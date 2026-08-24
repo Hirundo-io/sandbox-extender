@@ -1,2 +1,59 @@
-# sandbox-extender
-Policy-based sandbox permission extensions for coding agents
+# Sandbox Extender
+
+Sandbox Extender adds user-owned, Cedar-backed approval extensions to Codex CLI and Claude Code. It only allows requests covered by an explicitly activated Profile; every missing, invalid, or out-of-scope policy state abstains and leaves the host's ordinary approval flow in control.
+
+## Policy repository
+
+Sandbox Extender always stores its policy repository at `$HOME_FOLDER/.agents/sandbox-extender`. If `HOME_FOLDER` is not set, it uses the current user's home directory. A Profile is JSON and uses an exact `allowedTargets` list plus ordered Cedar groupings.
+
+```text
+$HOME_FOLDER/.agents/sandbox-extender/
+  profiles/
+    review-current-pr.json
+  state/
+    thread-bindings.json
+  audit.yaml
+```
+
+For example, this Profile allows only Codex shell requests from one workspace:
+
+```json
+{
+  "id": "review-current-pr",
+  "policyRevision": "your-reviewed-commit",
+  "allowedTargets": ["/absolute/path/to/workspace"],
+  "groupings": [
+    {
+      "id": "read-only-shell",
+      "policies": {
+        "allow-git-status": "permit(principal, action == Action::\"codex.unified_exec\", resource) when { context.arguments.command like \"git status*\" };"
+      }
+    }
+  ]
+}
+```
+
+Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists.
+
+The disabled `templates/scout.json` and `templates/maker.json` files are starting points only. Each has an empty target set and a `pending-review` revision, so neither can be activated until you copy, scope, review, and promote it.
+
+## Development
+
+```sh
+bun test
+tsc --noEmit
+claude plugin validate . --strict
+```
+
+Codex discovers this repository through `.claude-plugin/marketplace.json`; install it locally with:
+
+```sh
+codex plugin marketplace add /absolute/path/to/sandbox-extender
+codex plugin add sandbox-extender@sandbox-extender
+```
+
+For Claude Code development, load the plugin directly:
+
+```sh
+claude --plugin-dir /absolute/path/to/sandbox-extender
+```

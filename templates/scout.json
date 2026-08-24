@@ -1,0 +1,37 @@
+{
+  "id": "scout",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "sessionContext": [
+    "Use this profile only for inspection. Do not alter files or remote state."
+  ],
+  "groupings": [
+    {
+      "id": "read-only-inspection",
+      "policies": {
+        "allowRemoteInspection": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.arguments.command like \"gh pr diff*\" ||",
+          "  context.arguments.command like \"gh pr view*\" ||",
+          "  context.arguments.command like \"gh pr list*\" ||",
+          "  context.arguments.command like \"gh pr checks*\" ||",
+          "  context.arguments.command like \"gh issue view*\" ||",
+          "  context.arguments.command like \"gh issue list*\" ||",
+          "  context.arguments.command like \"gh run view*\" ||",
+          "  context.arguments.command like \"gh run list*\" ||",
+          "  context.arguments.command like \"gh release view*\" ||",
+          "  context.arguments.command like \"gh release list*\" ||",
+          "  context.arguments.command like \"gh workflow view*\" ||",
+          "  context.arguments.command like \"gh workflow list*\" ||",
+          "  context.arguments.command like \"gh repo view*\" ||",
+          "  context.arguments.command like \"gh repo list*\" ||",
+          "  context.arguments.command like \"gh label list*\" ||",
+          "  context.arguments.command like \"git fetch --dry-run*\" ||",
+          "  context.arguments.command like \"git ls-remote*\"",
+          "};"
+        ]
+      }
+    }
+  ]
+}

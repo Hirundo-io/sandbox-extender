@@ -1,0 +1,7 @@
+{
+  "name": "sandbox-extender",
+  "version": "0.1.2",
+  "description": "Reusable, Cedar-backed approval extensions for coding agents.",
+  "author": { "name": "Ben Lewis" },
+  "license": "MIT"
+}

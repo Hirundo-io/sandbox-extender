@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/src/hook-cli.ts\" claude"
+          }
+        ]
+      }
+    ]
+  }
+}

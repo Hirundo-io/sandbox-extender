@@ -1,0 +1,12 @@
+{
+  "name": "sandbox-extender",
+  "interface": { "displayName": "Sandbox Extender" },
+  "plugins": [
+    {
+      "name": "sandbox-extender",
+      "source": { "source": "local", "path": "." },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}
