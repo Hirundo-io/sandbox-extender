@@ -54,6 +54,12 @@ export type EvaluationResult = {
   readonly token?: DecisionToken;
 };
 
+export type ProfileBinding = {
+  readonly fingerprint: string;
+  readonly policyRevision: string;
+  readonly profileId: string;
+};
+
 export type ProfileProposal = {
   readonly profile: {
     readonly allowedTargets: readonly string[];

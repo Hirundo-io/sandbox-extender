@@ -1,11 +1,16 @@
 import { handlePermissionRequest } from "./hook.js";
 import { hookEventSchema, hostSchema } from "./schemas.js";
 
-const input = await Bun.stdin.text();
-const event: unknown = JSON.parse(input);
-const host = hostSchema.parse(process.argv[2]);
-const hookEvent = hookEventSchema.parse(event);
+const fallbackHost = hostSchema.safeParse(process.argv[2]).data ?? "codex";
 
-console.log(
-  JSON.stringify(await handlePermissionRequest(hookEvent, host)),
-);
+try {
+  const event: unknown = JSON.parse(await Bun.stdin.text());
+  const host = hostSchema.parse(process.argv[2]);
+  const hookEvent = hookEventSchema.parse(event);
+  console.log(JSON.stringify(await handlePermissionRequest(hookEvent, host)));
+} catch {
+  console.log(JSON.stringify({
+    hookSpecificOutput: { permissionDecision: "ask" },
+    systemMessage: `Sandbox Extender (${fallbackHost}): policy context is unavailable`,
+  }));
+}

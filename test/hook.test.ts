@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { handlePermissionRequest, normalizeHookRequest } from "../src/hook.js";
+import { activateProfile } from "../src/policy-service.js";
+import { PolicyRepository } from "../src/policy-repository.js";
 
 describe("host permission hooks", () => {
   test("normalizes the portable fields used by both hosts", () => {
@@ -40,9 +42,8 @@ describe("host permission hooks", () => {
           session_id: "thread-1",
           tool_input: { command: "git status" },
           tool_name: "Bash",
-        },
-        "codex",
-        undefined,
+          },
+          "codex",
       ),
     ).toEqual({
       hookSpecificOutput: { permissionDecision: "ask" },
@@ -72,10 +73,7 @@ describe("host permission hooks", () => {
           policyRevision: "e2e",
         }),
       );
-      await Bun.write(
-        join(root, "state", "thread-bindings.json"),
-        JSON.stringify({ "thread-1": "allow" }),
-      );
+      await activateProfile(new PolicyRepository(root), "thread-1", "allow");
 
       expect(
         await handlePermissionRequest(

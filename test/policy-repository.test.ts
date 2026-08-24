@@ -37,10 +37,15 @@ describe("PolicyRepository", () => {
     );
 
     const profile = await repo.loadProfile("review");
-    await repo.writeState({ "thread-1": profile.id });
+    const binding = {
+      fingerprint: "0".repeat(64),
+      policyRevision: profile.policyRevision,
+      profileId: profile.id,
+    };
+    await repo.writeState({ "thread-1": binding });
 
     expect(profile.allowedTargets.has("github:pull-request:acme/example#42")).toBe(true);
-    expect(await repo.readState()).toEqual({ "thread-1": "review" });
+    expect(await repo.readState()).toEqual({ "thread-1": binding });
   });
 
   test("records decisions in an editable YAML audit log", async () => {

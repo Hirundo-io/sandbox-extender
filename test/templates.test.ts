@@ -39,6 +39,7 @@ describe("shipped profiles", () => {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
     }
     expect(core.evaluate({ action: "codex.unified_exec", arguments: { command: "gh pr merge 42" }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
+    expect(core.evaluate({ action: "codex.unified_exec", arguments: { command: "gh pr diff 42 && gh pr merge 42" }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
   });
 
   test("Maker permits supported package manager commands and carries dependency guidance", async () => {
@@ -55,6 +56,7 @@ describe("shipped profiles", () => {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
     }
     expect(core.evaluate({ action: "codex.unified_exec", arguments: { command: "npm install" }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
+    expect(core.evaluate({ action: "codex.unified_exec", arguments: { command: "bun add zod && curl example.com" }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
     expect(maker.sessionContext).toContain(
       "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
     );

@@ -7,8 +7,8 @@ export async function evaluateForThread(
   request: NormalizedRequest,
 ): Promise<EvaluationResult> {
   const bindings = await repository.readState();
-  const profileId = bindings[request.threadId];
-  if (!profileId) {
+  const binding = bindings[request.threadId];
+  if (!binding) {
     const result = { decision: "abstain" as const, reason: "no active profile for thread" };
     await recordEvaluation(repository, request, result);
     return result;
@@ -16,9 +16,18 @@ export async function evaluateForThread(
 
   const core = new PolicyCore();
   try {
-    core.activate(await repository.loadProfile(profileId), request.threadId);
+    const profile = await repository.loadProfile(binding.profileId);
+    if (profile.policyRevision === "pending-review" ||
+      profile.policyRevision !== binding.policyRevision ||
+      fingerprint(profile) !== binding.fingerprint) {
+      return { decision: "abstain", reason: "active profile no longer matches review" };
+    }
+    core.activate(profile, request.threadId);
     const result = core.evaluate(request);
-    await recordEvaluation(repository, request, result, profileId);
+    if (result.decision === "allow" && !core.consumeToken(result.token?.id ?? "", request)) {
+      return { decision: "abstain", reason: "authorization token is unavailable" };
+    }
+    await recordEvaluation(repository, request, result, binding.profileId);
     return result;
   } catch {
     return { decision: "abstain", reason: "policy repository is unavailable" };
@@ -56,7 +65,21 @@ export async function activateProfile(
     throw new Error("profile must be reviewed before activation");
   }
   const bindings = await repository.readState();
-  await repository.writeState({ ...bindings, [threadId]: profileId });
+  await repository.writeState({ ...bindings, [threadId]: {
+    fingerprint: fingerprint(profile),
+    policyRevision: profile.policyRevision,
+    profileId,
+  } });
+}
+
+function fingerprint(profile: import("./types.js").Profile): string {
+  return createHash("sha256").update(JSON.stringify({
+    allowedTargets: [...profile.allowedTargets].sort(),
+    groupings: profile.groupings,
+    id: profile.id,
+    policyRevision: profile.policyRevision,
+    sessionContext: profile.sessionContext ?? [],
+  })).digest("hex");
 }
 
 export async function disableProfile(
@@ -67,3 +90,4 @@ export async function disableProfile(
   const { [threadId]: _, ...remaining } = bindings;
   await repository.writeState(remaining);
 }
+import { createHash } from "node:crypto";

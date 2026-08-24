@@ -9,5 +9,5 @@
     "target": "ESNext",
     "verbatimModuleSyntax": true
   },
-  "include": ["src"]
+  "include": ["src", "test/**/*.test.ts"]
 }

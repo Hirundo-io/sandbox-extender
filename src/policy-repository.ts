@@ -5,7 +5,7 @@ import { parse, stringify } from "yaml";
 import { z } from "zod";
 
 import { profileIdSchema } from "./schemas.js";
-import type { Profile, ProfileProposal } from "./types.js";
+import type { Profile, ProfileBinding, ProfileProposal } from "./types.js";
 
 const cedarGroupingSchema = z.object({
   id: z.string().min(1),
@@ -21,7 +21,11 @@ const diskProfileSchema = z.object({
   policyRevision: z.string().min(1),
   sessionContext: z.array(z.string().min(1)).optional(),
 }).strict();
-const bindingsSchema = z.record(z.string().min(1), profileIdSchema);
+const bindingsSchema = z.record(z.string().min(1), z.object({
+  fingerprint: z.string().length(64),
+  policyRevision: z.string().min(1),
+  profileId: profileIdSchema,
+}).strict());
 const auditEntriesSchema = z.array(z.record(z.string(), z.unknown()));
 
 type DiskProfile = z.infer<typeof diskProfileSchema>;
@@ -95,7 +99,7 @@ export class PolicyRepository {
     );
   }
 
-  async readState(): Promise<Record<string, string>> {
+  async readState(): Promise<Record<string, ProfileBinding>> {
     const file = join(this.root, "state", "thread-bindings.json");
     try {
       const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
@@ -108,7 +112,7 @@ export class PolicyRepository {
     }
   }
 
-  async writeState(bindings: Readonly<Record<string, string>>): Promise<void> {
+  async writeState(bindings: Readonly<Record<string, ProfileBinding>>): Promise<void> {
     const file = join(this.root, "state", "thread-bindings.json");
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, `${JSON.stringify(bindings, null, 2)}\n`, "utf8");

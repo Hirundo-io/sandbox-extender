@@ -38,7 +38,11 @@ describe("policy service", () => {
       });
       expect(await readFile(join(root, "audit.yaml"), "utf8")).toContain("extension-request");
 
-      await repository.writeState({ [request.threadId]: "missing" });
+      await repository.writeState({ [request.threadId]: {
+        fingerprint: "0".repeat(64),
+        policyRevision: "revision-1",
+        profileId: "missing",
+      } });
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
         reason: "policy repository is unavailable",
@@ -57,6 +61,11 @@ describe("policy service", () => {
       await writeProfile(root, "reviewed", "revision-1");
       await activateProfile(repository, request.threadId, "reviewed");
       expect((await evaluateForThread(repository, request)).decision).toBe("allow");
+      await writeProfile(root, "reviewed", "revision-2");
+      expect(await evaluateForThread(repository, request)).toEqual({
+        decision: "abstain",
+        reason: "active profile no longer matches review",
+      });
       await disableProfile(repository, request.threadId);
       expect(await repository.readState()).toEqual({});
     } finally {

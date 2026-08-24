@@ -45,6 +45,9 @@ export class PolicyCore {
     }
 
     const { profile } = activeProfile;
+    if (!hasSingleShellCommand(request)) {
+      return { decision: "abstain", reason: "compound shell commands are unsupported" };
+    }
     if (!profile.allowedTargets.has(request.resource)) {
       return {
         decision: "abstain",
@@ -112,6 +115,11 @@ export class PolicyCore {
     this.#tokens.set(token.id, token);
     return token;
   }
+}
+
+function hasSingleShellCommand(request: NormalizedRequest): boolean {
+  const command = request.arguments.command;
+  return typeof command !== "string" || !/[;&|`$()<>\n\r]/.test(command);
 }
 
 function isCedarGrouping(

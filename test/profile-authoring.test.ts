@@ -37,5 +37,13 @@ describe("profile authoring", () => {
     expect(proposal.profile.allowedTargets).toEqual([request.resource]);
     expect(proposal.profile.groupings[0]?.policies.allowObservedRequest).toContain('Action::"codex.unified_exec"');
     expect(proposal.tests[1]?.expected).toBe("abstain");
+    expect(proposal.tests[2]?.expected).toBe("abstain");
+  });
+
+  test("rejects observed arguments outside the JSON authorization boundary", () => {
+    expect(() => proposeProfile("inspect-repository", {
+      ...request,
+      arguments: { command: undefined } as unknown as Record<string, unknown>,
+    })).toThrow("JSON values");
   });
 });
