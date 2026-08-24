@@ -136,39 +136,41 @@ export class PolicyCore {
     }
 
     const { profile } = activeProfile;
-    const resolvedRequest = resolveProfileTarget(profile, request);
-    if (!resolvedRequest) {
-      return { decision: "abstain", reason: "profile could not resolve the request target" };
-    }
-    if (!profile.allowedTargets.has(resolvedRequest.resource)) {
-      return {
-        decision: "abstain",
-        reason: "resolved target is outside the allowed target set",
-      };
-    }
-
-    const commands = shellCommands(resolvedRequest);
+    const commands = shellCommands(request);
     if (!commands) {
       return { decision: "abstain", reason: "shell syntax cannot be authorized safely" };
     }
 
     let matchedGroupingId: string | undefined;
+    let resolvedTarget: string | undefined;
     for (const command of commands) {
       if (isHarmlessShellBuiltin(command)) continue;
       const commandRequest = {
-        ...resolvedRequest,
-        arguments: { ...resolvedRequest.arguments, command },
+        ...request,
+        arguments: { ...request.arguments, command },
       };
-      const result = evaluateCommand(profile, commandRequest);
+      const resolvedRequest = resolveProfileTarget(profile, commandRequest);
+      if (!resolvedRequest) {
+        return { decision: "abstain", reason: "profile could not resolve the request target" };
+      }
+      if (!profile.allowedTargets.has(resolvedRequest.resource)) {
+        return {
+          decision: "abstain",
+          reason: "resolved target is outside the allowed target set",
+        };
+      }
+      const result = evaluateCommand(profile, resolvedRequest);
       if (result.decision !== "allow") return result;
       matchedGroupingId = result.matchedGroupingId;
+      resolvedTarget = resolvedRequest.resource;
     }
 
-    const token = this.#issueToken(resolvedRequest, profile.policyRevision);
+    const token = this.#issueToken(request, profile.policyRevision, resolvedTarget ?? request.resource);
     return {
       decision: "allow",
       matchedGroupingId,
       reason: "allowed by capability grouping",
+      resolvedTarget,
       token,
     };
   }
@@ -187,13 +189,14 @@ export class PolicyCore {
   #issueToken(
     request: NormalizedRequest,
     policyRevision: string,
+    resolvedTarget: string,
   ): DecisionToken {
     const token: DecisionToken = {
       expiresAt: new Date(Date.now() + this.tokenLifetimeMs),
       id: crypto.randomUUID(),
       policyRevision,
       request,
-      resolvedTarget: request.resource,
+      resolvedTarget,
     };
     this.#tokens.set(token.id, token);
     return token;

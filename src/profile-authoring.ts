@@ -3,6 +3,9 @@ import { parseShellCommands } from "./shell-parser.js";
 import type { NormalizedRequest, ProfileProposal } from "./types.js";
 
 function cedarLiteral(value: unknown): string {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new Error("request arguments must contain finite JSON numbers");
+  }
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
     return JSON.stringify(value);
   }

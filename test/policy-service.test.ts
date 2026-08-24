@@ -66,6 +66,9 @@ describe("policy service", () => {
         decision: "abstain",
         reason: "active profile no longer matches review",
       });
+      expect(await readFile(join(root, "audit.yaml"), "utf8")).toContain(
+        "active profile no longer matches review",
+      );
       await disableProfile(repository, request.threadId);
       expect(await repository.readState()).toEqual({});
     } finally {

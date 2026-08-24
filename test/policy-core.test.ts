@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { PolicyCore, type NormalizedRequest, type Profile } from "../src/index.js";
 
@@ -131,5 +134,35 @@ describe("PolicyCore", () => {
     expect(
       core.evaluate({ ...request, action: "github.pr.close" }).decision,
     ).toBe("abstain");
+  });
+
+  test("resolves every compound command before authorizing it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sandbox-extender-resolver-"));
+    const resolver = join(root, "repository.js");
+    try {
+      await writeFile(resolver, [
+        "const input = await Bun.stdin.json();",
+        "const match = input.requestArguments.command.match(/--repo (\\S+)/);",
+        "if (match) console.log(`github:repository:${match[1]}`);",
+      ].join("\n"));
+      const core = new PolicyCore();
+      core.activate(profile({
+        allowedTargets: new Set(["github:repository:acme/example"]),
+        groupings: [{
+          id: "read",
+          evaluate: () => "allow",
+        }],
+        targetResolver: { file: resolver, language: "javascript" },
+      }), request.threadId);
+      expect(core.evaluate({
+        ...request,
+        action: "codex.unified_exec",
+        arguments: {
+          command: "gh pr view --repo acme/example && gh pr view --repo evil/example",
+        },
+      }).decision).toBe("abstain");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 });

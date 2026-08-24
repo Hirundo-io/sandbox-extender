@@ -63,4 +63,13 @@ describe("profile authoring", () => {
       arguments: { command: undefined } as unknown as Record<string, unknown>,
     })).toThrow("JSON values");
   });
+
+  test("rejects non-finite numbers at every argument depth", () => {
+    for (const argumentsValue of [{ count: NaN }, { nested: [Infinity] }]) {
+      expect(() => proposeProfile("inspect-repository", {
+        ...request,
+        arguments: argumentsValue,
+      })).toThrow("finite JSON numbers");
+    }
+  });
 });

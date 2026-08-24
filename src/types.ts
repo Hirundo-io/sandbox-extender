@@ -58,6 +58,7 @@ export type EvaluationResult = {
   readonly decision: Decision;
   readonly matchedGroupingId?: string;
   readonly reason: string;
+  readonly resolvedTarget?: string;
   readonly token?: DecisionToken;
 };
 

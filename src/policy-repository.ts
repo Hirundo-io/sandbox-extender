@@ -182,6 +182,7 @@ export class PolicyRepository {
   }
 
   async writeState(bindings: Readonly<Record<string, ProfileBinding>>): Promise<void> {
+    bindingsSchema.parse(bindings);
     const file = join(this.root, "state", "thread-bindings.json");
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, `${JSON.stringify(bindings, null, 2)}\n`, "utf8");

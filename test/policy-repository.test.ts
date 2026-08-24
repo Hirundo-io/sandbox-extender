@@ -73,6 +73,15 @@ describe("PolicyRepository", () => {
     expect(audit).toContain("profileId: review");
   });
 
+  test("refuses to persist an invalid thread binding", async () => {
+    const repo = await repository();
+    await expect(repo.writeState({ "thread-1": {
+      fingerprint: "short",
+      policyRevision: "revision-1",
+      profileId: "review",
+    } })).rejects.toThrow();
+  });
+
   test("rejects policy files that do not match the persisted Zod schema", async () => {
     const repo = await repository();
     await mkdir(join(repo.root, "profiles"));

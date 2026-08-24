@@ -31,14 +31,16 @@ export async function evaluateForThread(
     if (profile.policyRevision === "pending-review" ||
       profile.policyRevision !== binding.policyRevision ||
       fingerprint(profile) !== binding.fingerprint) {
-      return { decision: "abstain", reason: "active profile no longer matches review" };
+      const result = { decision: "abstain" as const, reason: "active profile no longer matches review" };
+      await recordEvaluation(repository, request, result, binding.profileId, binding.policyRevision);
+      return result;
     }
     core.activate(profile, request.threadId);
     const result = core.evaluate(request);
     if (result.decision === "allow" && !core.consumeToken(result.token?.id ?? "", request)) {
       return { decision: "abstain", reason: "authorization token is unavailable" };
     }
-    await recordEvaluation(repository, request, result, binding.profileId);
+    await recordEvaluation(repository, request, result, binding.profileId, profile.policyRevision);
     return result;
   } catch {
     return { decision: "abstain", reason: "policy repository is unavailable" };
@@ -50,14 +52,19 @@ async function recordEvaluation(
   request: NormalizedRequest,
   result: EvaluationResult,
   profileId?: string,
+  policyRevision?: string,
 ): Promise<void> {
   const entry = {
     action: request.action,
+    arguments: request.arguments,
     decision: result.decision,
     event: "extension-request",
     profileId,
+    policyRevision,
     reason: result.reason,
-    resource: request.resource,
+    resource: result.resolvedTarget ?? request.resource,
+    resolvedTarget: result.resolvedTarget,
+    matchedGroupingId: result.matchedGroupingId,
     threadId: request.threadId,
   };
   if (result.decision === "allow") {
