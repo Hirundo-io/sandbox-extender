@@ -39,5 +39,8 @@ jobs:
       - name: Type-check
         run: bun run typecheck
 
+      - name: Validate published plugin configuration
+        run: bun run validate:plugin
+
       - name: Run tests with coverage
         run: bun run test:coverage

@@ -8,6 +8,8 @@
     "test:coverage": "bun test --coverage --coverage-reporter=text",
     "typecheck": "tsc --noEmit",
     "knip": "knip",
+    "validate:plugin": "bun src/validate-plugin.ts",
+    "authorize:mutation": "bun src/authorize-mutation.ts",
     "audit": "bun audit"
   },
   "dependencies": {

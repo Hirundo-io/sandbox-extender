@@ -52,6 +52,13 @@ function codexHookOutput(decision: Decision): Record<string, unknown> {
   };
 }
 
+function claudeHookOutput(decision: Decision): Record<string, unknown> {
+  return {
+    hookEventName: "PreToolUse",
+    permissionDecision: decision === "abstain" ? "ask" : decision,
+  };
+}
+
 export function hookOutput(
   decision: Decision,
   host: "claude" | "codex",
@@ -59,7 +66,7 @@ export function hookOutput(
 ): Record<string, unknown> {
   const hookSpecificOutput = host === "codex"
     ? codexHookOutput(decision)
-    : { permissionDecision: decision === "abstain" ? "ask" : decision };
+    : claudeHookOutput(decision);
 
   return {
     hookSpecificOutput,

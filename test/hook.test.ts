@@ -86,7 +86,10 @@ describe("host permission hooks", () => {
           "claude",
         ),
       ).toEqual({
-        hookSpecificOutput: { permissionDecision: "allow" },
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+        },
         systemMessage: "Sandbox Extender (claude): allowed by capability grouping",
       });
 
@@ -145,6 +148,17 @@ describe("host permission hooks", () => {
     expect(hookOutput("deny", "codex", "denied").hookSpecificOutput).toEqual({
       decision: { behavior: "deny" },
       hookEventName: "PermissionRequest",
+    });
+  });
+
+  test("maps Claude decisions to the PreToolUse envelope", () => {
+    expect(hookOutput("allow", "claude", "allowed").hookSpecificOutput).toEqual({
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+    });
+    expect(hookOutput("abstain", "claude", "unavailable").hookSpecificOutput).toEqual({
+      hookEventName: "PreToolUse",
+      permissionDecision: "ask",
     });
   });
 });

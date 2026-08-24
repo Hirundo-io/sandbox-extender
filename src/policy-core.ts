@@ -13,6 +13,96 @@ type ActiveProfile = {
   readonly threadId: string;
 };
 
+function resolveProfileTarget(
+  profile: Profile,
+  request: NormalizedRequest,
+): NormalizedRequest | undefined {
+  if (!profile.targetResolver) return request;
+  try {
+    const process = Bun.spawnSync({
+      cmd: ["bun", profile.targetResolver.file],
+      stdin: new TextEncoder().encode(JSON.stringify({
+        localTarget: request.resource,
+        requestArguments: request.arguments,
+      })),
+      stderr: "ignore",
+      stdout: "pipe",
+    });
+    const resource = new TextDecoder().decode(process.stdout).trim();
+    return process.exitCode === 0 && resource.length > 0
+      ? { ...request, resource }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function evaluateCommand(
+  profile: Profile,
+  request: NormalizedRequest,
+): EvaluationResult {
+  const context = {
+    policyRevision: profile.policyRevision,
+    profileId: profile.id,
+    request,
+    resolvedTarget: request.resource,
+  };
+  for (const grouping of profile.groupings) {
+    const decision = isCedarGrouping(grouping)
+      ? evaluateCedarGrouping(grouping, context)
+      : grouping.evaluate(context);
+    if (decision === "abstain") continue;
+    if (decision === "allow") {
+      return {
+        decision,
+        matchedGroupingId: grouping.id,
+        reason: "allowed by capability grouping",
+      };
+    }
+    return {
+      decision,
+      matchedGroupingId: grouping.id,
+      reason: "denied by capability grouping",
+    };
+  }
+  return { decision: "abstain", reason: "no grouping made a decision" };
+}
+
+function shellCommands(request: NormalizedRequest): string[] | undefined {
+  const command = request.arguments.command;
+  if (!isShellAction(request.action)) return [""];
+  if (typeof command !== "string" || command.trim().length === 0) {
+    return undefined;
+  }
+  return parseShellCommands(command);
+}
+
+function isShellAction(action: string): boolean {
+  return action.endsWith(".Bash") || action.endsWith(".unified_exec");
+}
+
+function isHarmlessShellBuiltin(command: string): boolean {
+  return /^(?:cd|:|true|false|pwd|echo|printf|test)(?:\s|$)/.test(command);
+}
+
+function isCedarGrouping(
+  grouping: Profile["groupings"][number],
+): grouping is CedarGrouping {
+  return "policies" in grouping;
+}
+
+function sameRequest(
+  left: NormalizedRequest,
+  right: NormalizedRequest,
+): boolean {
+  return (
+    left.action === right.action &&
+    left.resource === right.resource &&
+    left.threadId === right.threadId &&
+    JSON.stringify(left.arguments) === JSON.stringify(right.arguments)
+  );
+}
+
 /**
  * Coordinates profile activation, ordered capability evaluation, and one-time
  * authorization tokens. It intentionally does not execute agent requests.
@@ -108,100 +198,4 @@ export class PolicyCore {
     this.#tokens.set(token.id, token);
     return token;
   }
-}
-
-function resolveProfileTarget(
-  profile: Profile,
-  request: NormalizedRequest,
-): NormalizedRequest | undefined {
-  if (!profile.targetResolver) return request;
-  try {
-    const process = Bun.spawnSync({
-      cmd: ["bun", profile.targetResolver.file],
-      stdin: new TextEncoder().encode(JSON.stringify({
-        localTarget: request.resource,
-        requestArguments: request.arguments,
-      })),
-      stderr: "ignore",
-      stdout: "pipe",
-    });
-    const resource = new TextDecoder().decode(process.stdout).trim();
-    return process.exitCode === 0 && resource.length > 0
-      ? { ...request, resource }
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function evaluateCommand(
-  profile: Profile,
-  request: NormalizedRequest,
-): EvaluationResult {
-  const context = {
-    policyRevision: profile.policyRevision,
-    profileId: profile.id,
-    request,
-    resolvedTarget: request.resource,
-  };
-  for (const grouping of profile.groupings) {
-    const decision = isCedarGrouping(grouping)
-      ? evaluateCedarGrouping(grouping, context)
-      : grouping.evaluate(context);
-    if (decision === "abstain") continue;
-    if (decision === "allow") {
-      return {
-        decision,
-        matchedGroupingId: grouping.id,
-        reason: "allowed by capability grouping",
-      };
-    }
-    return {
-      decision,
-      matchedGroupingId: grouping.id,
-      reason: "denied by capability grouping",
-    };
-  }
-  return { decision: "abstain", reason: "no grouping made a decision" };
-}
-
-/**
- * Extracts simple-command units from portable Bash/Zsh syntax. Quotes, nested
- * substitutions, control-flow keywords, functions, and pipelines are handled
- * without executing the script. Redirections and heredocs remain fail-closed.
- */
-function shellCommands(request: NormalizedRequest): string[] | undefined {
-  const command = request.arguments.command;
-  if (!isShellAction(request.action)) return [""];
-  if (typeof command !== "string" || command.trim().length === 0) {
-    return undefined;
-  }
-  return parseShellCommands(command);
-}
-
-function isShellAction(action: string): boolean {
-  return action.endsWith(".Bash") || action.endsWith(".unified_exec");
-}
-
-function isHarmlessShellBuiltin(command: string): boolean {
-  return /^(?:cd|:|true|false|pwd|echo|printf|test)(?:\s|$)/.test(command);
-}
-
-
-function isCedarGrouping(
-  grouping: Profile["groupings"][number],
-): grouping is CedarGrouping {
-  return "policies" in grouping;
-}
-
-function sameRequest(
-  left: NormalizedRequest,
-  right: NormalizedRequest,
-): boolean {
-  return (
-    left.action === right.action &&
-    left.resource === right.resource &&
-    left.threadId === right.threadId &&
-    JSON.stringify(left.arguments) === JSON.stringify(right.arguments)
-  );
 }

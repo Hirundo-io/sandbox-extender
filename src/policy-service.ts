@@ -3,6 +3,17 @@ import { PolicyCore } from "./policy-core.js";
 import { PolicyRepository } from "./policy-repository.js";
 import type { EvaluationResult, NormalizedRequest } from "./types.js";
 
+function fingerprint(profile: import("./types.js").Profile): string {
+  return createHash("sha256").update(JSON.stringify({
+    allowedTargets: [...profile.allowedTargets].sort(),
+    groupings: profile.groupings,
+    id: profile.id,
+    policyRevision: profile.policyRevision,
+    sessionContext: profile.sessionContext ?? [],
+    targetResolver: profile.targetResolver,
+  })).digest("hex");
+}
+
 export async function evaluateForThread(
   repository: PolicyRepository,
   request: NormalizedRequest,
@@ -75,17 +86,6 @@ export async function activateProfile(
     policyRevision: profile.policyRevision,
     profileId,
   } });
-}
-
-function fingerprint(profile: import("./types.js").Profile): string {
-  return createHash("sha256").update(JSON.stringify({
-    allowedTargets: [...profile.allowedTargets].sort(),
-    groupings: profile.groupings,
-    id: profile.id,
-    policyRevision: profile.policyRevision,
-    sessionContext: profile.sessionContext ?? [],
-    targetResolver: profile.targetResolver,
-  })).digest("hex");
 }
 
 export async function disableProfile(

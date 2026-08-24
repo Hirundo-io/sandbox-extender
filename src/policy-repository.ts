@@ -50,6 +50,41 @@ const authorizationTestsSchema = z.array(z.object({
 
 type DiskProfile = z.infer<typeof diskProfileSchema>;
 
+function readCommittedFile(
+  root: string,
+  revision: string,
+  relativePath: string,
+): string {
+  const result = Bun.spawnSync({
+    cmd: ["git", "-C", root, "show", `${revision}:${relativePath}`],
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `policy revision ${revision} does not contain ${relativePath}`,
+    );
+  }
+  return new TextDecoder().decode(result.stdout);
+}
+
+function parseProfile(candidate: unknown, file: string): DiskProfile {
+  const result = diskProfileSchema.safeParse(candidate);
+  if (!result.success) {
+    throw new Error(`${file} is not a valid policy profile`, { cause: result.error });
+  }
+  return result.data;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT",
+  );
+}
+
 export class PolicyRepository {
   constructor(readonly root: string) {}
 
@@ -114,8 +149,12 @@ export class PolicyRepository {
     profileIdSchema.parse(profileId);
     policyRevisionSchema.parse(policyRevision);
     await this.initialize();
-    const proposalFile = join(this.root, "proposals", `${profileId}.json`);
-    const candidate: unknown = JSON.parse(await readFile(proposalFile, "utf8"));
+    const proposalFile = `proposals/${profileId}.json`;
+    const candidate: unknown = JSON.parse(readCommittedFile(
+      this.root,
+      policyRevision,
+      proposalFile,
+    ));
     const profile = parseProfile(candidate, proposalFile);
     if (profile.id !== profileId) {
       throw new Error(`${proposalFile} does not match its requested profile ID`);
@@ -169,8 +208,12 @@ export class PolicyRepository {
     profileId: string,
     policyRevision: string,
   ): Promise<void> {
-    const testFile = join(this.root, "tests", `${profileId}.json`);
-    const candidate: unknown = JSON.parse(await readFile(testFile, "utf8"));
+    const testFile = `tests/${profileId}.json`;
+    const candidate: unknown = JSON.parse(readCommittedFile(
+      this.root,
+      policyRevision,
+      testFile,
+    ));
     const tests = authorizationTestsSchema.parse(candidate);
     const reviewedProfile: Profile = {
       ...profile,
@@ -186,21 +229,4 @@ export class PolicyRepository {
       }
     }
   }
-}
-
-function parseProfile(candidate: unknown, file: string): DiskProfile {
-  const result = diskProfileSchema.safeParse(candidate);
-  if (!result.success) {
-    throw new Error(`${file} is not a valid policy profile`, { cause: result.error });
-  }
-  return result.data;
-}
-
-function isMissingFile(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === "ENOENT",
-  );
 }

@@ -17,6 +17,21 @@ async function repository(): Promise<PolicyRepository> {
   return new PolicyRepository(root);
 }
 
+async function commitPolicyRevision(root: string): Promise<string> {
+  for (const command of [
+    ["git", "init", "--quiet"],
+    ["git", "config", "user.email", "sandbox-extender@example.test"],
+    ["git", "config", "user.name", "Sandbox Extender"],
+    ["git", "add", "proposals", "tests"],
+    ["git", "commit", "--quiet", "-m", "Review policy proposal"],
+  ]) {
+    const result = Bun.spawnSync({ cmd: command, cwd: root });
+    if (result.exitCode !== 0) throw new Error(`could not run ${command.join(" ")}`);
+  }
+  const result = Bun.spawnSync({ cmd: ["git", "rev-parse", "HEAD"], cwd: root, stdout: "pipe" });
+  return new TextDecoder().decode(result.stdout).trim();
+}
+
 describe("PolicyRepository", () => {
   test("loads a Cedar profile and persists thread bindings", async () => {
     const repo = await repository();
@@ -99,11 +114,41 @@ describe("PolicyRepository", () => {
       }],
     });
 
-    await repo.promoteProposal("review", "a".repeat(40));
-    expect((await repo.loadProfile("review")).policyRevision).toBe("a".repeat(40));
+    const revision = await commitPolicyRevision(repo.root);
+    await repo.promoteProposal("review", revision);
+    expect((await repo.loadProfile("review")).policyRevision).toBe(revision);
   });
 
-  test("rejects proposals whose identity or authorization tests are invalid", async () => {
+  test("rejects a revision without the reviewed proposal and tests", async () => {
+    const repo = await repository();
+    await repo.writeProposal({
+      profile: {
+        allowedTargets: ["github:repository:acme/example"],
+        groupings: [],
+        id: "review",
+        policyRevision: "pending-review",
+      },
+      tests: [{
+        expected: "abstain",
+        name: "does not make a decision",
+        request: {
+          action: "claude.Bash",
+          arguments: { command: "git status" },
+          resource: "github:repository:acme/example",
+          threadId: "thread-1",
+        },
+      }],
+    });
+    const revision = await commitPolicyRevision(repo.root);
+    await Bun.write(join(repo.root, "proposals", "review.json"), "{}\n");
+
+    await expect(repo.promoteProposal("review", revision)).resolves.toBeUndefined();
+    await expect(repo.promoteProposal("review", "a".repeat(40))).rejects.toThrow(
+      "does not contain proposals/review.json",
+    );
+  });
+
+  test("rejects an invalid proposal before it can be promoted", async () => {
     const repo = await repository();
     await repo.initialize();
     await Bun.write(
@@ -117,7 +162,7 @@ describe("PolicyRepository", () => {
     );
 
     await expect(repo.promoteProposal("review", "a".repeat(40))).rejects.toThrow(
-      "does not match its requested profile ID",
+      "does not contain proposals/review.json",
     );
   });
 });

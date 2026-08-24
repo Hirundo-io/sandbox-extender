@@ -12,6 +12,22 @@ const request = {
   threadId: "thread-1",
 };
 
+function commitPolicyRevision(root: string): string {
+  for (const command of [
+    ["git", "init", "--quiet"],
+    ["git", "config", "user.email", "sandbox-extender@example.test"],
+    ["git", "config", "user.name", "Sandbox Extender"],
+    ["git", "add", "proposals", "tests"],
+    ["git", "commit", "--quiet", "-m", "Review policy proposal"],
+  ]) {
+    if (Bun.spawnSync({ cmd: command, cwd: root }).exitCode !== 0) {
+      throw new Error(`could not run ${command.join(" ")}`);
+    }
+  }
+  const result = Bun.spawnSync({ cmd: ["git", "rev-parse", "HEAD"], cwd: root, stdout: "pipe" });
+  return new TextDecoder().decode(result.stdout).trim();
+}
+
 describe("profile authoring", () => {
   test("writes a narrow proposal and promotes it only with a review revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-authoring-"));
@@ -24,9 +40,10 @@ describe("profile authoring", () => {
       expect(await readFile(join(root, "proposals", "inspect-repository.json"), "utf8")).toContain('"pending-review"');
       await expect(repository.promoteProposal("inspect-repository", "pending-review")).rejects.toThrow("policyRevision");
 
-      await repository.promoteProposal("inspect-repository", "a".repeat(40));
+      const revision = commitPolicyRevision(root);
+      await repository.promoteProposal("inspect-repository", revision);
       expect(await repository.listProfiles()).toEqual(["inspect-repository"]);
-      expect((await repository.loadProfile("inspect-repository")).policyRevision).toBe("a".repeat(40));
+      expect((await repository.loadProfile("inspect-repository")).policyRevision).toBe(revision);
     } finally {
       await rm(root, { force: true, recursive: true });
     }

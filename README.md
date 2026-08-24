@@ -35,6 +35,19 @@ For example, this Profile allows only Codex shell requests from one workspace:
 
 Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists.
 
+Profile mutations require a separate, one-time user authorization for the
+relevant host thread. This authorization is intentionally created by the CLI,
+not the plugin's MCP server, so an agent cannot mint its own permission to
+change policy state. Before asking the agent to initialize, propose, promote,
+activate, or disable a Profile, run:
+
+```sh
+bun run authorize:mutation -- <host-thread-id>
+```
+
+The next mutation for that exact thread consumes the authorization. The agent
+can still evaluate requests without a mutation authorization.
+
 The disabled `templates/scout.json`, `templates/maker.json`, and
 `templates/babysitter.json` files are starting points only. Each has an empty
 target set and a `pending-review` revision, so none can be activated until you
@@ -49,6 +62,7 @@ bun test
 bun run audit
 bun run knip
 bun run typecheck
+bun run validate:plugin
 claude plugin validate . --strict
 ```
 
