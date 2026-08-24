@@ -41,9 +41,14 @@ The disabled `templates/scout.json` and `templates/maker.json` files are startin
 
 ```sh
 bun test
-tsc --noEmit
+bun run audit
+bun run knip
+bun run typecheck
 claude plugin validate . --strict
 ```
+
+GitHub Actions runs the locked install, audit, Knip, type check, and test
+coverage on every pull request and change to `main`.
 
 Codex discovers this repository through `.claude-plugin/marketplace.json`; install it locally with:
 
