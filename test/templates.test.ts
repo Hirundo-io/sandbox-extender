@@ -58,9 +58,9 @@ describe("shipped profiles", () => {
     core.activate(maker, "thread-1");
 
     for (const command of [
-      "bun install", "bun add zod", "bun remove zod", "bun update",
+      "bun install", "bun i", "bun add zod", "bun remove zod", "bun update",
       "uv add requests", "uv remove requests", "uv sync", "uv lock",
-      "pixi install", "pixi add ruff", "pixi remove ruff", "pixi update",
+      "pixi install", "pixi i", "pixi add ruff", "pixi remove ruff", "pixi update",
       "pixi lock",
     ]) {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
