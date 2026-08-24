@@ -4,8 +4,14 @@ import { dirname, join } from "node:path";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
-import { profileIdSchema } from "./schemas.js";
-import type { Profile, ProfileBinding, ProfileProposal } from "./types.js";
+import { PolicyCore } from "./policy-core.js";
+import { policyRevisionSchema, profileIdSchema } from "./schemas.js";
+import type {
+  AuthorizationTest,
+  Profile,
+  ProfileBinding,
+  ProfileProposal,
+} from "./types.js";
 
 const cedarGroupingSchema = z.object({
   id: z.string().min(1),
@@ -20,6 +26,10 @@ const diskProfileSchema = z.object({
   id: profileIdSchema,
   policyRevision: z.string().min(1),
   sessionContext: z.array(z.string().min(1)).optional(),
+  targetResolver: z.object({
+    file: z.string().regex(/^resolvers\/[a-z0-9-]+\.js$/),
+    language: z.literal("javascript"),
+  }).strict().optional(),
 }).strict();
 const bindingsSchema = z.record(z.string().min(1), z.object({
   fingerprint: z.string().length(64),
@@ -27,6 +37,16 @@ const bindingsSchema = z.record(z.string().min(1), z.object({
   profileId: profileIdSchema,
 }).strict());
 const auditEntriesSchema = z.array(z.record(z.string(), z.unknown()));
+const authorizationTestsSchema = z.array(z.object({
+  expected: z.enum(["allow", "deny", "abstain"]),
+  name: z.string().min(1),
+  request: z.object({
+    action: z.string().min(1),
+    arguments: z.record(z.string(), z.unknown()),
+    resource: z.string().min(1),
+    threadId: z.string().min(1),
+  }).strict(),
+}).strict()).min(1);
 
 type DiskProfile = z.infer<typeof diskProfileSchema>;
 
@@ -38,10 +58,18 @@ export class PolicyRepository {
     const file = join(this.root, "profiles", `${profileId}.json`);
     const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
     const profile = parseProfile(candidate, file);
+    if (profile.id !== profileId) {
+      throw new Error(`${file} does not match its requested profile ID`);
+    }
 
+    const targetResolver = profile.targetResolver && {
+      ...profile.targetResolver,
+      file: join(this.root, profile.targetResolver.file),
+    };
     return {
       ...profile,
       allowedTargets: new Set(profile.allowedTargets),
+      targetResolver,
     };
   }
 
@@ -84,13 +112,15 @@ export class PolicyRepository {
 
   async promoteProposal(profileId: string, policyRevision: string): Promise<void> {
     profileIdSchema.parse(profileId);
-    if (!policyRevision || policyRevision === "pending-review") {
-      throw new Error("policyRevision must identify the reviewed policy state");
-    }
+    policyRevisionSchema.parse(policyRevision);
     await this.initialize();
     const proposalFile = join(this.root, "proposals", `${profileId}.json`);
     const candidate: unknown = JSON.parse(await readFile(proposalFile, "utf8"));
     const profile = parseProfile(candidate, proposalFile);
+    if (profile.id !== profileId) {
+      throw new Error(`${proposalFile} does not match its requested profile ID`);
+    }
+    await this.#verifyProposalTests(profile, profileId, policyRevision);
     const reviewedProfile = { ...profile, policyRevision };
     await writeFile(
       join(this.root, "profiles", `${profileId}.json`),
@@ -132,6 +162,29 @@ export class PolicyRepository {
 
     entries.push({ ...entry, timestamp: new Date().toISOString() });
     await writeFile(file, stringify(entries), "utf8");
+  }
+
+  async #verifyProposalTests(
+    profile: DiskProfile,
+    profileId: string,
+    policyRevision: string,
+  ): Promise<void> {
+    const testFile = join(this.root, "tests", `${profileId}.json`);
+    const candidate: unknown = JSON.parse(await readFile(testFile, "utf8"));
+    const tests = authorizationTestsSchema.parse(candidate);
+    const reviewedProfile: Profile = {
+      ...profile,
+      allowedTargets: new Set(profile.allowedTargets),
+      policyRevision,
+    };
+    for (const authorizationTest of tests) {
+      const core = new PolicyCore();
+      core.activate(reviewedProfile, authorizationTest.request.threadId);
+      const result = core.evaluate(authorizationTest.request);
+      if (result.decision !== authorizationTest.expected) {
+        throw new Error(`authorization test failed: ${authorizationTest.name}`);
+      }
+    }
   }
 }
 

@@ -24,9 +24,9 @@ describe("profile authoring", () => {
       expect(await readFile(join(root, "proposals", "inspect-repository.json"), "utf8")).toContain('"pending-review"');
       await expect(repository.promoteProposal("inspect-repository", "pending-review")).rejects.toThrow("policyRevision");
 
-      await repository.promoteProposal("inspect-repository", "reviewed-commit");
+      await repository.promoteProposal("inspect-repository", "a".repeat(40));
       expect(await repository.listProfiles()).toEqual(["inspect-repository"]);
-      expect((await repository.loadProfile("inspect-repository")).policyRevision).toBe("reviewed-commit");
+      expect((await repository.loadProfile("inspect-repository")).policyRevision).toBe("a".repeat(40));
     } finally {
       await rm(root, { force: true, recursive: true });
     }

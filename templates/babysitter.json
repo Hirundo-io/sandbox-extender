@@ -1,0 +1,35 @@
+{
+  "id": "babysitter",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "targetResolver": {
+    "language": "javascript",
+    "file": "resolvers/github-repository.js"
+  },
+  "sessionContext": [
+    "Use only for the reviewed pull request and its repository.",
+    "Read CI status and logs before changing code or responding to review.",
+    "Write only pull-request review comments or replies requested by the user."
+  ],
+  "groupings": [
+    {
+      "id": "pull-request-and-ci",
+      "policies": {
+        "allowBabysitting": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.arguments.command like \"gh pr view*\" ||",
+          "  context.arguments.command like \"gh pr diff*\" ||",
+          "  context.arguments.command like \"gh pr checks*\" ||",
+          "  context.arguments.command like \"gh pr comment*\" ||",
+          "  context.arguments.command like \"gh pr review*\" ||",
+          "  context.arguments.command like \"gh api repos/*/pulls/*/comments*\" ||",
+          "  context.arguments.command like \"gh run view*\" ||",
+          "  context.arguments.command like \"gh run list*\" ||",
+          "  context.arguments.command like \"gh api repos/*/actions/*\"",
+          "};"
+        ]
+      }
+    }
+  ]
+}

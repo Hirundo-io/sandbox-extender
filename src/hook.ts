@@ -28,8 +28,8 @@ export function normalizeHookRequest(
   const { cwd, session_id, sessionId, tool_input, toolInput, tool_name, toolName, working_directory } = parsedEvent.data;
   const threadId = session_id ?? sessionId;
   const toolNameValue = tool_name ?? toolName;
-  const resource = cwd ?? working_directory;
   const argumentsValue = tool_input ?? toolInput;
+  const resource = cwd ?? working_directory;
   if (!threadId || !toolNameValue || !resource || !argumentsValue) {
     return undefined;
   }
@@ -42,16 +42,27 @@ export function normalizeHookRequest(
   };
 }
 
-function hookOutput(
+function codexHookOutput(decision: Decision): Record<string, unknown> {
+  if (decision === "abstain") {
+    return { hookEventName: "PermissionRequest" };
+  }
+  return {
+    decision: { behavior: decision },
+    hookEventName: "PermissionRequest",
+  };
+}
+
+export function hookOutput(
   decision: Decision,
   host: "claude" | "codex",
   reason: string,
 ): Record<string, unknown> {
-  const permissionDecision =
-    decision === "allow" ? "allow" : decision === "deny" ? "deny" : "ask";
+  const hookSpecificOutput = host === "codex"
+    ? codexHookOutput(decision)
+    : { permissionDecision: decision === "abstain" ? "ask" : decision };
 
   return {
-    hookSpecificOutput: { permissionDecision },
+    hookSpecificOutput,
     systemMessage: `Sandbox Extender (${host}): ${reason}`,
   };
 }

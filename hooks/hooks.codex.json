@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun \"${CODEX_PLUGIN_DIR}/src/hook-cli.ts\" codex"
+            "command": "bun \"${PLUGIN_ROOT}/src/hook-cli.ts\" codex"
           }
         ]
       }

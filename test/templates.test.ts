@@ -9,7 +9,17 @@ const templateDirectory = join(process.cwd(), "templates");
 async function template(name: string): Promise<Profile> {
   const candidate: unknown = JSON.parse(await readFile(join(templateDirectory, `${name}.json`), "utf8"));
   const profile = candidate as Omit<Profile, "allowedTargets"> & { allowedTargets: string[] };
-  return { ...profile, allowedTargets: new Set(["/work/example"]) };
+  return {
+    ...profile,
+    allowedTargets: new Set([
+      "/work/example",
+      "github:repository:acme/example",
+    ]),
+    targetResolver: profile.targetResolver && {
+      ...profile.targetResolver,
+      file: join(templateDirectory, profile.targetResolver.file),
+    },
+  };
 }
 
 describe("shipped profiles", () => {
@@ -18,21 +28,21 @@ describe("shipped profiles", () => {
     core.activate(await template("scout"), "thread-1");
 
     for (const command of [
-      "gh pr diff 42",
-      "gh pr view 42",
-      "gh pr list",
-      "gh pr checks 42",
-      "gh issue view 42",
-      "gh issue list",
-      "gh run view 123",
-      "gh run list",
-      "gh release view v1.0.0",
-      "gh release list",
-      "gh workflow view build",
-      "gh workflow list",
-      "gh repo view",
-      "gh repo list",
-      "gh label list",
+      "gh pr diff 42 --repo acme/example",
+      "gh pr view 42 --repo acme/example",
+      "gh pr list --repo acme/example",
+      "gh pr checks 42 --repo acme/example",
+      "gh issue view 42 --repo acme/example",
+      "gh issue list --repo acme/example",
+      "gh run view 123 --repo acme/example",
+      "gh run list --repo acme/example",
+      "gh release view v1.0.0 --repo acme/example",
+      "gh release list --repo acme/example",
+      "gh workflow view build --repo acme/example",
+      "gh workflow list --repo acme/example",
+      "gh repo view --repo acme/example",
+      "gh repo list --repo acme/example",
+      "gh label list --repo acme/example",
       "git fetch --dry-run origin",
       "git ls-remote origin",
     ]) {
@@ -55,7 +65,7 @@ describe("shipped profiles", () => {
     ]) {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
     }
-    expect(core.evaluate({ action: "codex.unified_exec", arguments: { command: "npm install" }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
+    expect(core.evaluate({ action: "codex.unified_exec", arguments: { command: "npm install" }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
     expect(core.evaluate({ action: "codex.unified_exec", arguments: { command: "bun add zod && curl example.com" }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
     expect(maker.sessionContext).toContain(
       "No high/critical known vulnerabilities; inspect lockfiles and audit data.",

@@ -37,6 +37,13 @@ export type Profile = {
   readonly id: string;
   readonly policyRevision: string;
   readonly sessionContext?: readonly string[];
+  readonly targetResolver?: TargetResolver;
+};
+
+/** Reviewed JavaScript that returns a canonical policy target or undefined. */
+export type TargetResolver = {
+  readonly file: string;
+  readonly language: "javascript";
 };
 
 export type DecisionToken = {

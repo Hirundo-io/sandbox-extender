@@ -4,7 +4,12 @@ import { PolicyRepository } from "./policy-repository.js";
 import { activateProfile, disableProfile, evaluateForThread } from "./policy-service.js";
 import { proposeProfile } from "./profile-authoring.js";
 import { getPolicyRoot } from "./policy-root.js";
-import { nonEmptyStringSchema, profileIdSchema, requestArgumentsSchema } from "./schemas.js";
+import {
+  nonEmptyStringSchema,
+  policyRevisionSchema,
+  profileIdSchema,
+  requestArgumentsSchema,
+} from "./schemas.js";
 
 const policyRoot = getPolicyRoot();
 const repository = new PolicyRepository(policyRoot);
@@ -58,7 +63,7 @@ server.registerTool(
   {
     description: "Promote a user-reviewed proposal into an activatable profile. Call only after the user has reviewed the proposal and its tests.",
     inputSchema: {
-      policyRevision: nonEmptyStringSchema.describe("Reviewed policy revision, such as a Git commit ID"),
+      policyRevision: policyRevisionSchema.describe("Reviewed full Git commit ID"),
       profileId: profileIdSchema,
     },
   },

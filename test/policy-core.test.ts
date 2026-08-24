@@ -80,6 +80,33 @@ describe("PolicyCore", () => {
     expect(core.consumeToken(result.token!.id, differentRequest)).toBe(false);
   });
 
+  test("authorizes every Bash or Zsh command while allowing harmless shell flow", () => {
+    const core = new PolicyCore();
+    core.activate(
+      profile({
+        groupings: [{
+          id: "npm",
+          evaluate: ({ request: evaluated }) =>
+            evaluated.arguments.command === "npm i zod" ? "allow" : "abstain",
+        }],
+      }),
+      request.threadId,
+    );
+
+    expect(core.evaluate({
+      ...request,
+      arguments: { command: "cd packages/app && npm i zod" },
+    }).decision).toBe("allow");
+    expect(core.evaluate({
+      ...request,
+      arguments: { command: "for item in one; do npm i zod; done" },
+    }).decision).toBe("allow");
+    expect(core.evaluate({
+      ...request,
+      arguments: { command: "npm i zod && curl example.test" },
+    }).decision).toBe("abstain");
+  });
+
   test("evaluates Cedar policies and abstains when none match", () => {
     const core = new PolicyCore();
     core.activate(

@@ -3,6 +3,10 @@ import { z } from "zod";
 export const hostSchema = z.enum(["claude", "codex"]);
 export const profileIdSchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 export const nonEmptyStringSchema = z.string().min(1);
+export const policyRevisionSchema = z.string().regex(
+  /^[0-9a-f]{40}$/i,
+  "policyRevision must be a full Git commit ID",
+);
 export const requestArgumentsSchema = z.record(z.string(), z.unknown());
 export const normalizedRequestSchema = z.object({
   action: nonEmptyStringSchema,

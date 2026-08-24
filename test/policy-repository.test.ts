@@ -74,4 +74,50 @@ describe("PolicyRepository", () => {
 
     await expect(repo.loadProfile("invalid")).rejects.toThrow("not a valid policy profile");
   });
+
+  test("only promotes a matching profile after every authorization test passes", async () => {
+    const repo = await repository();
+    await repo.writeProposal({
+      profile: {
+        allowedTargets: ["github:repository:acme/example"],
+        groupings: [{
+          id: "allow-read",
+          policies: { allow: "permit(principal, action, resource);" },
+        }],
+        id: "review",
+        policyRevision: "pending-review",
+      },
+      tests: [{
+        expected: "allow",
+        name: "allows the reviewed request",
+        request: {
+          action: "claude.Bash",
+          arguments: { command: "gh pr view --repo acme/example" },
+          resource: "github:repository:acme/example",
+          threadId: "thread-1",
+        },
+      }],
+    });
+
+    await repo.promoteProposal("review", "a".repeat(40));
+    expect((await repo.loadProfile("review")).policyRevision).toBe("a".repeat(40));
+  });
+
+  test("rejects proposals whose identity or authorization tests are invalid", async () => {
+    const repo = await repository();
+    await repo.initialize();
+    await Bun.write(
+      join(repo.root, "proposals", "review.json"),
+      JSON.stringify({
+        allowedTargets: ["github:repository:acme/example"],
+        groupings: [],
+        id: "other",
+        policyRevision: "pending-review",
+      }),
+    );
+
+    await expect(repo.promoteProposal("review", "a".repeat(40))).rejects.toThrow(
+      "does not match its requested profile ID",
+    );
+  });
 });

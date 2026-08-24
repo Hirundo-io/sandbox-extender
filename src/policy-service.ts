@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PolicyCore } from "./policy-core.js";
 import { PolicyRepository } from "./policy-repository.js";
 import type { EvaluationResult, NormalizedRequest } from "./types.js";
@@ -79,6 +80,7 @@ function fingerprint(profile: import("./types.js").Profile): string {
     id: profile.id,
     policyRevision: profile.policyRevision,
     sessionContext: profile.sessionContext ?? [],
+    targetResolver: profile.targetResolver,
   })).digest("hex");
 }
 
@@ -90,4 +92,3 @@ export async function disableProfile(
   const { [threadId]: _, ...remaining } = bindings;
   await repository.writeState(remaining);
 }
-import { createHash } from "node:crypto";

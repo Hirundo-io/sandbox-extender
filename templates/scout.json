@@ -2,6 +2,10 @@
   "id": "scout",
   "policyRevision": "pending-review",
   "allowedTargets": [],
+  "targetResolver": {
+    "language": "javascript",
+    "file": "resolvers/github-repository.js"
+  },
   "sessionContext": [
     "Use this profile only for inspection. Do not alter files or remote state."
   ],

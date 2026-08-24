@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { handlePermissionRequest, normalizeHookRequest } from "../src/hook.js";
+import { handlePermissionRequest, hookOutput, normalizeHookRequest } from "../src/hook.js";
 import { activateProfile } from "../src/policy-service.js";
 import { PolicyRepository } from "../src/policy-repository.js";
 
@@ -29,7 +29,7 @@ describe("host permission hooks", () => {
 
   test("abstains when a hook event does not have a complete request", async () => {
     expect(await handlePermissionRequest({ session_id: "thread-1" }, "codex")).toEqual({
-      hookSpecificOutput: { permissionDecision: "ask" },
+      hookSpecificOutput: { hookEventName: "PermissionRequest" },
       systemMessage: "Sandbox Extender (codex): policy context is unavailable",
     });
   });
@@ -46,7 +46,7 @@ describe("host permission hooks", () => {
           "codex",
       ),
     ).toEqual({
-      hookSpecificOutput: { permissionDecision: "ask" },
+      hookSpecificOutput: { hookEventName: "PermissionRequest" },
       systemMessage: "Sandbox Extender (codex): no active profile for thread",
     });
   });
@@ -96,5 +96,55 @@ describe("host permission hooks", () => {
       else process.env.HOME_FOLDER = previousHomeFolder;
       await rm(homeFolder, { force: true, recursive: true });
     }
+  });
+
+  test("preserves raw command arguments for profile-specific target resolution", () => {
+    expect(
+      normalizeHookRequest(
+        {
+          cwd: "/work/example",
+          session_id: "thread-1",
+          tool_input: { command: "gh pr view 42 --repo Other/Repository" },
+          tool_name: "Bash",
+        },
+        "claude",
+      ),
+    ).toMatchObject({
+      arguments: { command: "gh pr view 42 --repo Other/Repository" },
+      resource: "/work/example",
+    });
+  });
+
+  test("does not impose GitHub-specific target rules on generic hook events", () => {
+    expect(
+      normalizeHookRequest(
+        {
+          cwd: "/work/example",
+          session_id: "thread-1",
+          tool_input: { command: "gh pr view 42" },
+          tool_name: "Bash",
+        },
+        "codex",
+      ),
+    ).toMatchObject({ resource: "/work/example" });
+  });
+
+  test("uses the Codex PermissionRequest response envelope", async () => {
+    const response = await handlePermissionRequest({ session_id: "thread-1" }, "codex");
+    expect(response).toEqual({
+      hookSpecificOutput: { hookEventName: "PermissionRequest" },
+      systemMessage: "Sandbox Extender (codex): policy context is unavailable",
+    });
+  });
+
+  test("maps Codex allow and deny decisions to the documented envelope", () => {
+    expect(hookOutput("allow", "codex", "allowed").hookSpecificOutput).toEqual({
+      decision: { behavior: "allow" },
+      hookEventName: "PermissionRequest",
+    });
+    expect(hookOutput("deny", "codex", "denied").hookSpecificOutput).toEqual({
+      decision: { behavior: "deny" },
+      hookEventName: "PermissionRequest",
+    });
   });
 });

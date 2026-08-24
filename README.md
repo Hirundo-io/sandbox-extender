@@ -35,7 +35,12 @@ For example, this Profile allows only Codex shell requests from one workspace:
 
 Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists.
 
-The disabled `templates/scout.json` and `templates/maker.json` files are starting points only. Each has an empty target set and a `pending-review` revision, so neither can be activated until you copy, scope, review, and promote it.
+The disabled `templates/scout.json`, `templates/maker.json`, and
+`templates/babysitter.json` files are starting points only. Each has an empty
+target set and a `pending-review` revision, so none can be activated until you
+copy, scope, review, and promote it. Templates that name a resolver require
+the matching file from `templates/resolvers/` to be copied to `resolvers/` in
+the policy repository and are executed with Bun using JSON stdin/stdout.
 
 ## Development
 

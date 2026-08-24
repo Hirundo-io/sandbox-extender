@@ -13,6 +13,8 @@
   "dependencies": {
     "@cedar-policy/cedar-wasm": "^4.12.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "tree-sitter-wasms": "0.1.13",
+    "web-tree-sitter": "0.25.10",
     "yaml": "^2.9.0",
     "zod": "^4.0.0"
   },
@@ -28,6 +30,9 @@
       "src/mcp-server.ts",
       "src/index.ts",
       "test/**/*.test.ts"
+    ],
+    "ignore": [
+      "templates/resolvers/**/*.js"
     ],
     "ignoreExportsUsedInFile": true
   },
