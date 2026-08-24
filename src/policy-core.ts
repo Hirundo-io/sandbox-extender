@@ -172,8 +172,15 @@ function evaluateCommand(
  */
 function shellCommands(request: NormalizedRequest): string[] | undefined {
   const command = request.arguments.command;
-  if (typeof command !== "string") return [""];
+  if (!isShellAction(request.action)) return [""];
+  if (typeof command !== "string" || command.trim().length === 0) {
+    return undefined;
+  }
   return parseShellCommands(command);
+}
+
+function isShellAction(action: string): boolean {
+  return action.endsWith(".Bash") || action.endsWith(".unified_exec");
 }
 
 function isHarmlessShellBuiltin(command: string): boolean {

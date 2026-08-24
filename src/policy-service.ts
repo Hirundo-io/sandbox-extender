@@ -7,16 +7,15 @@ export async function evaluateForThread(
   repository: PolicyRepository,
   request: NormalizedRequest,
 ): Promise<EvaluationResult> {
-  const bindings = await repository.readState();
-  const binding = bindings[request.threadId];
-  if (!binding) {
-    const result = { decision: "abstain" as const, reason: "no active profile for thread" };
-    await recordEvaluation(repository, request, result);
-    return result;
-  }
-
-  const core = new PolicyCore();
   try {
+    const bindings = await repository.readState();
+    const binding = bindings[request.threadId];
+    if (!binding) {
+      const result = { decision: "abstain" as const, reason: "no active profile for thread" };
+      await recordEvaluation(repository, request, result);
+      return result;
+    }
+    const core = new PolicyCore();
     const profile = await repository.loadProfile(binding.profileId);
     if (profile.policyRevision === "pending-review" ||
       profile.policyRevision !== binding.policyRevision ||
@@ -41,18 +40,23 @@ async function recordEvaluation(
   result: EvaluationResult,
   profileId?: string,
 ): Promise<void> {
+  const entry = {
+    action: request.action,
+    decision: result.decision,
+    event: "extension-request",
+    profileId,
+    reason: result.reason,
+    resource: request.resource,
+    threadId: request.threadId,
+  };
+  if (result.decision === "allow") {
+    await repository.appendAudit(entry);
+    return;
+  }
   try {
-    await repository.appendAudit({
-      action: request.action,
-      decision: result.decision,
-      event: "extension-request",
-      profileId,
-      reason: result.reason,
-      resource: request.resource,
-      threadId: request.threadId,
-    });
+    await repository.appendAudit(entry);
   } catch {
-    // A missing policy repository cannot create an extension decision or an audit entry.
+    // Abstentions never extend host authority, so their audit failure is safe.
   }
 }
 

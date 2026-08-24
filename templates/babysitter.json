@@ -21,12 +21,10 @@
           "  context.arguments.command like \"gh pr view*\" ||",
           "  context.arguments.command like \"gh pr diff*\" ||",
           "  context.arguments.command like \"gh pr checks*\" ||",
-          "  context.arguments.command like \"gh pr comment*\" ||",
-          "  context.arguments.command like \"gh pr review*\" ||",
-          "  context.arguments.command like \"gh api repos/*/pulls/*/comments*\" ||",
+          "  context.arguments.command like \"gh pr comment *\" ||",
+          "  context.arguments.command like \"gh api repos/*/pulls/*/comments/*/replies*\" ||",
           "  context.arguments.command like \"gh run view*\" ||",
-          "  context.arguments.command like \"gh run list*\" ||",
-          "  context.arguments.command like \"gh api repos/*/actions/*\"",
+          "  context.arguments.command like \"gh run list*\"",
           "};"
         ]
       }

@@ -95,14 +95,17 @@ describe("PolicyCore", () => {
 
     expect(core.evaluate({
       ...request,
+      action: "codex.unified_exec",
       arguments: { command: "cd packages/app && npm i zod" },
     }).decision).toBe("allow");
     expect(core.evaluate({
       ...request,
+      action: "codex.unified_exec",
       arguments: { command: "for item in one; do npm i zod; done" },
     }).decision).toBe("allow");
     expect(core.evaluate({
       ...request,
+      action: "codex.unified_exec",
       arguments: { command: "npm i zod && curl example.test" },
     }).decision).toBe("abstain");
   });

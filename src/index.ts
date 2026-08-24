@@ -16,6 +16,7 @@ export type {
   PolicyGrouping,
   NormalizedRequest,
   Profile,
+  ProfileBinding,
   ProfileProposal,
   AuthorizationTest,
 } from "./types.js";
