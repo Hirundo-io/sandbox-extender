@@ -31,6 +31,15 @@ const claudePluginSchema = z.object({
   version: z.string().min(1),
 }).loose();
 
+function resolveInsideRoot(root: string, entry: string): string {
+  const resolvedRoot = resolve(root);
+  const resolvedEntry = resolve(resolvedRoot, entry);
+  if (resolvedEntry !== resolvedRoot && !resolvedEntry.startsWith(`${resolvedRoot}/`)) {
+    throw new Error(`plugin path escapes its root: ${entry}`);
+  }
+  return resolvedEntry;
+}
+
 async function readJson(file: string): Promise<unknown> {
   return JSON.parse(await readFile(file, "utf8"));
 }
@@ -40,15 +49,15 @@ async function validateFile(file: string): Promise<void> {
 }
 
 export async function validatePlugin(root: string): Promise<void> {
-  const codexPluginFile = resolve(root, ".codex-plugin/plugin.json");
+  const codexPluginFile = resolveInsideRoot(root, ".codex-plugin/plugin.json");
   const codexPlugin = codexPluginSchema.parse(await readJson(codexPluginFile));
-  const claudePluginFile = resolve(root, ".claude-plugin/plugin.json");
+  const claudePluginFile = resolveInsideRoot(root, ".claude-plugin/plugin.json");
   claudePluginSchema.parse(await readJson(claudePluginFile));
 
-  const hooksFile = resolve(root, codexPlugin.hooks);
+  const hooksFile = resolveInsideRoot(root, codexPlugin.hooks);
   hooksFileSchema.parse(await readJson(hooksFile));
-  await validateFile(resolve(root, codexPlugin.skills));
+  await validateFile(resolveInsideRoot(root, codexPlugin.skills));
   for (const server of Object.values(codexPlugin.mcpServers)) {
-    await validateFile(resolve(root, server.args[0]!));
+    await validateFile(resolveInsideRoot(root, server.args[0]!));
   }
 }

@@ -41,6 +41,16 @@ describe("plugin validation", () => {
       await writeFile(join(root, "src", "mcp-server.ts"), "");
       await writeFile(join(root, ".claude-plugin", "plugin.json"), "{}");
       await expect(validatePlugin(root)).rejects.toThrow();
+      await writeFile(join(root, ".claude-plugin", "plugin.json"),
+        JSON.stringify({ name: "test", version: "1" }));
+      await writeFile(join(root, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: "../../outside.json",
+        mcpServers: {},
+        name: "test",
+        skills: "./skills",
+        version: "1",
+      }));
+      await expect(validatePlugin(root)).rejects.toThrow("escapes its root");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
