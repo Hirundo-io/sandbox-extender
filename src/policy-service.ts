@@ -64,7 +64,9 @@ async function recordEvaluation(
     reason: result.reason,
     resource: result.resolvedTarget ?? request.resource,
     resolvedTarget: result.resolvedTarget,
+    resolvedTargets: result.resolvedTargets,
     matchedGroupingId: result.matchedGroupingId,
+    matchedGroupingIds: result.matchedGroupingIds,
     threadId: request.threadId,
   };
   if (result.decision === "allow") {

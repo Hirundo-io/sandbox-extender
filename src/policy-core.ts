@@ -156,8 +156,8 @@ export class PolicyCore {
       return { decision: "abstain", reason: "shell syntax cannot be authorized safely" };
     }
 
-    let matchedGroupingId: string | undefined;
-    let resolvedTarget: string | undefined;
+    const matchedGroupingIds: string[] = [];
+    const resolvedTargets: string[] = [];
     const rootDirectory = request.resource;
     let workingDirectory = rootDirectory;
     for (const command of commands) {
@@ -186,16 +186,19 @@ export class PolicyCore {
       }
       const result = evaluateCommand(profile, resolvedRequest);
       if (result.decision !== "allow") return result;
-      matchedGroupingId = result.matchedGroupingId;
-      resolvedTarget = resolvedRequest.resource;
+      if (result.matchedGroupingId) matchedGroupingIds.push(result.matchedGroupingId);
+      resolvedTargets.push(resolvedRequest.resource);
     }
 
-    const token = this.#issueToken(request, profile.policyRevision, resolvedTarget ?? request.resource);
+    const targets = resolvedTargets.length > 0 ? resolvedTargets : [request.resource];
+    const token = this.#issueToken(request, profile.policyRevision, targets);
     return {
       decision: "allow",
-      matchedGroupingId,
+      matchedGroupingId: matchedGroupingIds.at(-1),
+      matchedGroupingIds,
       reason: "allowed by capability grouping",
-      resolvedTarget,
+      resolvedTarget: targets.at(-1),
+      resolvedTargets: targets,
       token,
     };
   }
@@ -215,7 +218,7 @@ export class PolicyCore {
         resolvedRequest &&
         token.expiresAt.getTime() > Date.now() &&
         token.policyRevision === activeProfile.profile.policyRevision &&
-        token.resolvedTarget === resolvedRequest.resource &&
+        token.resolvedTargets.includes(resolvedRequest.resource) &&
         sameRequest(token.request, request),
     );
   }
@@ -223,14 +226,15 @@ export class PolicyCore {
   #issueToken(
     request: NormalizedRequest,
     policyRevision: string,
-    resolvedTarget: string,
+    resolvedTargets: readonly string[],
   ): DecisionToken {
     const token: DecisionToken = {
       expiresAt: new Date(Date.now() + this.tokenLifetimeMs),
       id: crypto.randomUUID(),
       policyRevision,
       request,
-      resolvedTarget,
+      resolvedTarget: resolvedTargets.at(-1)!,
+      resolvedTargets,
     };
     this.#tokens.set(token.id, token);
     return token;

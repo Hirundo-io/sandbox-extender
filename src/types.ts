@@ -52,13 +52,16 @@ export type DecisionToken = {
   readonly policyRevision: string;
   readonly request: NormalizedRequest;
   readonly resolvedTarget: string;
+  readonly resolvedTargets: readonly string[];
 };
 
 export type EvaluationResult = {
   readonly decision: Decision;
   readonly matchedGroupingId?: string;
+  readonly matchedGroupingIds?: readonly string[];
   readonly reason: string;
   readonly resolvedTarget?: string;
+  readonly resolvedTargets?: readonly string[];
   readonly token?: DecisionToken;
 };
 
