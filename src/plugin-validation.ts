@@ -1,5 +1,5 @@
 import { access, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import { z } from "zod";
 
@@ -34,7 +34,9 @@ const claudePluginSchema = z.object({
 function resolveInsideRoot(root: string, entry: string): string {
   const resolvedRoot = resolve(root);
   const resolvedEntry = resolve(resolvedRoot, entry);
-  if (resolvedEntry !== resolvedRoot && !resolvedEntry.startsWith(`${resolvedRoot}/`)) {
+  const relativeEntry = relative(resolvedRoot, resolvedEntry);
+  if (isAbsolute(relativeEntry) || relativeEntry === ".." ||
+    relativeEntry.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
     throw new Error(`plugin path escapes its root: ${entry}`);
   }
   return resolvedEntry;

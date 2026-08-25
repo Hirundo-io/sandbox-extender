@@ -83,6 +83,14 @@ describe("PolicyCore", () => {
     expect(core.consumeToken(result.token!.id, differentRequest)).toBe(false);
   });
 
+  test("invalidates tokens when their active profile is disabled", () => {
+    const core = new PolicyCore();
+    core.activate(profile({ groupings: [{ id: "allow", evaluate: () => "allow" }] }), request.threadId);
+    const result = core.evaluate(request);
+    core.disable(request.threadId);
+    expect(core.consumeToken(result.token!.id, request)).toBe(false);
+  });
+
   test("authorizes every Bash or Zsh command while allowing harmless shell flow", () => {
     const core = new PolicyCore();
     core.activate(
@@ -110,6 +118,18 @@ describe("PolicyCore", () => {
       ...request,
       action: "codex.unified_exec",
       arguments: { command: "npm i zod && curl example.test" },
+    }).decision).toBe("abstain");
+  });
+
+  test("rejects directory changes outside the original workspace", () => {
+    const core = new PolicyCore();
+    core.activate(profile({
+      groupings: [{ id: "allow", evaluate: () => "allow" }],
+    }), request.threadId);
+    expect(core.evaluate({
+      ...request,
+      action: "codex.unified_exec",
+      arguments: { command: "cd ../outside && npm i zod" },
     }).decision).toBe("abstain");
   });
 

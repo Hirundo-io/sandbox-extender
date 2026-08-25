@@ -7,6 +7,7 @@ import type {
 } from "./types.js";
 import { evaluateCedarGrouping } from "./cedar.js";
 import { parseShellCommands } from "./shell-parser.js";
+import { relative, resolve } from "node:path";
 
 type ActiveProfile = {
   readonly profile: Profile;
@@ -82,7 +83,21 @@ function isShellAction(action: string): boolean {
 }
 
 function isHarmlessShellBuiltin(command: string): boolean {
-  return /^(?:cd|:|true|false|pwd|echo|printf|test)(?:\s|$)/.test(command);
+  return /^(?::|true|false|pwd|echo|printf|test)(?:\s|$)/.test(command);
+}
+
+function changeDirectory(
+  root: string,
+  currentDirectory: string,
+  command: string,
+): string | undefined {
+  const match = command.match(/^cd(?:\s+([^\s]+))?$/);
+  if (!match) return undefined;
+  const next = resolve(currentDirectory, match[1] ?? ".");
+  const path = relative(root, next);
+  return path === "" || (!path.startsWith("..") && !path.includes("/../"))
+    ? next
+    : undefined;
 }
 
 function isCedarGrouping(
@@ -143,7 +158,17 @@ export class PolicyCore {
 
     let matchedGroupingId: string | undefined;
     let resolvedTarget: string | undefined;
+    const rootDirectory = request.resource;
+    let workingDirectory = rootDirectory;
     for (const command of commands) {
+      if (command.startsWith("cd")) {
+        const nextDirectory = changeDirectory(rootDirectory, workingDirectory, command);
+        if (!nextDirectory) {
+          return { decision: "abstain", reason: "directory change is outside the request scope" };
+        }
+        workingDirectory = nextDirectory;
+        continue;
+      }
       if (isHarmlessShellBuiltin(command)) continue;
       const commandRequest = {
         ...request,
@@ -178,10 +203,19 @@ export class PolicyCore {
   consumeToken(tokenId: string, request: NormalizedRequest): boolean {
     const token = this.#tokens.get(tokenId);
     this.#tokens.delete(tokenId);
+    const activeProfile = this.#activeProfiles.get(request.threadId);
+    const resolvedRequest = activeProfile && resolveProfileTarget(
+      activeProfile.profile,
+      request,
+    );
 
     return Boolean(
       token &&
+        activeProfile &&
+        resolvedRequest &&
         token.expiresAt.getTime() > Date.now() &&
+        token.policyRevision === activeProfile.profile.policyRevision &&
+        token.resolvedTarget === resolvedRequest.resource &&
         sameRequest(token.request, request),
     );
   }
