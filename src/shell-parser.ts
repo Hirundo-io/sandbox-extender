@@ -40,6 +40,44 @@ export function parseShellCommands(script: string): string[] | undefined {
   }
 }
 
+/** Splits one already-validated static command into its literal arguments. */
+export function parseShellWords(command: string): string[] | undefined {
+  const words: string[] = [];
+  let word = "";
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+  let hasWord = false;
+
+  for (const character of command) {
+    if (escaped) {
+      word += character;
+      escaped = false;
+      hasWord = true;
+    } else if (character === "\\") {
+      escaped = true;
+      hasWord = true;
+    } else if (quote) {
+      if (character === quote) quote = undefined;
+      else word += character;
+      hasWord = true;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+      hasWord = true;
+    } else if (/\s/.test(character)) {
+      if (hasWord) words.push(word);
+      word = "";
+      hasWord = false;
+    } else {
+      word += character;
+      hasWord = true;
+    }
+  }
+
+  if (quote || escaped) return undefined;
+  if (hasWord) words.push(word);
+  return words.length > 0 ? words : undefined;
+}
+
 function descendants(node: SyntaxNode, type: string): SyntaxNode[] {
   const result: SyntaxNode[] = [];
   const nodes = [node];

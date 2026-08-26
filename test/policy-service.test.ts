@@ -113,6 +113,69 @@ describe("policy service", () => {
     }
   });
 
+  test("redacts credentials inside nested JSON strings while retaining useful fields", async () => {
+    const { repository, root } = await createRepository();
+    const password = "json-password-must-not-reach-the-audit-log";
+    const apiKey = "json-api-key-must-not-reach-the-audit-log";
+    const refreshToken = "json-refresh-token-must-not-reach-the-audit-log";
+    try {
+      await evaluateForThread(repository, {
+        ...request,
+        arguments: {
+          payload: JSON.stringify({
+            batch: [{ action: "sync", apiKey }],
+            context: { requestId: "request-42" },
+            password,
+            serialized: JSON.stringify({
+              metadata: { environment: "staging" },
+              refreshToken,
+            }),
+          }),
+        },
+      });
+
+      const audit = await readFile(join(root, "audit.yaml"), "utf8");
+      expect(audit).not.toContain(password);
+      expect(audit).not.toContain(apiKey);
+      expect(audit).not.toContain(refreshToken);
+      expect(audit).toContain("request-42");
+      expect(audit).toContain("sync");
+      expect(audit).toContain("staging");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  test("fails safe when JSON audit values exceed parsing or traversal bounds", async () => {
+    const { repository, root } = await createRepository();
+    const deeplyNestedSecret = "deeply-nested-secret-must-not-reach-the-audit-log";
+    const oversizedSecret = "oversized-secret-must-not-reach-the-audit-log";
+    let deeplyNested: unknown = { password: deeplyNestedSecret };
+    for (let depth = 0; depth < 20; depth += 1) {
+      deeplyNested = [deeplyNested];
+    }
+    try {
+      await evaluateForThread(repository, {
+        ...request,
+        arguments: {
+          deeplyNested: JSON.stringify(deeplyNested),
+          oversized: JSON.stringify({
+            padding: "x".repeat(64 * 1024),
+            password: oversizedSecret,
+          }),
+        },
+      });
+
+      const audit = await readFile(join(root, "audit.yaml"), "utf8");
+      expect(audit).not.toContain(deeplyNestedSecret);
+      expect(audit).not.toContain(oversizedSecret);
+      expect(audit).toContain("[redacted deeply nested audit value]");
+      expect(audit).toContain("[redacted oversized JSON]");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   test("redacts common provider credentials without obscuring ordinary audit data", async () => {
     const { repository, root } = await createRepository();
     const gitlabToken = `glpat-${"a".repeat(20)}`;

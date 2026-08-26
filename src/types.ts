@@ -8,10 +8,18 @@ export type NormalizedRequest = {
 };
 
 export type EvaluationContext = {
+  readonly command?: ShellCommandContext;
   readonly policyRevision: string;
   readonly profileId: string;
   readonly request: NormalizedRequest;
   readonly resolvedTarget: string;
+};
+
+export type ShellCommandContext = {
+  readonly arguments: readonly string[];
+  readonly executable: string;
+  readonly subcommand?: string;
+  readonly words: readonly string[];
 };
 
 export type CapabilityEvaluator = (

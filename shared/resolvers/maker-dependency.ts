@@ -1,7 +1,9 @@
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { parseArgs } from "node:util";
 
 export type MakerDependencyResolverInput = {
+  readonly commandWords?: unknown;
   readonly localTarget?: unknown;
   readonly requestArguments?: Readonly<Record<string, unknown>>;
   readonly workingDirectory?: unknown;
@@ -21,57 +23,13 @@ function resolverInput(candidate: unknown): MakerDependencyResolverInput {
   if (typeof candidate !== "object" || candidate === null) return {};
   const input = candidate as Record<string, unknown>;
   return {
+    commandWords: input.commandWords,
     localTarget: input.localTarget,
     requestArguments: typeof input.requestArguments === "object" && input.requestArguments !== null
       ? input.requestArguments as Readonly<Record<string, unknown>>
       : undefined,
     workingDirectory: input.workingDirectory,
   };
-}
-
-function shellWords(command: string): string[] | undefined {
-  const words: string[] = [];
-  let word = "";
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-  let hasWord = false;
-
-  for (const character of command) {
-    if (escaped) {
-      word += character;
-      escaped = false;
-      hasWord = true;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = true;
-      hasWord = true;
-      continue;
-    }
-    if (quote) {
-      if (character === quote) quote = undefined;
-      else word += character;
-      hasWord = true;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      hasWord = true;
-      continue;
-    }
-    if (/\s/.test(character)) {
-      if (hasWord) words.push(word);
-      word = "";
-      hasWord = false;
-      continue;
-    }
-    word += character;
-    hasWord = true;
-  }
-
-  if (quote || escaped) return undefined;
-  if (hasWord) words.push(word);
-  return words.length > 0 ? words : undefined;
 }
 
 function isWithin(root: string, candidate: string): boolean {
@@ -113,31 +71,29 @@ function parseArguments(
   booleanOptions: ReadonlySet<string>,
   valueOptions: ReadonlySet<string>,
 ): ParsedArguments | undefined {
-  const options = new Map<string, string | true>();
-  const positionals: string[] = [];
-  for (let index = 0; index < arguments_.length; index += 1) {
-    const argument = arguments_[index];
-    if (!argument.startsWith("--")) {
-      if (argument.startsWith("-")) return undefined;
-      positionals.push(argument);
-      continue;
+  try {
+    const optionDefinitions = Object.fromEntries([
+      ...[...booleanOptions].map((name) => [name.slice(2), { type: "boolean" as const }]),
+      ...[...valueOptions].map((name) => [name.slice(2), { type: "string" as const }]),
+    ]);
+    const parsed = parseArgs({
+      allowPositionals: true,
+      args: [...arguments_],
+      options: optionDefinitions,
+      strict: true,
+      tokens: true,
+    });
+    const optionTokens = parsed.tokens.filter((token) => token.kind === "option");
+    if (new Set(optionTokens.map((token) => token.name)).size !== optionTokens.length) return undefined;
+    const options = new Map<string, string | true>();
+    for (const [name, value] of Object.entries(parsed.values)) {
+      if (typeof value === "string" || value === true) options.set(`--${name}`, value);
+      else if (value !== undefined) return undefined;
     }
-
-    const equals = argument.indexOf("=");
-    const name = equals === -1 ? argument : argument.slice(0, equals);
-    if (options.has(name)) return undefined;
-    if (booleanOptions.has(name)) {
-      if (equals !== -1) return undefined;
-      options.set(name, true);
-      continue;
-    }
-    if (!valueOptions.has(name)) return undefined;
-    const value = equals === -1 ? arguments_[index + 1] : argument.slice(equals + 1);
-    if (!value || value.startsWith("-")) return undefined;
-    options.set(name, value);
-    if (equals === -1) index += 1;
+    return { options, positionals: parsed.positionals };
+  } catch {
+    return undefined;
   }
-  return { options, positionals };
 }
 
 function hasExactOptions(
@@ -216,7 +172,7 @@ function resolveUv(
   const command = words[1];
   if (!command || !["add", "remove", "lock"].includes(command)) return undefined;
   const required = ["--no-build", "--no-config", "--no-python-downloads", "--no-sources"];
-  if (command !== "lock") required.push("--no-sync");
+  if (["add", "remove"].includes(command)) required.push("--no-sync");
   const parsed = parseArguments(words.slice(2), new Set(required), new Set(["--cache-dir", "--project"]));
   if (!parsed || !hasExactOptions(parsed, required, {
     "--cache-dir": (value) => resolvesWithinWorkspace(workspace, workingDirectory, value) !== undefined,
@@ -247,12 +203,11 @@ function resolvePixi(
 function resolveTarget(input: MakerDependencyResolverInput): string | undefined {
   const workspace = input.localTarget;
   const workingDirectory = input.workingDirectory;
-  const command = input.requestArguments?.command;
+  const commandWords = input.commandWords;
   if (typeof workspace !== "string" || !isAbsolute(workspace) ||
     typeof workingDirectory !== "string" || !resolvesWithinWorkspace(workspace, workspace, workingDirectory) ||
-    typeof command !== "string") return undefined;
-  const words = shellWords(command);
-  if (!words) return undefined;
+    !Array.isArray(commandWords) || !commandWords.every((word) => typeof word === "string")) return undefined;
+  const words = commandWords as readonly string[];
   if (words[0] === "npm") return resolveNpm(workspace, workingDirectory, words);
   if (words[0] === "bun") return resolveBun(workspace, workingDirectory, words);
   if (words[0] === "uv") return resolveUv(workspace, workingDirectory, words);

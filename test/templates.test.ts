@@ -65,6 +65,7 @@ describe("shipped profiles", () => {
     for (const command of [
       "gh pr diff 42 --repo acme/example",
       "gh pr view 42 --repo acme/example",
+      "gh pr view 42 --repo=acme/example",
       "gh pr list --repo acme/example",
       "gh pr checks 42 --repo acme/example",
       "gh issue view 42 --repo acme/example",
@@ -84,6 +85,12 @@ describe("shipped profiles", () => {
     for (const command of [
       "gh pr merge 42",
       "gh pr diff 42 && gh pr merge 42",
+      "gh pr view 42 --repo acme/example --repo acme/example",
+      "gh pr view 42 --repo acme/example --repo acme/other",
+      "gh pr view 42 --repo=acme/example --repo=acme/other",
+      "gh pr view 42 --repo acme/example --repo=acme/other",
+      "gh pr view 42 --repo=acme/example --repo acme/other",
+      "gh pr view 42 --repo acme/example --json title --json url",
     ]) {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
     }
@@ -219,6 +226,7 @@ describe("shipped profiles", () => {
         "npm install zod",
         "npm install zod --global --ignore-scripts --package-lock-only --workspaces=false --location=project --prefix . --cache .cache/npm",
         "npm install zod --ignore-scripts=false --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
+        "npm install zod --ignore-scripts --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix ../outside --cache .cache/npm",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache /tmp/npm-cache",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces --location=project --prefix . --cache .cache/npm",
@@ -227,6 +235,7 @@ describe("shipped profiles", () => {
         "bun add zod --ignore-scripts --lockfile-only --cwd ../outside --cache-dir .cache/bun",
         "bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir /tmp/bun-cache",
         "bun add zod --trust --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
+        "bun add zod --ignore-scripts --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         "bun add zod --config ../bunfig.toml --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         "bun add zod --global --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         "bun add zod --filter app --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
@@ -238,6 +247,8 @@ describe("shipped profiles", () => {
         "uv add requests --workspace --no-sync --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
         "uv add requests --config-file uv.toml --no-sync --no-build --no-sources --no-python-downloads --project . --cache-dir .cache/uv",
         "uv sync --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
+        "uv sync --locked --no-build --no-sources --no-config --no-env-file --no-python-downloads --no-install-project --no-install-workspace --project . --cache-dir .cache/uv",
+        "uv sync --locked --no-build --no-sources --no-config --no-env-file --no-python-downloads --no-install-project --no-install-workspace --no-install-workspace --project . --cache-dir .cache/uv",
         "uv run python -c pass",
         "pixi add python --no-install --offline --no-config --manifest-path ../outside/pixi.toml",
         "pixi add python --no-install --offline --no-config --manifest-path . --config-file pixi.toml",
@@ -272,6 +283,7 @@ describe("shipped profiles", () => {
       "gh pr checks 42 --repo acme/example",
       "gh pr checks 42 --repo acme/example --watch",
       'gh pr comment 42 --repo acme/example --body "Reviewed."',
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Fixed in the latest revision."',
     ]) {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
     }
@@ -291,6 +303,25 @@ describe("shipped profiles", () => {
       "gh pr view 042 --repo acme/example",
       "gh pr view --repo acme/example",
       "gh pr merge 42 --repo acme/example",
+      'gh api --method POST repos/acme/example/pulls/43/comments/987/replies -f body="Wrong pull request."',
+      'gh api --method POST repos/acme/other/pulls/42/comments/987/replies -f body="Wrong repository."',
+      "gh api --method POST repos/acme/example/pulls/42/comments/987/replies",
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body=""',
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body=First -f body=Second',
+      'gh api --method POST --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Duplicate method."',
+      'gh api --method=POST repos/acme/example/pulls/42/comments/987/replies -f body="Alternate method flag."',
+      'gh api -X POST repos/acme/example/pulls/42/comments/987/replies -f body="Alternate method flag."',
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies --raw-field body="Alternate flag."',
+      "gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body",
+      'gh api --method POST repos/acme/example/pulls/42/comments/987 -f body="Alternate endpoint."',
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies/extra -f body="Alternate endpoint."',
+      'gh api --method POST /repos/acme/example/pulls/42/comments/987/replies -f body="Alternate endpoint."',
+      'gh api --method POST repos/acme/example/issues/42/comments -f body="Unrelated write."',
+      'gh api --method PATCH repos/acme/example/pulls/42/comments/987/replies -f body="Wrong method."',
+      'gh api graphql -f query="mutation { addPullRequestReviewThreadReply(input: {}) { clientMutationId } }"',
+      'gh api --method POST repos/acme/example/pulls/42/comments/0/replies -f body="Invalid comment ID."',
+      'gh api --method POST repos/acme/example/pulls/42/comments/0987/replies -f body="Ambiguous comment ID."',
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Reviewed." --input payload.json',
     ]) {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
     }
@@ -317,23 +348,30 @@ describe("shipped profiles", () => {
   test("Babysitter's Cedar policy itself rejects another pull request", async () => {
     const babysitter = await template("babysitter");
     const grouping = babysitter.groupings[0] as CedarGrouping;
-    const request = {
-      action: "codex.unified_exec",
-      arguments: { command: "gh pr view 42 --repo acme/example" },
-      resource: "/work/example",
-      threadId: "thread-1",
-    };
-    const context = {
-      policyRevision: babysitter.policyRevision,
-      profileId: babysitter.id,
-      request,
-      resolvedTarget: "github:pull-request:acme/example#42",
-    };
+    expect(grouping.policies).toHaveProperty("allowReviewThreadReplies");
 
-    expect(evaluateCedarGrouping(grouping, context)).toBe("allow");
-    expect(evaluateCedarGrouping(grouping, {
-      ...context,
-      resolvedTarget: "github:pull-request:acme/example#43",
-    })).toBe("abstain");
+    for (const command of [
+      "gh pr view 42 --repo acme/example",
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Reviewed."',
+    ]) {
+      const request = {
+        action: "codex.unified_exec",
+        arguments: { command },
+        resource: "/work/example",
+        threadId: "thread-1",
+      };
+      const context = {
+        policyRevision: babysitter.policyRevision,
+        profileId: babysitter.id,
+        request,
+        resolvedTarget: "github:pull-request:acme/example#42",
+      };
+
+      expect(evaluateCedarGrouping(grouping, context)).toBe("allow");
+      expect(evaluateCedarGrouping(grouping, {
+        ...context,
+        resolvedTarget: "github:pull-request:acme/example#43",
+      })).toBe("abstain");
+    }
   });
 });

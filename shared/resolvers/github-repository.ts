@@ -135,7 +135,20 @@ function resolveGitTarget(
     : undefined;
 }
 
-function resolveGitHubTarget(command: string): string | undefined {
+function hasDuplicateLongOptions(words: readonly string[]): boolean {
+  const options = new Set<string>();
+  for (const word of words) {
+    if (word === "--") break;
+    if (!word.startsWith("--")) continue;
+    const option = word.split("=", 1)[0];
+    if (options.has(option)) return true;
+    options.add(option);
+  }
+  return false;
+}
+
+function resolveGitHubTarget(command: string, words: readonly string[]): string | undefined {
+  if (hasDuplicateLongOptions(words)) return undefined;
   const repositoryPattern =
     /(?:^|\s)--repo(?:=|\s+)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)(?=\s|$)/;
   const repository = command.match(repositoryPattern)?.[1];
@@ -149,7 +162,7 @@ export function resolveGitHubRepositoryTarget(candidate: unknown): string | unde
   const target = words?.[0] === "git"
     ? resolveGitTarget(input.localTarget, input.workingDirectory, words)
     : typeof command === "string" && /^\s*gh\b/.test(command)
-      ? resolveGitHubTarget(command)
+      ? words && resolveGitHubTarget(command, words)
       : input.localTarget;
   return typeof target === "string" && target.length > 0 ? target : undefined;
 }

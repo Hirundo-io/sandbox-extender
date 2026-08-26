@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { PolicyRepository } from "./policy-repository.js";
 import { consumeProfileMutationAuthorization } from "./mutation-authorization.js";
+import type { ProfileMutationIntent } from "./mutation-authorization.js";
 import { activateProfile, disableProfile, evaluateForThread } from "./policy-service.js";
 import { proposeProfile } from "./profile-authoring.js";
 import { getPolicyRoot } from "./policy-root.js";
@@ -24,8 +25,11 @@ const server = new McpServer({
   version: "0.1.2",
 });
 
-async function authorizeMutation(threadId: string): Promise<void> {
-  await consumeProfileMutationAuthorization(policyRoot, threadId);
+async function authorizeMutation(
+  threadId: string,
+  intent: ProfileMutationIntent,
+): Promise<void> {
+  await consumeProfileMutationAuthorization(policyRoot, threadId, intent);
 }
 
 server.registerTool(
@@ -35,7 +39,10 @@ server.registerTool(
     inputSchema: { threadId: nonEmptyStringSchema },
   },
   async ({ threadId }) => {
-    await authorizeMutation(threadId);
+    await authorizeMutation(threadId, {
+      arguments: {},
+      operation: "initialize_policy_repository",
+    });
     await repository.initialize();
     return text(`Initialized policy repository at ${policyRoot}.`);
   },
@@ -63,7 +70,15 @@ server.registerTool(
     },
   },
   async ({ action, arguments: requestArguments, profileId, resource, threadId }) => {
-    await authorizeMutation(threadId);
+    await authorizeMutation(threadId, {
+      arguments: {
+        action,
+        arguments: requestArguments,
+        profileId,
+        resource,
+      },
+      operation: "propose_profile",
+    });
     const proposal = proposeProfile(profileId, { action, arguments: requestArguments, resource, threadId });
     await repository.writeProposal(proposal);
     return text(`Wrote proposal ${profileId}. Review proposals/${profileId}.json and tests/${profileId}.json before promoting it to profiles/.`);
@@ -81,7 +96,10 @@ server.registerTool(
     },
   },
   async ({ policyRevision, profileId, threadId }) => {
-    await authorizeMutation(threadId);
+    await authorizeMutation(threadId, {
+      arguments: { policyRevision, profileId },
+      operation: "promote_profile",
+    });
     await repository.promoteProposal(profileId, policyRevision);
     return text(`Promoted ${profileId}. It remains inactive until explicitly activated.`);
   },
@@ -97,7 +115,10 @@ server.registerTool(
     },
   },
   async ({ profileId, threadId }) => {
-    await authorizeMutation(threadId);
+    await authorizeMutation(threadId, {
+      arguments: { profileId },
+      operation: "activate_profile",
+    });
     await activateProfile(repository, threadId, profileId);
     const profile = await repository.loadProfile(profileId);
     return text(JSON.stringify({
@@ -114,7 +135,10 @@ server.registerTool(
     inputSchema: { threadId: nonEmptyStringSchema },
   },
   async ({ threadId }) => {
-    await authorizeMutation(threadId);
+    await authorizeMutation(threadId, {
+      arguments: {},
+      operation: "disable_profile",
+    });
     await disableProfile(repository, threadId);
     return text(`Disabled the profile for ${threadId}.`);
   },

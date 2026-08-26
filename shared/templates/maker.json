@@ -9,14 +9,51 @@
   "sessionContext": [
     "Prefer established packages with multiple maintainers and recent updates.",
     "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
-    "Keep dependency changes narrow; explain package and lockfile changes."
+    "Keep dependency changes narrow; explain package and lockfile changes.",
+    "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace."
   ],
   "groupings": [
     {
       "id": "dependency-management",
       "policies": {
-        "allowDependencyChanges": [
-          "permit(principal, action, resource);"
+        "allowNpmDependencyChanges": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.command.executable == \"npm\" &&",
+          "  [\"install\", \"i\", \"uninstall\", \"remove\", \"update\", \"up\"].contains(context.command.subcommand) &&",
+          "  context.command.words.contains(\"--ignore-scripts\") &&",
+          "  context.command.words.contains(\"--package-lock-only\")",
+          "};"
+        ],
+        "allowBunDependencyChanges": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.command.executable == \"bun\" &&",
+          "  [\"install\", \"i\", \"add\", \"remove\", \"update\"].contains(context.command.subcommand) &&",
+          "  context.command.words.contains(\"--ignore-scripts\") &&",
+          "  context.command.words.contains(\"--lockfile-only\")",
+          "};"
+        ],
+        "allowUvDependencyChanges": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.command.executable == \"uv\" &&",
+          "  [\"add\", \"remove\", \"lock\"].contains(context.command.subcommand) &&",
+          "  context.command.words.contains(\"--no-build\") &&",
+          "  context.command.words.contains(\"--no-config\") &&",
+          "  context.command.words.contains(\"--no-python-downloads\") &&",
+          "  context.command.words.contains(\"--no-sources\")",
+          "};"
+        ],
+        "allowPixiDependencyChanges": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.command.executable == \"pixi\" &&",
+          "  [\"add\", \"remove\", \"update\", \"lock\"].contains(context.command.subcommand) &&",
+          "  context.command.words.contains(\"--no-config\") &&",
+          "  context.command.words.contains(\"--no-install\") &&",
+          "  context.command.words.contains(\"--offline\")",
+          "};"
         ]
       }
     }

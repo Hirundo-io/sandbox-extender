@@ -133,6 +133,7 @@ describe("PolicyCore", () => {
       "echo safe",
       "echo /tmp/literal-path",
       "printf '%s' ../../literal-path",
+      "printf -- '-v' PATH",
       "test -n /tmp/literal-string",
     ]) {
       expect(core.evaluate({
@@ -142,6 +143,24 @@ describe("PolicyCore", () => {
         resource: process.cwd(),
       }).decision).toBe("allow");
     }
+  });
+
+  test("does not automatically authorize printf variable assignment", () => {
+    const core = new PolicyCore();
+    core.activate(profile({
+      groupings: [{
+        id: "npm",
+        evaluate: ({ request: evaluated }) =>
+          evaluated.arguments.command === "npm i zod" ? "allow" : "abstain",
+      }],
+    }), request.threadId);
+
+    expect(core.evaluate({
+      ...request,
+      action: "codex.unified_exec",
+      arguments: { command: "printf -v PATH /tmp/attacker-bin; npm i zod" },
+      resource: process.cwd(),
+    }).decision).toBe("abstain");
   });
 
   test("automatically allows filesystem tests only within the working directory", async () => {

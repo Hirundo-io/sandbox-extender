@@ -4,9 +4,10 @@ import type {
   EvaluationResult,
   NormalizedRequest,
   Profile,
+  ShellCommandContext,
 } from "./types.js";
 import { evaluateCedarGrouping } from "./cedar.js";
-import { parseShellCommands } from "./shell-parser.js";
+import { parseShellCommands, parseShellWords } from "./shell-parser.js";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
@@ -33,7 +34,7 @@ type DirectoryOption = {
 
 type SafeBuiltinDecision = "auto-allow" | "defer-to-policy" | "not-safe-builtin";
 
-const automaticallyAllowedBuiltins = new Set([":", "true", "false", "pwd", "echo", "printf"]);
+const automaticallyAllowedBuiltins = new Set([":", "true", "false", "pwd", "echo"]);
 
 const unaryFilesystemTestOperators = new Set([
   "-a",
@@ -101,51 +102,6 @@ function resolvesWithinWorkspace(
   return canonicalWorkspace && canonicalCandidate && isWithin(canonicalWorkspace, canonicalCandidate)
     ? candidate
     : undefined;
-}
-
-function shellWords(command: string): string[] | undefined {
-  const words: string[] = [];
-  let word = "";
-  let quote: "'" | '"' | undefined;
-  let escaped = false;
-  let hasWord = false;
-
-  for (const character of command) {
-    if (escaped) {
-      word += character;
-      escaped = false;
-      hasWord = true;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = true;
-      hasWord = true;
-      continue;
-    }
-    if (quote) {
-      if (character === quote) quote = undefined;
-      else word += character;
-      hasWord = true;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      quote = character;
-      hasWord = true;
-      continue;
-    }
-    if (/\s/.test(character)) {
-      if (hasWord) words.push(word);
-      word = "";
-      hasWord = false;
-      continue;
-    }
-    word += character;
-    hasWord = true;
-  }
-
-  if (quote || escaped) return undefined;
-  if (hasWord) words.push(word);
-  return words.length > 0 ? words : undefined;
 }
 
 function isFilesystemPath(value: string): boolean {
@@ -253,12 +209,24 @@ function filesystemTestOperands(words: readonly string[]): readonly string[] | u
   return paths;
 }
 
+function safePrintfDecision(words: readonly string[]): SafeBuiltinDecision {
+  if (words[0] !== "printf") return "not-safe-builtin";
+
+  const firstArgument = words[1];
+  return firstArgument === undefined || firstArgument === "--" || !firstArgument.startsWith("-")
+    ? "auto-allow"
+    : "defer-to-policy";
+}
+
 function safeBuiltinDecision(
   workspace: string,
   workingDirectory: string,
   words: readonly string[],
 ): SafeBuiltinDecision {
   if (automaticallyAllowedBuiltins.has(words[0])) return "auto-allow";
+
+  const printfDecision = safePrintfDecision(words);
+  if (printfDecision !== "not-safe-builtin") return printfDecision;
 
   const paths = filesystemTestOperands(words);
   if (!paths) return "not-safe-builtin";
@@ -286,6 +254,7 @@ function resolveProfileTarget(
   profile: Profile,
   request: NormalizedRequest,
   workingDirectory = request.resource,
+  command?: ShellCommandContext,
 ): NormalizedRequest | undefined {
   if (!profile.targetResolver) return request;
   try {
@@ -296,6 +265,10 @@ function resolveProfileTarget(
       stdin: new TextEncoder().encode(JSON.stringify({
         localTarget: request.resource,
         requestArguments: request.arguments,
+        commandArguments: command?.arguments,
+        commandExecutable: command?.executable,
+        commandSubcommand: command?.subcommand,
+        commandWords: command?.words,
         workingDirectory,
       })),
       stderr: "ignore",
@@ -317,8 +290,10 @@ function hasValidTargetScope(profile: Profile): boolean {
 function evaluateCommand(
   profile: Profile,
   request: NormalizedRequest,
+  command?: ShellCommandContext,
 ): EvaluationResult {
   const context = {
+    command,
     policyRevision: profile.policyRevision,
     profileId: profile.id,
     request,
@@ -431,7 +406,7 @@ export class PolicyCore {
     const rootDirectory = request.resource;
     let workingDirectory = rootDirectory;
     for (const command of commands) {
-      const words = isShellAction(request.action) ? shellWords(command) : undefined;
+      const words = isShellAction(request.action) ? parseShellWords(command) : undefined;
       if (isShellAction(request.action) && !words) {
         return { decision: "abstain", reason: "shell arguments cannot be authorized safely" };
       }
@@ -459,7 +434,15 @@ export class PolicyCore {
         ...request,
         arguments: { ...request.arguments, command },
       };
-      const resolvedRequest = resolveProfileTarget(profile, commandRequest, workingDirectory);
+      const commandContext = words
+        ? {
+            arguments: words.slice(2),
+            executable: words[0],
+            ...(words[1] === undefined ? {} : { subcommand: words[1] }),
+            words,
+          }
+        : undefined;
+      const resolvedRequest = resolveProfileTarget(profile, commandRequest, workingDirectory, commandContext);
       if (!resolvedRequest) {
         return { decision: "abstain", reason: "profile could not resolve the request target" };
       }
@@ -469,7 +452,7 @@ export class PolicyCore {
           reason: "resolved target is outside the allowed target set",
         };
       }
-      const result = evaluateCommand(profile, resolvedRequest);
+      const result = evaluateCommand(profile, resolvedRequest, commandContext);
       if (result.decision !== "allow") return result;
       if (result.matchedGroupingId) matchedGroupingIds.push(result.matchedGroupingId);
       resolvedTargets.push(resolvedRequest.resource);

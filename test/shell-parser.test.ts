@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { parseShellCommands } from "../src/shell-parser.js";
+import { parseShellCommands, parseShellWords } from "../src/shell-parser.js";
 
 describe("shell parser", () => {
   test("extracts every static command from compound syntax and control flow", () => {
@@ -18,5 +18,16 @@ describe("shell parser", () => {
     expect(parseShellCommands("npm i &&")).toBeUndefined();
     expect(parseShellCommands("npm i $(curl example.test)")).toBeUndefined();
     expect(parseShellCommands("npm i zod > install.log")).toBeUndefined();
+  });
+
+  test("splits static command words once for policy resolvers", () => {
+    expect(parseShellWords('npm install "package name" --cache=.cache/npm')).toEqual([
+      "npm",
+      "install",
+      "package name",
+      "--cache=.cache/npm",
+    ]);
+    expect(parseShellWords("npm install 'unterminated")).toBeUndefined();
+    expect(parseShellWords("npm install trailing\\")).toBeUndefined();
   });
 });

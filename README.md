@@ -35,18 +35,34 @@ For example, this Profile allows only Codex shell requests from one workspace:
 
 Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists.
 
-Profile mutations require a separate, one-time user authorization for the
-relevant host thread. This authorization is intentionally created by the CLI,
-not the plugin's MCP server, so an agent cannot mint its own permission to
-change policy state. Before asking the agent to initialize, propose, promote,
-activate, or disable a Profile, run:
+Profile mutations require a separate user authorization created by the CLI,
+not the plugin's MCP server. Each authorization names the host thread, the
+exact MCP operation, and a SHA-256 digest of the operation's canonical
+arguments. The artifact and CLI output do not retain or echo the arguments. It
+expires after two minutes and can be claimed only once. Create it immediately
+before the matching MCP call:
 
 ```sh
-bun run authorize:mutation -- <host-thread-id>
+bun run authorize:mutation -- <operation> \
+  --thread-id <host-thread-id> \
+  --arguments-json '<operation-arguments-without-threadId>'
 ```
 
-The next mutation for that exact thread consumes the authorization. The agent
-can still evaluate requests without a mutation authorization.
+For example, authorize one activation with:
+
+```sh
+bun run authorize:mutation -- activate_profile \
+  --thread-id <host-thread-id> \
+  --arguments-json '{"profileId":"review-current-pr"}'
+```
+
+Use `{}` or omit `--arguments-json` for
+`initialize_policy_repository` and `disable_profile`. The other argument
+objects match their MCP inputs with `threadId` removed. Run the command with
+`--help` to see each operation's shape. A mismatched, malformed, or expired
+authorization fails closed and is consumed, so create a new one before
+retrying. The agent can still evaluate requests without a mutation
+authorization.
 
 The disabled `shared/templates/scout.json`, `shared/templates/maker.json`, and
 `shared/templates/babysitter.json` files are starting points only. Their

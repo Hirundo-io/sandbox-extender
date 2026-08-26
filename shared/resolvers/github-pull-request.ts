@@ -84,10 +84,27 @@ function commentTarget(words: readonly string[]): string | undefined {
   return canonicalPullRequestTarget(number, ownerAndName);
 }
 
+function reviewCommentReplyTarget(words: readonly string[]): string | undefined {
+  const [gh, api, methodFlag, method, endpoint, bodyFlag, bodyField] = words;
+  if (words.length !== 7 || gh !== "gh" || api !== "api" || methodFlag !== "--method" || method !== "POST" ||
+    bodyFlag !== "-f" || !bodyField?.startsWith("body=") || bodyField.length === "body=".length) {
+    return undefined;
+  }
+
+  const match = endpoint?.match(
+    /^repos\/([^/]+)\/([^/]+)\/pulls\/([^/]+)\/comments\/([^/]+)\/replies$/,
+  );
+  if (!match) return undefined;
+
+  const [, owner, repository, number, commentId] = match;
+  if (!commentId || !/^[1-9][0-9]*$/.test(commentId)) return undefined;
+  return canonicalPullRequestTarget(number ?? "", `${owner}/${repository}`);
+}
+
 function resolvePullRequest(command: string): string | undefined {
   const words = shellWords(command);
   if (!words) return undefined;
-  return inspectionTarget(words) ?? commentTarget(words);
+  return inspectionTarget(words) ?? commentTarget(words) ?? reviewCommentReplyTarget(words);
 }
 
 export function resolveGitHubPullRequestTarget(candidate: unknown): string | undefined {

@@ -85,6 +85,12 @@ const credentialKeySuffixes = [
   "token",
   "webhook-secret",
 ];
+const maxAuditJsonStringLength = 64 * 1024;
+const maxAuditRedactionDepth = 16;
+const redactedDeeplyNestedValue = "[redacted deeply nested audit value]";
+const redactedOversizedJson = "[redacted oversized JSON]";
+
+type AuditValueRedactor = (value: unknown, depth: number) => unknown;
 
 function isCredentialKey(key: string): boolean {
   const canonicalKey = key
@@ -137,40 +143,74 @@ function redactSecretsInString(value: string): string {
     .replace(jwtPattern, "[redacted JWT]");
 }
 
-function redactHeaders(value: unknown): unknown {
+function redactJsonString(
+  value: string,
+  depth: number,
+  redactValue: AuditValueRedactor,
+): string | undefined {
+  const trimmedValue = value.trim();
+  const isJsonContainer = (trimmedValue.startsWith("{") && trimmedValue.endsWith("}")) ||
+    (trimmedValue.startsWith("[") && trimmedValue.endsWith("]"));
+  if (!isJsonContainer) return undefined;
+  if (value.length > maxAuditJsonStringLength) return redactedOversizedJson;
+  if (depth >= maxAuditRedactionDepth) return redactedDeeplyNestedValue;
+
+  let parsedValue: unknown;
+  try {
+    parsedValue = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+
+  const leadingWhitespaceLength = value.length - value.trimStart().length;
+  const trailingWhitespaceLength = value.length - value.trimEnd().length;
+  const leadingWhitespace = value.slice(0, leadingWhitespaceLength);
+  const trailingWhitespace = trailingWhitespaceLength === 0
+    ? ""
+    : value.slice(value.length - trailingWhitespaceLength);
+  return `${leadingWhitespace}${JSON.stringify(redactValue(parsedValue, depth + 1))}${trailingWhitespace}`;
+}
+
+function redactHeaders(value: unknown, depth: number): unknown {
   if (Array.isArray(value)) {
+    if (depth >= maxAuditRedactionDepth) return redactedDeeplyNestedValue;
     return value.map((item, index) =>
-      index > 0 && isSensitiveHeaderName(value[index - 1]) ? "[redacted]" : redactAuditArguments(item),
+      index > 0 && isSensitiveHeaderName(value[index - 1])
+        ? "[redacted]"
+        : redactAuditArguments(item, depth + 1),
     );
   }
   if (typeof value === "object" && value !== null) {
+    if (depth >= maxAuditRedactionDepth) return redactedDeeplyNestedValue;
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        isSensitiveHeaderName(key) ? "[redacted]" : redactAuditArguments(item),
+        isSensitiveHeaderName(key) ? "[redacted]" : redactAuditArguments(item, depth + 1),
       ]),
     );
   }
-  return redactAuditArguments(value);
+  return redactAuditArguments(value, depth);
 }
 
-function redactAuditArguments(value: unknown): unknown {
+function redactAuditArguments(value: unknown, depth = 0): unknown {
   if (value === null || typeof value === "boolean" || typeof value === "number") {
     return value;
   }
   if (typeof value === "string") {
-    return redactSecretsInString(value);
+    return redactJsonString(value, depth, redactAuditArguments) ?? redactSecretsInString(value);
   }
   if (Array.isArray(value)) {
-    return value.map(redactAuditArguments);
+    if (depth >= maxAuditRedactionDepth) return redactedDeeplyNestedValue;
+    return value.map((item) => redactAuditArguments(item, depth + 1));
   }
   if (typeof value === "object") {
+    if (depth >= maxAuditRedactionDepth) return redactedDeeplyNestedValue;
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
         isCredentialKey(key) ? "[redacted]" : key.toLowerCase() === "headers"
-          ? redactHeaders(item)
-          : redactAuditArguments(item),
+          ? redactHeaders(item, depth + 1)
+          : redactAuditArguments(item, depth + 1),
       ]),
     );
   }

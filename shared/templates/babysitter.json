@@ -14,7 +14,8 @@
   "sessionContext": [
     "Use only for the pull request frozen when this profile was promoted.",
     "Read pull-request status before changing code or responding to review.",
-    "Write only user-requested inline-body comments to that pull request."
+    "Write only user-requested inline-body comments to that pull request.",
+    "Reply to review threads only through the pull request's explicit REST reply endpoint."
   ],
   "groupings": [
     {
@@ -27,6 +28,12 @@
           "  context.arguments.command like \"gh pr diff*\" ||",
           "  context.arguments.command like \"gh pr checks*\" ||",
           "  context.arguments.command like \"gh pr comment * --repo * --body *\"",
+          "};"
+        ],
+        "allowReviewThreadReplies": [
+          "permit(principal, action, resource == Target::\"__SANDBOX_EXTENDER_PULL_REQUEST_TARGET__\")",
+          "when {",
+          "  context.arguments.command like \"gh api --method POST repos/*/*/pulls/*/comments/*/replies -f body=*\"",
           "};"
         ]
       }
