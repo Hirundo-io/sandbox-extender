@@ -42,6 +42,7 @@ _Avoid_: Latest policy, live policy
 
 **Context Lookup**:
 Profile-owned code that derives bounded, trusted facts needed for policy evaluation, such as the current repository, branch, active cloud project, or current pull request. It is versioned and reviewed with the Profile rather than generated at evaluation time.
+Approving a lookup resolver approves trusted executable code that runs with the user's authority; it is not runtime-sandboxed.
 _Avoid_: Dynamic policy code, arbitrary evaluation command
 
 **Extension Decision**:

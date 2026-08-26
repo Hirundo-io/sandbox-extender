@@ -95,13 +95,13 @@ If required context cannot be resolved or is inconsistent with the request, eval
 
 ## Adapters and lookups
 
-Adapters are typed, read-only normalization code. They can be profile-owned and reviewed with the Policy Repository, but may not execute the requested operation during authorization.
+Adapters are typed normalization code. Profile-owned TypeScript resolvers are trusted executable code reviewed with the Policy Repository and run with the user's authority; approving a Policy Revision that contains a resolver approves that code. Resolver references and source bytes are verified against the reviewed revision before use. Resolvers are not runtime-sandboxed and must not execute the requested operation during authorization.
 
 - Shell adapters parse compound syntax and independently authorize every executable segment in pipelines, `&&`, `||`, redirections, subshells, assignments, and substitutions. If any segment cannot be normalized, the full request abstains.
 - MCP adapters use server identity, tool name, JSON-schema-validated arguments, and declared target extractors. Servers or tools lacking an adapter abstain.
 - Context lookups are read-only and versioned as part of the Profile. They may resolve facts such as the PR for the current repository and branch.
 
-Read-only behavior is an implementation and review contract in the first release; no additional sandboxing of lookup code is required at this stage.
+Read-only behavior is an engineer-review contract in the first release; no additional runtime sandboxing of trusted resolver code is required at this stage.
 
 ## Learning, approval, and testing
 
@@ -136,6 +136,6 @@ The first acceptance workflow is **GitHub comment on the current pull request**:
 
 ## Implementation choice
 
-Implement the Policy Core in TypeScript on Bun, using Cedar's JavaScript/WASM interface. Host bridges use the language and integration surface best suited to each host.
+Implement the Policy Core in TypeScript on Bun, using Cedar's WebAssembly interface. Host bridges use the language and integration surface best suited to each host.
 
 Before claiming a bridge is supported, implementation must validate its interactive approval interception behavior against the current host API. Claude Code documents a permission-prompt MCP facility for its non-interactive/SDK path; Codex coverage must be independently confirmed.

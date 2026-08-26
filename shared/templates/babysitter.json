@@ -1,0 +1,35 @@
+{
+  "id": "babysitter",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "pullRequestBinding": {
+    "pullRequest": "owner/repository#123",
+    "workspace": "/absolute/path/to/repository"
+  },
+  "targetScope": "single",
+  "targetResolver": {
+    "file": "resolvers/github-pull-request.ts",
+    "language": "typescript"
+  },
+  "sessionContext": [
+    "Use only for the pull request frozen when this profile was promoted.",
+    "Read pull-request status before changing code or responding to review.",
+    "Write only user-requested inline-body comments to that pull request."
+  ],
+  "groupings": [
+    {
+      "id": "pull-request-and-ci",
+      "policies": {
+        "allowBabysitting": [
+          "permit(principal, action, resource == Target::\"__SANDBOX_EXTENDER_PULL_REQUEST_TARGET__\")",
+          "when {",
+          "  context.arguments.command like \"gh pr view*\" ||",
+          "  context.arguments.command like \"gh pr diff*\" ||",
+          "  context.arguments.command like \"gh pr checks*\" ||",
+          "  context.arguments.command like \"gh pr comment * --repo * --body *\"",
+          "};"
+        ]
+      }
+    }
+  ]
+}

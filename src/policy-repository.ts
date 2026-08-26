@@ -1,11 +1,22 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
 import { PolicyCore } from "./policy-core.js";
-import { policyRevisionSchema, profileIdSchema } from "./schemas.js";
+import {
+  policyRevisionSchema,
+  profileIdSchema,
+  pullRequestBindingSchema,
+  targetResolverSchema,
+} from "./schemas.js";
+import {
+  materializePullRequestProfile,
+  materializePullRequestProfileForTarget,
+} from "./pull-request-binding.js";
+import type { PullRequestCommandRunner } from "./pull-request-binding.js";
 import type {
   AuthorizationTest,
   Profile,
@@ -26,10 +37,12 @@ const diskProfileSchema = z.object({
   id: profileIdSchema,
   policyRevision: z.string().min(1),
   sessionContext: z.array(z.string().min(1)).optional(),
-  targetResolver: z.object({
-    file: z.string().regex(/^resolvers\/[a-z0-9-]+\.js$/),
-    language: z.literal("javascript"),
-  }).strict().optional(),
+  targetScope: z.literal("single").optional(),
+  targetResolver: targetResolverSchema.optional(),
+}).strict();
+const diskProposalSchema = diskProfileSchema.extend({
+  policyRevision: z.literal("pending-review"),
+  pullRequestBinding: pullRequestBindingSchema.optional(),
 }).strict();
 const bindingsSchema = z.record(z.string().min(1), z.object({
   fingerprint: z.string().length(64),
@@ -49,12 +62,26 @@ const authorizationTestsSchema = z.array(z.object({
 }).strict()).min(1);
 
 type DiskProfile = z.infer<typeof diskProfileSchema>;
+type DiskProposal = z.infer<typeof diskProposalSchema>;
+
+function verifyCommitRevision(root: string, revision: string): void {
+  const result = Bun.spawnSync({
+    cmd: ["git", "-C", root, "cat-file", "-t", revision],
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const objectType = new TextDecoder().decode(result.stdout).trim();
+  if (result.exitCode !== 0 || objectType !== "commit") {
+    throw new Error(`policy revision ${revision} is not a Git commit`);
+  }
+}
 
 function readCommittedFile(
   root: string,
   revision: string,
   relativePath: string,
 ): string {
+  verifyCommitRevision(root, revision);
   const result = Bun.spawnSync({
     cmd: ["git", "-C", root, "show", `${revision}:${relativePath}`],
     stderr: "pipe",
@@ -76,6 +103,64 @@ function parseProfile(candidate: unknown, file: string): DiskProfile {
   return result.data;
 }
 
+function parseProposal(candidate: unknown, file: string): DiskProposal {
+  const result = diskProposalSchema.safeParse(candidate);
+  if (!result.success) {
+    throw new Error(`${file} is not a valid policy proposal`, { cause: result.error });
+  }
+  return result.data;
+}
+
+function reconstructReviewedProfile(
+  root: string,
+  profileId: string,
+  liveProfile: DiskProfile,
+): DiskProfile {
+  policyRevisionSchema.parse(liveProfile.policyRevision);
+  const proposalFile = `proposals/${profileId}.json`;
+  const candidate: unknown = JSON.parse(readCommittedFile(
+    root,
+    liveProfile.policyRevision,
+    proposalFile,
+  ));
+  const proposal = parseProposal(candidate, proposalFile);
+  if (proposal.id !== profileId) {
+    throw new Error(`${proposalFile} does not match its requested profile ID`);
+  }
+
+  const reviewedProfile: DiskProfile = proposal.pullRequestBinding
+    ? materializePullRequestProfileForTarget(
+      { ...proposal, pullRequestBinding: proposal.pullRequestBinding },
+      liveProfile.allowedTargets[0] ?? "",
+    )
+    : proposal;
+  return { ...reviewedProfile, policyRevision: liveProfile.policyRevision };
+}
+
+function verifyReviewedProfile(
+  root: string,
+  profileId: string,
+  liveProfile: DiskProfile,
+): void {
+  const reviewedProfile = reconstructReviewedProfile(root, profileId, liveProfile);
+  if (!isDeepStrictEqual(liveProfile, reviewedProfile)) {
+    throw new Error(`profile ${profileId} does not match policy revision ${liveProfile.policyRevision}`);
+  }
+}
+
+async function readVerifiedResolverSource(
+  root: string,
+  policyRevision: string,
+  relativePath: string,
+): Promise<string> {
+  const reviewedSource = readCommittedFile(root, policyRevision, relativePath);
+  const currentSource = await readFile(join(root, relativePath), "utf8");
+  if (currentSource !== reviewedSource) {
+    throw new Error(`resolver ${relativePath} does not match policy revision ${policyRevision}`);
+  }
+  return reviewedSource;
+}
+
 function isMissingFile(error: unknown): boolean {
   return Boolean(
     error &&
@@ -86,7 +171,10 @@ function isMissingFile(error: unknown): boolean {
 }
 
 export class PolicyRepository {
-  constructor(readonly root: string) {}
+  constructor(
+    readonly root: string,
+    private readonly pullRequestCommandRunner?: PullRequestCommandRunner,
+  ) {}
 
   async loadProfile(profileId: string): Promise<Profile> {
     profileIdSchema.parse(profileId);
@@ -105,6 +193,32 @@ export class PolicyRepository {
       ...profile,
       allowedTargets: new Set(profile.allowedTargets),
       targetResolver,
+    };
+  }
+
+  async loadVerifiedProfile(profileId: string): Promise<Profile> {
+    profileIdSchema.parse(profileId);
+    const file = join(this.root, "profiles", `${profileId}.json`);
+    const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
+    const diskProfile = parseProfile(candidate, file);
+    if (diskProfile.id !== profileId) {
+      throw new Error(`${file} does not match its requested profile ID`);
+    }
+    if (diskProfile.policyRevision === "pending-review") {
+      throw new Error("profile must be reviewed before activation");
+    }
+    verifyReviewedProfile(this.root, profileId, diskProfile);
+    const profile = await this.loadProfile(profileId);
+    if (!profile.targetResolver) return profile;
+    const relativePath = relative(this.root, profile.targetResolver.file);
+    const reviewedSource = await readVerifiedResolverSource(
+      this.root,
+      diskProfile.policyRevision,
+      relativePath,
+    );
+    return {
+      ...profile,
+      targetResolver: { ...profile.targetResolver, reviewedSource },
     };
   }
 
@@ -155,10 +269,16 @@ export class PolicyRepository {
       policyRevision,
       proposalFile,
     ));
-    const profile = parseProfile(candidate, proposalFile);
-    if (profile.id !== profileId) {
+    const proposal = parseProposal(candidate, proposalFile);
+    if (proposal.id !== profileId) {
       throw new Error(`${proposalFile} does not match its requested profile ID`);
     }
+    const profile: DiskProfile = proposal.pullRequestBinding
+      ? materializePullRequestProfile(
+        { ...proposal, pullRequestBinding: proposal.pullRequestBinding },
+        this.pullRequestCommandRunner,
+      )
+      : proposal;
     await this.#verifyProposalTests(profile, profileId, policyRevision);
     const reviewedProfile = { ...profile, policyRevision };
     await writeFile(
@@ -216,10 +336,20 @@ export class PolicyRepository {
       testFile,
     ));
     const tests = authorizationTestsSchema.parse(candidate);
+    const targetResolver = profile.targetResolver && {
+      ...profile.targetResolver,
+      file: join(this.root, profile.targetResolver.file),
+      reviewedSource: readCommittedFile(
+        this.root,
+        policyRevision,
+        profile.targetResolver.file,
+      ),
+    };
     const reviewedProfile: Profile = {
       ...profile,
       allowedTargets: new Set(profile.allowedTargets),
       policyRevision,
+      targetResolver,
     };
     for (const authorizationTest of tests) {
       const core = new PolicyCore();

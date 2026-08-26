@@ -1,7 +1,9 @@
-import { access, readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { access, readFile, readdir } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { z } from "zod";
+
+import { targetResolverSchema } from "./schemas.js";
 
 const commandHookSchema = z.object({
   command: z.string().min(1),
@@ -30,6 +32,9 @@ const claudePluginSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
 }).loose();
+const resolverTemplateSchema = z.object({
+  targetResolver: targetResolverSchema.optional(),
+}).loose();
 
 function resolveInsideRoot(root: string, entry: string): string {
   const resolvedRoot = resolve(root);
@@ -50,6 +55,22 @@ async function validateFile(file: string): Promise<void> {
   await access(file);
 }
 
+async function validateResolverTemplates(root: string): Promise<void> {
+  const sharedDirectory = resolveInsideRoot(root, "shared");
+  const templateDirectory = resolveInsideRoot(sharedDirectory, "templates");
+  const entries = await readdir(templateDirectory, { withFileTypes: true });
+  await Promise.all(entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map(async (entry) => {
+      const template = resolverTemplateSchema.parse(
+        await readJson(join(templateDirectory, entry.name)),
+      );
+      if (template.targetResolver) {
+        await validateFile(resolveInsideRoot(sharedDirectory, template.targetResolver.file));
+      }
+    }));
+}
+
 export async function validatePlugin(root: string): Promise<void> {
   const codexPluginFile = resolveInsideRoot(root, ".codex-plugin/plugin.json");
   const codexPlugin = codexPluginSchema.parse(await readJson(codexPluginFile));
@@ -62,4 +83,5 @@ export async function validatePlugin(root: string): Promise<void> {
   for (const server of Object.values(codexPlugin.mcpServers)) {
     await validateFile(resolveInsideRoot(root, server.args[0]!));
   }
+  await validateResolverTemplates(root);
 }

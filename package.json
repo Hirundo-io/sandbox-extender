@@ -34,7 +34,7 @@
       "test/**/*.test.ts"
     ],
     "ignore": [
-      "templates/resolvers/**/*.js"
+      "shared/resolvers/**/*.ts"
     ],
     "ignoreExportsUsedInFile": true
   },

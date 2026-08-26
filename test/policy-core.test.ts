@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -91,7 +91,7 @@ describe("PolicyCore", () => {
     expect(core.consumeToken(result.token!.id, request)).toBe(false);
   });
 
-  test("authorizes every Bash or Zsh command while allowing harmless shell flow", () => {
+  test("authorizes every Bash or Zsh command while allowing structural cd flow", () => {
     const core = new PolicyCore();
     core.activate(
       profile({
@@ -121,6 +121,103 @@ describe("PolicyCore", () => {
     }).decision).toBe("abstain");
   });
 
+  test("automatically allows non-mutating shell builtins", () => {
+    const core = new PolicyCore();
+    core.activate(profile(), request.threadId);
+
+    for (const command of [
+      ":",
+      "true",
+      "false",
+      "pwd",
+      "echo safe",
+      "echo /tmp/literal-path",
+      "printf '%s' ../../literal-path",
+      "test -n /tmp/literal-string",
+    ]) {
+      expect(core.evaluate({
+        ...request,
+        action: "codex.unified_exec",
+        arguments: { command },
+        resource: process.cwd(),
+      }).decision).toBe("allow");
+    }
+  });
+
+  test("automatically allows filesystem tests only within the working directory", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-builtins-workspace-"));
+    const outside = await mkdtemp(join(tmpdir(), "sandbox-extender-builtins-outside-"));
+    try {
+      await mkdir(join(workspace, "nested"));
+      await symlink(outside, join(workspace, "linked"));
+      const core = new PolicyCore();
+      core.activate(profile(), request.threadId);
+      const workspaceRequest = {
+        ...request,
+        action: "codex.unified_exec",
+        resource: workspace,
+      };
+
+      for (const command of [
+        "test -e nested/file",
+        "test -d nested",
+        "test nested/older -nt nested/newer",
+      ]) {
+        expect(core.evaluate({
+          ...workspaceRequest,
+          arguments: { command },
+        }).decision).toBe("allow");
+      }
+
+      for (const command of [
+        `test -e ${outside}`,
+        `test -G ${outside}`,
+        "test -f ../outside/file",
+        "test -e linked/file",
+      ]) {
+        expect(core.evaluate({
+          ...workspaceRequest,
+          arguments: { command },
+        }).decision).toBe("abstain");
+      }
+
+      expect(core.evaluate({
+        ...workspaceRequest,
+        arguments: { command: "[ -d nested ]" },
+      }).decision).toBe("abstain");
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+      await rm(outside, { force: true, recursive: true });
+    }
+  });
+
+  test("allows an outside filesystem test when policy explicitly matches it", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-builtins-policy-workspace-"));
+    const outside = await mkdtemp(join(tmpdir(), "sandbox-extender-builtins-policy-outside-"));
+    try {
+      const command = `test -e ${outside}`;
+      const core = new PolicyCore();
+      core.activate(profile({
+        allowedTargets: new Set([workspace]),
+        groupings: [{
+          id: "outside-test",
+          evaluate: ({ request: evaluated }) =>
+            evaluated.arguments.command === command ? "allow" : "abstain",
+        }],
+      }), request.threadId);
+
+      expect(core.evaluate({
+        ...request,
+        action: "codex.unified_exec",
+        arguments: { command },
+        resource: workspace,
+      }).decision).toBe("allow");
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+      await rm(outside, { force: true, recursive: true });
+    }
+  });
+
   test("rejects directory changes outside the original workspace", () => {
     const core = new PolicyCore();
     core.activate(profile({
@@ -131,6 +228,59 @@ describe("PolicyCore", () => {
       action: "codex.unified_exec",
       arguments: { command: "cd ../outside && npm i zod" },
     }).decision).toBe("abstain");
+  });
+
+  test("does not authorize filesystem paths that escape a workspace target", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-workspace-"));
+    const outside = await mkdtemp(join(tmpdir(), "sandbox-extender-outside-"));
+    const nested = join(workspace, "nested");
+    try {
+      await mkdir(nested);
+      await symlink(outside, join(workspace, "linked"));
+      const core = new PolicyCore();
+      core.activate(profile({
+        allowedTargets: new Set([workspace]),
+        groupings: [{ id: "allow", evaluate: () => "allow" }],
+      }), request.threadId);
+      const workspaceRequest = {
+        ...request,
+        action: "codex.unified_exec",
+        resource: workspace,
+      };
+
+      for (const command of [
+        "git status -- /tmp/outside",
+        "git -C ../outside status",
+        "git -C../outside status",
+        "tool --config=../outside",
+        "tool -I../outside",
+        "git -C= status",
+        "tool --cwd",
+        "tool --cwd nested --config ../../outside",
+        "tool ./linked/file",
+      ]) {
+        expect(core.evaluate({
+          ...workspaceRequest,
+          arguments: { command },
+        }).decision).toBe("abstain");
+      }
+
+      expect(core.evaluate({
+        ...workspaceRequest,
+        arguments: { command: "git -C nested status -- ../nested" },
+      }).decision).toBe("allow");
+      expect(core.evaluate({
+        ...workspaceRequest,
+        arguments: { command: "gh pr view --repo acme/example" },
+      }).decision).toBe("allow");
+      expect(core.evaluate({
+        ...workspaceRequest,
+        arguments: { command: "curl https://example.test/api" },
+      }).decision).toBe("allow");
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+      await rm(outside, { force: true, recursive: true });
+    }
   });
 
   test("evaluates Cedar policies and abstains when none match", () => {
@@ -156,33 +306,26 @@ describe("PolicyCore", () => {
     ).toBe("abstain");
   });
 
-  test("resolves every compound command before authorizing it", async () => {
-    const root = await mkdtemp(join(tmpdir(), "sandbox-extender-resolver-"));
-    const resolver = join(root, "repository.js");
-    try {
-      await writeFile(resolver, [
-        "const input = await Bun.stdin.json();",
-        "const match = input.requestArguments.command.match(/--repo (\\S+)/);",
-        "if (match) console.log(`github:repository:${match[1]}`);",
-      ].join("\n"));
-      const core = new PolicyCore();
-      core.activate(profile({
-        allowedTargets: new Set(["github:repository:acme/example"]),
-        groupings: [{
-          id: "read",
-          evaluate: () => "allow",
-        }],
-        targetResolver: { file: resolver, language: "javascript" },
-      }), request.threadId);
-      expect(core.evaluate({
-        ...request,
-        action: "codex.unified_exec",
-        arguments: {
-          command: "gh pr view --repo acme/example && gh pr view --repo evil/example",
-        },
-      }).decision).toBe("abstain");
-    } finally {
-      await rm(root, { force: true, recursive: true });
-    }
+  test("resolves every compound command before authorizing it", () => {
+    const core = new PolicyCore();
+    core.activate(profile({
+      allowedTargets: new Set(["github:repository:acme/example"]),
+      groupings: [{
+        id: "read",
+        evaluate: () => "allow",
+      }],
+      targetResolver: {
+        file: join(process.cwd(), "shared", "resolvers", "github-repository.ts"),
+        language: "typescript",
+      },
+    }), request.threadId);
+    expect(core.evaluate({
+      ...request,
+      action: "codex.unified_exec",
+      arguments: {
+        command: "gh pr view --repo acme/example && gh pr view --repo evil/example",
+      },
+    }).decision).toBe("abstain");
   });
+
 });

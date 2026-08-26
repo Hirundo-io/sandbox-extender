@@ -48,12 +48,27 @@ bun run authorize:mutation -- <host-thread-id>
 The next mutation for that exact thread consumes the authorization. The agent
 can still evaluate requests without a mutation authorization.
 
-The disabled `templates/scout.json`, `templates/maker.json`, and
-`templates/babysitter.json` files are starting points only. Each has an empty
-target set and a `pending-review` revision, so none can be activated until you
-copy, scope, review, and promote it. Templates that name a resolver require
-the matching file from `templates/resolvers/` to be copied to `resolvers/` in
-the policy repository and are executed with Bun using JSON stdin/stdout.
+The disabled `shared/templates/scout.json`, `shared/templates/maker.json`, and
+`shared/templates/babysitter.json` files are starting points only. Their
+`pending-review` revision prevents activation until you copy, scope, review,
+and promote them. The babysitter template has a proposal-only
+`pullRequestBinding`. Set its absolute `workspace` and its fully qualified,
+reviewable `pullRequest` as `owner/repository#42`. Promotion verifies the PR
+and freezes its canonical target into both `allowedTargets` and the Cedar
+`resource` condition; the binding is not retained after promotion. Requiring
+the full PR identity lets later activation reconstruct the materialized
+profile exactly from the reviewed Git revision.
+
+Profiles may reference a resolver such as
+`{"file":"resolvers/github-repository.ts","language":"typescript"}`. A
+resolver is profile-owned, engineer-reviewed executable code: approving its
+Policy Revision approves that code to run with the same user authority as
+Sandbox Extender itself. It is not runtime-sandboxed. Activation verifies both
+the resolver reference and its current source bytes against the reviewed Git
+commit, and any missing or changed resolver makes evaluation abstain. Keep
+resolver code narrow, readable, and dedicated to target normalization; copy
+the matching files from `shared/resolvers/` when starting from a bundled
+template.
 
 ## Development
 

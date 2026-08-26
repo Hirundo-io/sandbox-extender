@@ -1,0 +1,24 @@
+{
+  "id": "maker",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "targetResolver": {
+    "file": "resolvers/maker-dependency.ts",
+    "language": "typescript"
+  },
+  "sessionContext": [
+    "Prefer established packages with multiple maintainers and recent updates.",
+    "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
+    "Keep dependency changes narrow; explain package and lockfile changes."
+  ],
+  "groupings": [
+    {
+      "id": "dependency-management",
+      "policies": {
+        "allowDependencyChanges": [
+          "permit(principal, action, resource);"
+        ]
+      }
+    }
+  ]
+}

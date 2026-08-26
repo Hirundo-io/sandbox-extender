@@ -3,8 +3,8 @@
   "policyRevision": "pending-review",
   "allowedTargets": [],
   "targetResolver": {
-    "language": "javascript",
-    "file": "resolvers/github-repository.js"
+    "file": "resolvers/github-repository.ts",
+    "language": "typescript"
   },
   "sessionContext": [
     "Use this profile only for inspection. Do not alter files or remote state."

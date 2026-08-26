@@ -3,6 +3,180 @@ import { PolicyCore } from "./policy-core.js";
 import { PolicyRepository } from "./policy-repository.js";
 import type { EvaluationResult, NormalizedRequest } from "./types.js";
 
+const credentialOptionPattern = /(^|\s)(--(?:access[-_]?key|access[-_]?token|api[-_]?key|api[-_]?token|authorization|client[-_]?secret|connection[-_]?string|cookie|database[-_]?url|password|passwd|private[-_]?token|refresh[-_]?token|secret|token|webhook[-_]?secret))(?:=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
+const credentialAssignmentPattern = /(^|\s)([A-Za-z_][A-Za-z0-9_]*(?:ACCESS[-_]?(?:KEY|TOKEN)|ACCOUNT[-_]?KEY|API[-_]?KEY|API[-_]?TOKEN|AUTH(?:ORIZATION)?|CLIENT[-_]?SECRET|CONNECTION[-_]?STRING|COOKIE|CREDENTIAL|DATABASE[-_]?URL|PASSWORD|PASSWD|PRIVATE[-_]?TOKEN|REFRESH[-_]?TOKEN|SECRET|SHARED[-_]?ACCESS[-_]?KEY|TOKEN|WEBHOOK[-_]?SECRET)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi;
+const credentialUrlPattern = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]*@/gi;
+const credentialQueryParameterPattern = /([?&](?:access[-_]?key|access[-_]?token|account[-_]?key|api[-_]?key|api[-_]?token|client[-_]?secret|password|secret|shared[-_]?access[-_]?key|token|webhook[-_]?secret)=)[^&#\s]+/gi;
+const connectionStringSecretPattern = /(\b(?:AccountKey|AccessKey|ApiKey|ClientSecret|Password|Pwd|Secret|SharedAccessKey|Token)\s*=\s*)("[^"]*"|'[^']*'|[^;\s]+)/gi;
+const githubTokenPattern = /\b(?:gh[pousr]_[A-Za-z0-9_-]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/g;
+const gitlabTokenPattern = /\bglpat-[A-Za-z0-9_-]{20,}\b/g;
+const pypiTokenPattern = /\bpypi-[A-Za-z0-9_-]{20,}\b/g;
+const slackTokenPattern = /\b(?:xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,})\b/g;
+const stripeSecretPattern = /\b(?:[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-Za-z0-9]{16,})\b/g;
+const awsAccessKeyIdPattern = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g;
+const openAiTokenPattern = /\bsk-(?:proj|svcacct)-[A-Za-z0-9_-]{20,}\b/g;
+const jwtPattern = /\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}\b/g;
+const privateKeyPattern = /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)* PRIVATE KEY-----/g;
+const headerOptionPattern = /(^|\s)(-H|--header)(=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
+const standaloneHeaderPattern = /(^|[\n,])(\s*)(Authorization|Cookie|Gitlab-Token|Private-Token|Proxy-Authorization|Set-Cookie|Stripe-Signature|X-Access-Token|X-Amz-Security-Token|X-Api-Key|X-Auth-Token|X-Gitlab-Token|X-Hub-Signature(?:-256)?|X-Slack-Signature|X-Webhook-(?:Secret|Token))\s*:\s*[^\r\n,]*/gi;
+const sensitiveHeaderNames = new Set([
+  "authorization",
+  "cookie",
+  "gitlab-token",
+  "private-token",
+  "proxy-authorization",
+  "set-cookie",
+  "stripe-signature",
+  "x-access-token",
+  "x-amz-security-token",
+  "x-api-key",
+  "x-auth-token",
+  "x-gitlab-token",
+  "x-hub-signature",
+  "x-hub-signature-256",
+  "x-slack-signature",
+  "x-webhook-secret",
+  "x-webhook-token",
+]);
+const credentialKeys = new Set([
+  "access-key",
+  "access-token",
+  "account-key",
+  "api-key",
+  "api-token",
+  "authorization",
+  "authentication",
+  "client-secret",
+  "connection-string",
+  "cookie",
+  "credential",
+  "credentials",
+  "database-url",
+  "password",
+  "passwd",
+  "private-key",
+  "private-token",
+  "refresh-token",
+  "secret",
+  "secret-key",
+  "shared-access-key",
+  "signing-key",
+  "ssh-key",
+  "token",
+  "webhook-secret",
+]);
+const credentialKeySuffixes = [
+  "access-key",
+  "access-token",
+  "account-key",
+  "api-key",
+  "api-token",
+  "client-secret",
+  "connection-string",
+  "database-url",
+  "password",
+  "private-key",
+  "private-token",
+  "refresh-token",
+  "secret",
+  "secret-key",
+  "shared-access-key",
+  "signing-key",
+  "token",
+  "webhook-secret",
+];
+
+function isCredentialKey(key: string): boolean {
+  const canonicalKey = key
+    .replace(/([a-z])([A-Z])/g, "$1-$2")
+    .replace(/[_\s]+/g, "-")
+    .toLowerCase();
+  return credentialKeys.has(canonicalKey) || credentialKeySuffixes.some((suffix) =>
+    canonicalKey.endsWith(`-${suffix}`),
+  );
+}
+
+function isSensitiveHeaderName(value: unknown): value is string {
+  return typeof value === "string" && sensitiveHeaderNames.has(value.trim().toLowerCase());
+}
+
+function redactHeaderOption(
+  _match: string,
+  leadingWhitespace: string,
+  option: string,
+  separator: string,
+  value: string,
+): string {
+  const quote = value.startsWith("\"") || value.startsWith("'") ? value[0] : "";
+  const header = quote ? value.slice(1, -1) : value;
+  const colon = header.indexOf(":");
+  if (colon === -1 || !isSensitiveHeaderName(header.slice(0, colon))) {
+    return `${leadingWhitespace}${option}${separator}${value}`;
+  }
+  const redactedHeader = `${header.slice(0, colon)}: [redacted]`;
+  return `${leadingWhitespace}${option}${separator}${quote}${redactedHeader}${quote}`;
+}
+
+function redactSecretsInString(value: string): string {
+  return value
+    .replace(privateKeyPattern, "[redacted private key]")
+    .replace(credentialOptionPattern, "$1$2 [redacted]")
+    .replace(credentialAssignmentPattern, "$1$2=[redacted]")
+    .replace(headerOptionPattern, redactHeaderOption)
+    .replace(standaloneHeaderPattern, "$1$2$3: [redacted]")
+    .replace(credentialUrlPattern, "$1[redacted]@")
+    .replace(credentialQueryParameterPattern, "$1[redacted]")
+    .replace(connectionStringSecretPattern, "$1[redacted]")
+    .replace(githubTokenPattern, "[redacted GitHub token]")
+    .replace(gitlabTokenPattern, "[redacted GitLab token]")
+    .replace(pypiTokenPattern, "[redacted PyPI token]")
+    .replace(slackTokenPattern, "[redacted Slack token]")
+    .replace(stripeSecretPattern, "[redacted Stripe secret]")
+    .replace(awsAccessKeyIdPattern, "[redacted AWS access key ID]")
+    .replace(openAiTokenPattern, "[redacted OpenAI token]")
+    .replace(jwtPattern, "[redacted JWT]");
+}
+
+function redactHeaders(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item, index) =>
+      index > 0 && isSensitiveHeaderName(value[index - 1]) ? "[redacted]" : redactAuditArguments(item),
+    );
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        isSensitiveHeaderName(key) ? "[redacted]" : redactAuditArguments(item),
+      ]),
+    );
+  }
+  return redactAuditArguments(value);
+}
+
+function redactAuditArguments(value: unknown): unknown {
+  if (value === null || typeof value === "boolean" || typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return redactSecretsInString(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(redactAuditArguments);
+  }
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        isCredentialKey(key) ? "[redacted]" : key.toLowerCase() === "headers"
+          ? redactHeaders(item)
+          : redactAuditArguments(item),
+      ]),
+    );
+  }
+  return "[unsupported audit value]";
+}
+
 function fingerprint(profile: import("./types.js").Profile): string {
   return createHash("sha256").update(JSON.stringify({
     allowedTargets: [...profile.allowedTargets].sort(),
@@ -10,6 +184,7 @@ function fingerprint(profile: import("./types.js").Profile): string {
     id: profile.id,
     policyRevision: profile.policyRevision,
     sessionContext: profile.sessionContext ?? [],
+    targetScope: profile.targetScope,
     targetResolver: profile.targetResolver,
   })).digest("hex");
 }
@@ -27,7 +202,7 @@ export async function evaluateForThread(
       return result;
     }
     const core = new PolicyCore();
-    const profile = await repository.loadProfile(binding.profileId);
+    const profile = await repository.loadVerifiedProfile(binding.profileId);
     if (profile.policyRevision === "pending-review" ||
       profile.policyRevision !== binding.policyRevision ||
       fingerprint(profile) !== binding.fingerprint) {
@@ -56,7 +231,7 @@ async function recordEvaluation(
 ): Promise<void> {
   const entry = {
     action: request.action,
-    arguments: request.arguments,
+    arguments: redactAuditArguments(request.arguments),
     decision: result.decision,
     event: "extension-request",
     profileId,
@@ -85,7 +260,7 @@ export async function activateProfile(
   threadId: string,
   profileId: string,
 ): Promise<void> {
-  const profile = await repository.loadProfile(profileId);
+  const profile = await repository.loadVerifiedProfile(profileId);
   if (profile.policyRevision === "pending-review") {
     throw new Error("profile must be reviewed before activation");
   }

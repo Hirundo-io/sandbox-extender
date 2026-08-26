@@ -1,11 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { handlePermissionRequest, hookOutput, normalizeHookRequest } from "../src/hook.js";
 import { activateProfile } from "../src/policy-service.js";
 import { PolicyRepository } from "../src/policy-repository.js";
+
+function commitReview(root: string): string {
+  for (const command of [
+    ["git", "init", "--quiet"],
+    ["git", "config", "user.email", "sandbox-extender@example.test"],
+    ["git", "config", "user.name", "Sandbox Extender"],
+    ["git", "add", "proposals", "tests"],
+    ["git", "commit", "--quiet", "-m", "Review profile"],
+  ]) {
+    const result = Bun.spawnSync({ cmd: command, cwd: root });
+    if (result.exitCode !== 0) throw new Error(`could not run ${command.join(" ")}`);
+  }
+  const result = Bun.spawnSync({ cmd: ["git", "rev-parse", "HEAD"], cwd: root, stdout: "pipe" });
+  return new TextDecoder().decode(result.stdout).trim();
+}
 
 describe("host permission hooks", () => {
   test("normalizes the portable fields used by both hosts", () => {
@@ -57,23 +72,31 @@ describe("host permission hooks", () => {
     const previousHomeFolder = process.env.HOME_FOLDER;
     process.env.HOME_FOLDER = homeFolder;
     try {
-      await mkdir(join(root, "profiles"), { recursive: true });
-      await mkdir(join(root, "state"), { recursive: true });
-      await Bun.write(
-        join(root, "profiles", "allow.json"),
-        JSON.stringify({
+      const repository = new PolicyRepository(root);
+      await repository.writeProposal({
+        profile: {
           allowedTargets: ["/work/example"],
-          groupings: [
-            {
-              id: "allow-bash",
-              policies: { allow: "permit(principal, action, resource);" },
-            },
-          ],
+          groupings: [{
+            id: "allow-bash",
+            policies: { allow: "permit(principal, action, resource);" },
+          }],
           id: "allow",
-          policyRevision: "e2e",
-        }),
-      );
-      await activateProfile(new PolicyRepository(root), "thread-1", "allow");
+          policyRevision: "pending-review",
+        },
+        tests: [{
+          expected: "allow",
+          name: "allows the reviewed hook request",
+          request: {
+            action: "claude.Bash",
+            arguments: { command: "pwd" },
+            resource: "/work/example",
+            threadId: "thread-1",
+          },
+        }],
+      });
+      const revision = commitReview(root);
+      await repository.promoteProposal("allow", revision);
+      await activateProfile(repository, "thread-1", "allow");
 
       expect(
         await handlePermissionRequest(
