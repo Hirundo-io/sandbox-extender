@@ -1,53 +1,146 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { materializerIntegrity, workingDirectoryPermission } from "./materializer-policy.js";
 import { materializeActivation, materializeRequest } from "./materializer-runtime.js";
+import type { ActivationMaterializer, MaterializerPermissionManifest, RequestMaterializer } from "./types.js";
+
+const noPermissions = {
+  env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [],
+} as const satisfies MaterializerPermissionManifest;
 
 const activationSource = [
-  "const input = await Bun.stdin.json();",
-  "if (typeof input.repository !== 'string' || typeof input.pullRequest !== 'number') process.exit(1);",
+  "const input = await new Response(Deno.stdin.readable).json();",
+  "if (typeof input.repository !== 'string' || typeof input.pullRequest !== 'number') Deno.exit(1);",
   "console.log(JSON.stringify({targets: [`github:pull-request:${input.repository}#${input.pullRequest}`]}));",
 ].join("\n");
 
 const requestSource = [
-  "const input = await Bun.stdin.json();",
-  "console.log(JSON.stringify({resource: input.resource, context: {operation: input.command.executable}}));",
+  "const input = await new Response(Deno.stdin.readable).json();",
+  "console.log(JSON.stringify({resource: input.resource, context: {cwd: Deno.cwd(), operation: input.command.executable}}));",
 ].join("\n");
 
+function activationMaterializer(
+  source: string,
+  permissions: MaterializerPermissionManifest = noPermissions,
+  runtimeVersion = "2.8.1",
+): ActivationMaterializer {
+  return {
+    file: "materializers/activation/test.ts",
+    integrity: materializerIntegrity(source, permissions, runtimeVersion),
+    language: "typescript",
+    permissions,
+    reviewedSource: source,
+    runtimeVersion,
+  };
+}
+
+function requestMaterializer(
+  source: string,
+  permissions: MaterializerPermissionManifest = noPermissions,
+  runtimeVersion = "2.8.1",
+): RequestMaterializer {
+  return {
+    file: "materializers/requests/test.ts",
+    integrity: materializerIntegrity(source, permissions, runtimeVersion),
+    language: "typescript",
+    permissions,
+    reviewedSource: source,
+    runtimeVersion,
+  };
+}
+
+function request() {
+  return { action: "codex.unified_exec", arguments: { command: "npm install" }, resource: "/work", threadId: "t" };
+}
+
 describe("materializer runtime", () => {
-  test("materializes activation arguments into a frozen target set", () => {
+  test("materializes activation arguments with the exact local Deno runtime", () => {
     expect(materializeActivation(
-      { file: "unused.ts", language: "typescript", reviewedSource: activationSource },
+      activationMaterializer(activationSource),
       { pullRequest: 42, repository: "acme/example" },
     )).toEqual({ targets: ["github:pull-request:acme/example#42"] });
   });
 
-  test("rejects failed and malformed activation output", () => {
-    for (const reviewedSource of [
-      "process.exit(1)", "console.log('not-json')", "console.log('{}')",
-      "console.log(JSON.stringify({targets: []}))", "console.log(JSON.stringify({targets: [1]}))",
+  test("uses the actual request working directory", () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "materializer-cwd-"));
+    try {
+      expect(materializeRequest(
+        requestMaterializer(requestSource),
+        request(),
+        workingDirectory,
+        { arguments: [], executable: "npm", subcommand: "install", words: ["npm", "install"] },
+      )).toEqual({ context: { cwd: realpathSync(workingDirectory), operation: "npm" }, resource: "/work" });
+    } finally {
+      rmSync(workingDirectory, { force: true, recursive: true });
+    }
+  });
+
+  test("grants only declared read access", () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "materializer-read-"));
+    const source = [
+      'import { readFileSync } from "node:fs";',
+      "const input = await new Response(Deno.stdin.readable).json();",
+      "console.log(JSON.stringify({resource: input.resource, context: {value: readFileSync('allowed.txt', 'utf8')}}));",
+    ].join("\n");
+    const allowedPermissions = { ...noPermissions, read: [workingDirectoryPermission] };
+    try {
+      writeFileSync(join(workingDirectory, "allowed.txt"), "allowed");
+      expect(materializeRequest(requestMaterializer(source), request(), workingDirectory)).toBeUndefined();
+      expect(materializeRequest(requestMaterializer(source, allowedPermissions), request(), workingDirectory))
+        .toEqual({ context: { value: "allowed" }, resource: "/work" });
+    } finally {
+      rmSync(workingDirectory, { force: true, recursive: true });
+    }
+  });
+
+  test("grants subprocess access only when run is declared", () => {
+    const source = [
+      "const input = await new Response(Deno.stdin.readable).json();",
+      "const result = new Deno.Command('printf', {args: ['ok'], stdout: 'piped'}).outputSync();",
+      "console.log(JSON.stringify({resource: input.resource, context: {output: new TextDecoder().decode(result.stdout)}}));",
+    ].join("\n");
+    expect(materializeRequest(requestMaterializer(source), request(), process.cwd())).toBeUndefined();
+    expect(materializeRequest(requestMaterializer(source, { ...noPermissions, run: ["printf"] }), request(), process.cwd()))
+      .toEqual({ context: { output: "ok" }, resource: "/work" });
+  });
+
+  test("rejects changed source and non-self-contained imports", () => {
+    const changed = activationMaterializer(activationSource);
+    expect(materializeActivation({ ...changed, reviewedSource: `${activationSource}\n// changed` }, {})).toBeUndefined();
+    const importedSource = 'import "./dependency.ts"; console.log(JSON.stringify({targets:["one"]}));';
+    expect(materializeActivation(activationMaterializer(importedSource), {})).toBeUndefined();
+  });
+
+  test("rejects a reviewed runtime version that does not match the local binary", () => {
+    expect(materializeActivation(activationMaterializer(activationSource, noPermissions, "9.9.9"), {})).toBeUndefined();
+  });
+
+  test("fails closed on malformed output, timeout, process failure, and output overflow", () => {
+    for (const [source, options] of [
+      ["console.log('not-json')", {}],
+      ["Deno.exit(1)", {}],
+      ["while (true) {}", { timeoutMs: 25 }],
+      ["console.log('x'.repeat(1024))", { outputLimitBytes: 128 }],
+    ] as const) {
+      expect(materializeActivation(activationMaterializer(source), {}, process.cwd(), options)).toBeUndefined();
+    }
+  });
+
+  test("validates materialized output shape", () => {
+    for (const source of [
+      "console.log('{}')",
+      "console.log(JSON.stringify({targets: []}))",
+      "console.log(JSON.stringify({targets: [1]}))",
       "console.log(JSON.stringify({targets: ['same', 'same']}))",
-    ]) {
-      expect(materializeActivation({ file: "unused.ts", language: "typescript", reviewedSource }, {})).toBeUndefined();
-    }
-    expect(materializeActivation({ file: "\0", language: "typescript" }, {})).toBeUndefined();
-  });
+    ]) expect(materializeActivation(activationMaterializer(source), {})).toBeUndefined();
 
-  test("materializes requests into a resource and Cedar context without a decision", () => {
-    expect(materializeRequest(
-      { file: "unused.ts", language: "typescript", reviewedSource: requestSource },
-      { action: "codex.unified_exec", arguments: { command: "npm install" }, resource: "/work", threadId: "t" },
-      "/work",
-      { arguments: [], executable: "npm", subcommand: "install", words: ["npm", "install"] },
-    )).toEqual({ context: { operation: "npm" }, resource: "/work" });
-  });
-
-  test("rejects failed and malformed request output", () => {
-    for (const reviewedSource of ["process.exit(1)", "console.log('not-json')", "console.log('{}')",
-      "console.log(JSON.stringify({resource: '', context: {}}))", "console.log(JSON.stringify({resource: '/work', context: null}))"]) {
-      expect(materializeRequest({ file: "unused.ts", language: "typescript", reviewedSource },
-        { action: "a", arguments: {}, resource: "/work", threadId: "t" }, "/work")).toBeUndefined();
-    }
-    expect(materializeRequest({ file: "\0", language: "typescript" },
-      { action: "a", arguments: {}, resource: "/work", threadId: "t" }, "/work")).toBeUndefined();
+    for (const source of [
+      "console.log('{}')",
+      "console.log(JSON.stringify({resource: '', context: {}}))",
+      "console.log(JSON.stringify({resource: '/work', context: null}))",
+    ]) expect(materializeRequest(requestMaterializer(source), request(), process.cwd())).toBeUndefined();
   });
 });

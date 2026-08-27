@@ -6,6 +6,7 @@ import { parse, stringify } from "yaml";
 import { z } from "zod";
 
 import { PolicyCore } from "./policy-core.js";
+import { verifyMaterializerIntegrity } from "./materializer-policy.js";
 import { materializeActivation } from "./materializer-runtime.js";
 import {
   activationMaterializerSchema,
@@ -15,9 +16,11 @@ import {
 } from "./schemas.js";
 import type {
   AuthorizationTest,
+  ActivationMaterializer,
   Profile,
   ProfileBinding,
   ProfileProposal,
+  RequestMaterializer,
 } from "./types.js";
 
 const cedarGroupingSchema = z.object({
@@ -153,6 +156,30 @@ async function readVerifiedMaterializerSource(
   return reviewedSource;
 }
 
+async function verifiedMaterializer<T extends ActivationMaterializer | RequestMaterializer>(
+  root: string,
+  policyRevision: string,
+  materializer: T,
+): Promise<T & { readonly reviewedSource: string }> {
+  const reviewedSource = await readVerifiedMaterializerSource(
+    root,
+    policyRevision,
+    relative(root, materializer.file),
+  );
+  verifyMaterializerIntegrity(materializer, reviewedSource);
+  return { ...materializer, reviewedSource };
+}
+
+function committedMaterializer<T extends ActivationMaterializer | RequestMaterializer>(
+  root: string,
+  policyRevision: string,
+  materializer: T,
+): T & { readonly reviewedSource: string } {
+  const reviewedSource = readCommittedFile(root, policyRevision, materializer.file);
+  verifyMaterializerIntegrity(materializer, reviewedSource);
+  return { ...materializer, file: join(root, materializer.file), reviewedSource };
+}
+
 function isMissingFile(error: unknown): boolean {
   return Boolean(
     error &&
@@ -203,22 +230,10 @@ export class PolicyRepository {
     }
     verifyReviewedProfile(this.root, profileId, diskProfile);
     const profile = await this.loadProfile(profileId);
-    const activationMaterializer = profile.activationMaterializer && {
-      ...profile.activationMaterializer,
-      reviewedSource: await readVerifiedMaterializerSource(
-        this.root,
-        diskProfile.policyRevision,
-        relative(this.root, profile.activationMaterializer.file),
-      ),
-    };
-    const requestMaterializer = profile.requestMaterializer && {
-      ...profile.requestMaterializer,
-      reviewedSource: await readVerifiedMaterializerSource(
-        this.root,
-        diskProfile.policyRevision,
-        relative(this.root, profile.requestMaterializer.file),
-      ),
-    };
+    const activationMaterializer = profile.activationMaterializer &&
+      await verifiedMaterializer(this.root, diskProfile.policyRevision, profile.activationMaterializer);
+    const requestMaterializer = profile.requestMaterializer &&
+      await verifiedMaterializer(this.root, diskProfile.policyRevision, profile.requestMaterializer);
     return {
       ...profile,
       activationMaterializer,
@@ -334,27 +349,13 @@ export class PolicyRepository {
       testFile,
     ));
     const tests = authorizationTestsSchema.parse(candidate);
-    const activationMaterializer = profile.activationMaterializer && {
-      ...profile.activationMaterializer,
-      file: join(this.root, profile.activationMaterializer.file),
-      reviewedSource: readCommittedFile(
-        this.root,
-        policyRevision,
-        profile.activationMaterializer.file,
-      ),
-    };
-    const requestMaterializer = profile.requestMaterializer && {
-      ...profile.requestMaterializer,
-      file: join(this.root, profile.requestMaterializer.file),
-      reviewedSource: readCommittedFile(
-        this.root,
-        policyRevision,
-        profile.requestMaterializer.file,
-      ),
-    };
+    const activationMaterializer = profile.activationMaterializer &&
+      committedMaterializer(this.root, policyRevision, profile.activationMaterializer);
+    const requestMaterializer = profile.requestMaterializer &&
+      committedMaterializer(this.root, policyRevision, profile.requestMaterializer);
     for (const authorizationTest of tests) {
       const activation = activationMaterializer
-        ? materializeActivation(activationMaterializer, authorizationTest.activationArguments ?? {})
+        ? materializeActivation(activationMaterializer, authorizationTest.activationArguments ?? {}, this.root)
         : { targets: profile.allowedTargets };
       if (!activation) {
         throw new Error(`authorization test activation failed: ${authorizationTest.name}`);
@@ -368,7 +369,7 @@ export class PolicyRepository {
       };
       const core = new PolicyCore();
       core.activate(reviewedProfile, authorizationTest.request.threadId);
-      const result = core.evaluate(authorizationTest.request);
+      const result = await core.evaluate(authorizationTest.request);
       if (result.decision !== authorizationTest.expected) {
         throw new Error(`authorization test failed: ${authorizationTest.name}`);
       }

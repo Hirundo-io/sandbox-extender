@@ -18,7 +18,11 @@ export type EvaluationContext = {
 
 export type ShellCommandContext = {
   readonly arguments: readonly string[];
+  readonly controlFlow?: "for" | "until" | "while";
   readonly executable: string;
+  readonly iteration?: number;
+  readonly repetition?: "finite" | "potentially-unbounded";
+  readonly role?: "condition" | "body";
   readonly subcommand?: string;
   readonly words: readonly string[];
 };
@@ -55,9 +59,23 @@ export type Profile = {
 /** References engineer-reviewed executable code in the Policy Repository. */
 type MaterializerReference = {
   readonly file: string;
+  /** SHA-256 of the complete self-contained source, permissions, and runtime version. */
+  readonly integrity: string;
   readonly language: "typescript";
+  readonly permissions: MaterializerPermissionManifest;
+  readonly runtimeVersion: string;
   /** Source loaded from and verified against the Profile's reviewed Git revision. */
   readonly reviewedSource?: string;
+};
+
+export type MaterializerPermissionManifest = {
+  readonly env: readonly string[];
+  readonly ffi: readonly string[];
+  readonly net: readonly string[];
+  readonly read: readonly string[];
+  readonly run: readonly string[];
+  readonly sys: readonly string[];
+  readonly write: readonly string[];
 };
 
 export type ActivationMaterializer = MaterializerReference;

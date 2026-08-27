@@ -8,7 +8,7 @@ import type {
 } from "./types.js";
 import { evaluateCedarGrouping } from "./cedar.js";
 import { materializeRequest } from "./materializer-runtime.js";
-import { parseShellCommands, parseShellWords } from "./shell-parser.js";
+import { compileShell, type ExecutableSegment } from "./shell-parser.js";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 
@@ -303,14 +303,13 @@ function evaluateCommand(
   return { decision: "abstain", reason: "no grouping made a decision" };
 }
 
-function shellCommands(request: NormalizedRequest): string[] | undefined {
+async function shellSegments(request: NormalizedRequest): Promise<ExecutableSegment[] | undefined> {
   const command = request.arguments.command;
-  if (!isShellAction(request.action)) return [""];
+  if (!isShellAction(request.action)) return [{ source: "", words: [] }];
   if (typeof command !== "string" || command.trim().length === 0) {
     return undefined;
   }
-  const commands = parseShellCommands(command);
-  return commands && commands.length > 0 ? commands : undefined;
+  return compileShell(command);
 }
 
 function isShellAction(action: string): boolean {
@@ -366,7 +365,7 @@ export class PolicyCore {
     this.#activeProfiles.delete(threadId);
   }
 
-  evaluate(request: NormalizedRequest): EvaluationResult {
+  async evaluate(request: NormalizedRequest): Promise<EvaluationResult> {
     const activeProfile = this.#activeProfiles.get(request.threadId);
     if (!activeProfile) {
       return { decision: "abstain", reason: "no active profile for thread" };
@@ -379,8 +378,8 @@ export class PolicyCore {
         reason: "profile requires exactly one allowed target",
       };
     }
-    const commands = shellCommands(request);
-    if (!commands) {
+    const segments = await shellSegments(request);
+    if (!segments) {
       return { decision: "abstain", reason: "shell syntax cannot be authorized safely" };
     }
 
@@ -388,11 +387,8 @@ export class PolicyCore {
     const resolvedTargets: string[] = [];
     const rootDirectory = request.resource;
     let workingDirectory = rootDirectory;
-    for (const command of commands) {
-      const words = isShellAction(request.action) ? parseShellWords(command) : undefined;
-      if (isShellAction(request.action) && !words) {
-        return { decision: "abstain", reason: "shell arguments cannot be authorized safely" };
-      }
+    for (const segment of segments) {
+      const words = isShellAction(request.action) ? segment.words : undefined;
       if (words && words[0] === "cd") {
         const nextDirectory = changeDirectory(rootDirectory, workingDirectory, words);
         if (!nextDirectory) {
@@ -415,12 +411,16 @@ export class PolicyCore {
       }
       const commandRequest = {
         ...request,
-        arguments: { ...request.arguments, command },
+        arguments: { ...request.arguments, command: segment.source },
       };
       const commandContext = words
         ? {
             arguments: words.slice(2),
+            ...(segment.controlFlow === undefined ? {} : { controlFlow: segment.controlFlow }),
             executable: words[0],
+            ...(segment.iteration === undefined ? {} : { iteration: segment.iteration }),
+            ...(segment.repetition === undefined ? {} : { repetition: segment.repetition }),
+            ...(segment.role === undefined ? {} : { role: segment.role }),
             ...(words[1] === undefined ? {} : { subcommand: words[1] }),
             words,
           }
@@ -455,12 +455,12 @@ export class PolicyCore {
     };
   }
 
-  consumeToken(tokenId: string, request: NormalizedRequest): boolean {
+  async consumeToken(tokenId: string, request: NormalizedRequest): Promise<boolean> {
     const token = this.#tokens.get(tokenId);
     this.#tokens.delete(tokenId);
     const activeProfile = this.#activeProfiles.get(request.threadId);
     const reevaluated = token && activeProfile && sameRequest(token.request, request)
-      ? this.evaluate(request)
+      ? await this.evaluate(request)
       : undefined;
     if (reevaluated?.token) this.#tokens.delete(reevaluated.token.id);
 

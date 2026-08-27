@@ -12,6 +12,13 @@ type RepositoryOperation = {
   readonly resource: string;
 };
 
+type CommandOutput = {
+  readonly code: number;
+  readonly stdout: Uint8Array;
+};
+
+type RunGit = (arguments_: readonly string[]) => CommandOutput;
+
 function input(candidate: unknown): MaterializerInput {
   if (typeof candidate !== "object" || candidate === null) return {};
   const value = candidate as Record<string, unknown>;
@@ -46,13 +53,21 @@ function gitRemoteArgument(words: readonly string[]): { readonly argumentsSafe: 
     : undefined;
 }
 
-function effectiveGitRemote(workingDirectory: string, remote: string): string | undefined {
-  const result = Bun.spawnSync({
-    cmd: ["git", "-C", workingDirectory, "ls-remote", "--get-url", "--", remote],
-    stderr: "ignore",
-    stdout: "pipe",
-  });
-  if (result.exitCode !== 0) return undefined;
+function runGit(arguments_: readonly string[]): CommandOutput {
+  return new Deno.Command("git", {
+    args: [...arguments_],
+    stderr: "null",
+    stdout: "piped",
+  }).outputSync();
+}
+
+function effectiveGitRemote(
+  workingDirectory: string,
+  remote: string,
+  execute: RunGit,
+): string | undefined {
+  const result = execute(["-C", workingDirectory, "ls-remote", "--get-url", "--", remote]);
+  if (result.code !== 0) return undefined;
   const effectiveRemote = new TextDecoder().decode(result.stdout).trim();
   return effectiveRemote.length > 0 && !effectiveRemote.includes("\n") ? effectiveRemote : undefined;
 }
@@ -75,6 +90,7 @@ function gitOperation(
   localTarget: string,
   workingDirectory: string,
   words: readonly string[],
+  execute: RunGit,
 ): RepositoryOperation | undefined {
   const parsed = gitRemoteArgument(words);
   if (!parsed) return undefined;
@@ -82,7 +98,7 @@ function gitOperation(
     argumentsSafe: parsed.argumentsSafe,
     duplicateOptionCount: duplicateLongOptionCount(words),
     operation: `git.${words[1]}`,
-    remoteSafe: isSafeGitRemote(effectiveGitRemote(workingDirectory, parsed.remote)),
+    remoteSafe: isSafeGitRemote(effectiveGitRemote(workingDirectory, parsed.remote, execute)),
     resource: localTarget,
   };
 }
@@ -108,12 +124,15 @@ function githubOperation(words: readonly string[]): RepositoryOperation | undefi
   };
 }
 
-export function materializeGitHubRepository(candidate: unknown): RepositoryOperation | undefined {
+export function materializeGitHubRepository(
+  candidate: unknown,
+  execute: RunGit = runGit,
+): RepositoryOperation | undefined {
   const value = input(candidate);
   const words = value.command?.words;
   if (typeof value.resource !== "string" || typeof value.workingDirectory !== "string" ||
     !Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
-  if (words[0] === "git") return gitOperation(value.resource, value.workingDirectory, words);
+  if (words[0] === "git") return gitOperation(value.resource, value.workingDirectory, words, execute);
   if (words[0] === "gh") return githubOperation(words);
   return undefined;
 }
@@ -129,4 +148,6 @@ export async function runGitHubRepositoryMaterializer(
   return true;
 }
 
-if (import.meta.main && !await runGitHubRepositoryMaterializer(Bun.stdin.json())) process.exit(1);
+if (import.meta.main && !await runGitHubRepositoryMaterializer(new Response(Deno.stdin.readable).json())) {
+  Deno.exit(1);
+}

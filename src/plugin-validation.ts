@@ -3,7 +3,9 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { z } from "zod";
 
+import { verifyMaterializerIntegrity } from "./materializer-policy.js";
 import { activationMaterializerSchema, requestMaterializerSchema } from "./schemas.js";
+import type { ActivationMaterializer, RequestMaterializer } from "./types.js";
 
 const commandHookSchema = z.object({
   command: z.string().min(1),
@@ -56,6 +58,14 @@ async function validateFile(file: string): Promise<void> {
   await access(file);
 }
 
+async function validateMaterializer(
+  root: string,
+  materializer: ActivationMaterializer | RequestMaterializer,
+): Promise<void> {
+  const file = resolveInsideRoot(root, materializer.file);
+  verifyMaterializerIntegrity(materializer, await readFile(file, "utf8"));
+}
+
 async function validateProfileTemplates(root: string): Promise<void> {
   const sharedDirectory = resolveInsideRoot(root, "shared");
   const profileTemplateDirectory = resolveInsideRoot(sharedDirectory, "profile-templates");
@@ -67,10 +77,10 @@ async function validateProfileTemplates(root: string): Promise<void> {
         await readJson(join(profileTemplateDirectory, entry.name)),
       );
       if (profileTemplate.activationMaterializer) {
-        await validateFile(resolveInsideRoot(sharedDirectory, profileTemplate.activationMaterializer.file));
+        await validateMaterializer(sharedDirectory, profileTemplate.activationMaterializer);
       }
       if (profileTemplate.requestMaterializer) {
-        await validateFile(resolveInsideRoot(sharedDirectory, profileTemplate.requestMaterializer.file));
+        await validateMaterializer(sharedDirectory, profileTemplate.requestMaterializer);
       }
     }));
 }

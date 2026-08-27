@@ -1,5 +1,5 @@
 import { profileIdSchema } from "./schemas.js";
-import { parseShellCommands } from "./shell-parser.js";
+import { compileShell } from "./shell-parser.js";
 import type { NormalizedRequest, ProfileProposal } from "./types.js";
 
 function cedarLiteral(value: unknown): string {
@@ -20,11 +20,11 @@ function cedarEntity(type: string, id: string): string {
   return `${type}::${JSON.stringify(id)}`;
 }
 
-function validateProposableRequest(request: NormalizedRequest): void {
+async function validateProposableRequest(request: NormalizedRequest): Promise<void> {
   const command = request.arguments.command;
   if (typeof command !== "string") return;
-  const commands = parseShellCommands(command);
-  if (!commands || commands.length !== 1 || commands[0] !== command) {
+  const segments = await compileShell(command);
+  if (!segments || segments.length !== 1 || segments[0]?.source !== command) {
     throw new Error("observed shell command cannot be represented as one authorization case");
   }
 }
@@ -37,9 +37,9 @@ function differentArguments(request: NormalizedRequest): Readonly<Record<string,
 }
 
 /** Creates a deliberately narrow, reviewable starting point from one observed request. */
-export function proposeProfile(profileId: string, request: NormalizedRequest): ProfileProposal {
+export async function proposeProfile(profileId: string, request: NormalizedRequest): Promise<ProfileProposal> {
   profileIdSchema.parse(profileId);
-  validateProposableRequest(request);
+  await validateProposableRequest(request);
 
   const action = cedarEntity("Action", request.action);
   const resource = cedarEntity("Target", request.resource);

@@ -32,4 +32,6 @@ export async function runGitHubPullRequestActivationMaterializer(
   return true;
 }
 
-if (import.meta.main && !await runGitHubPullRequestActivationMaterializer(Bun.stdin.json())) process.exit(1);
+if (import.meta.main && !await runGitHubPullRequestActivationMaterializer(new Response(Deno.stdin.readable).json())) {
+  Deno.exit(1);
+}

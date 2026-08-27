@@ -56,7 +56,7 @@ Policy-repository writes always use the Agent Host's ordinary approval path. A P
 A Profile is a named, user-activated composition of Groupings for a defined kind of work and an Allowed Target Set.
 
 - A thread has exactly one Active Profile.
-- Only the user can activate or change one through `/profile` or the local CLI.
+- Only an Agent Host user Approval can activate or change one. MCP elicitation is primary; the short-lived local CLI artifact is a compatibility fallback for clients without elicitation.
 - Agent text resembling `/profile` has no authority to change a profile.
 - A profile is pinned to an exact approved Policy Revision.
 - A changed active profile requires an explicit reactivation and notification.
@@ -95,13 +95,13 @@ If required context cannot be resolved or is inconsistent with the request, eval
 
 ## Adapters and lookups
 
-Request Materializers are typed normalization code. Profile-owned TypeScript materializers are trusted executable code reviewed with the Policy Repository and run with the user's authority; approving a Policy Revision that contains a materializer approves that code. Materializer references and source bytes are verified against the reviewed revision before use. Materializers are not runtime-sandboxed and must not execute the requested operation during authorization.
+Request Materializers are typed normalization code. Profile-owned TypeScript materializers are reviewed with the Policy Repository. Approving a Policy Revision approves their complete self-contained source artifact, exact Deno runtime version, and canonical data-only permission manifest. Policy Core generates Deno flags for read, write, environment, network, system, subprocess, and foreign-function access. It verifies integrity and the repository-local runtime version before every non-interactive execution, uses the request working directory, and bounds time and output. Materializers must not execute the requested operation during authorization.
 
-- Shell adapters parse compound syntax and independently authorize every executable segment in pipelines, `&&`, `||`, redirections, subshells, assignments, and substitutions. If any segment cannot be normalized, the full request abstains.
+- The Bash and POSIX `sh` compiler independently authorizes every concrete Executable Segment in the supported sequence, pipeline, compound, and loop subset. Finite literal `for` loops expand into bounded concrete arguments. Simple `while` and `until` conditions and bodies expose potentially-unbounded repetition facts. Unsupported conditionals, dynamic construction, substitution, redirection, and unmodeled shell-state mutation make the full request abstain. Zsh remains unsupported until it has fixtures.
 - MCP adapters use server identity, tool name, JSON-schema-validated arguments, and declared target extractors. Servers or tools lacking an adapter abstain.
 - Context lookups are read-only and versioned as part of the Profile. They may resolve facts such as the PR for the current repository and branch.
 
-Read-only behavior is an engineer-review contract in the first release; no additional runtime sandboxing of trusted materializer code is required at this stage.
+`run` and `ffi` are high-authority declarations. A permitted subprocess retains normal OS authority outside Deno's other permission checks, so Profiles must name and review each permitted executable.
 
 ## Learning, approval, and testing
 

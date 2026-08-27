@@ -3,7 +3,20 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { materializerIntegrity } from "../src/materializer-policy.js";
 import { validatePlugin } from "../src/plugin-validation.js";
+
+const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
+
+function requestMaterializerReference(file = "materializers/requests/github-repository.ts") {
+  return {
+    file,
+    integrity: materializerIntegrity("", emptyPermissions, "2.8.1"),
+    language: "typescript",
+    permissions: emptyPermissions,
+    runtimeVersion: "2.8.1",
+  } as const;
+}
 
 async function writePlugin(root: string): Promise<void> {
   await mkdir(join(root, ".claude-plugin"));
@@ -27,7 +40,7 @@ async function writePlugin(root: string): Promise<void> {
     hooks: { PermissionRequest: [{ hooks: [{ command: "bun hook.ts", type: "command" }] }] },
   }));
   await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
-    requestMaterializer: { file: "materializers/requests/github-repository.ts", language: "typescript" },
+    requestMaterializer: requestMaterializerReference(),
   }));
   await writeFile(join(root, "shared", "materializers", "requests", "github-repository.ts"), "");
 }
@@ -50,11 +63,11 @@ describe("plugin validation", () => {
       await writeFile(join(root, ".claude-plugin", "plugin.json"),
         JSON.stringify({ name: "test", version: "1" }));
       await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
-        requestMaterializer: { file: "../../arbitrary-code.ts", language: "typescript" },
+        requestMaterializer: requestMaterializerReference("../../arbitrary-code.ts"),
       }));
       await expect(validatePlugin(root)).rejects.toThrow();
       await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
-        requestMaterializer: { file: "materializers/requests/github-repository.ts", language: "typescript" },
+        requestMaterializer: requestMaterializerReference(),
       }));
       await writeFile(join(root, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: "../../outside.json",

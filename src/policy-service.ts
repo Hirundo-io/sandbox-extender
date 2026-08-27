@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { PolicyCore } from "./policy-core.js";
 import { PolicyRepository } from "./policy-repository.js";
 import { materializeActivation } from "./materializer-runtime.js";
-import type { EvaluationResult, NormalizedRequest } from "./types.js";
+import type { EvaluationResult, NormalizedRequest, Profile } from "./types.js";
+
+export type PreparedProfileActivation = {
+  readonly profile: Profile;
+  readonly targets: readonly string[];
+};
 
 const credentialOptionPattern = /(^|\s)(--(?:access[-_]?key|access[-_]?token|api[-_]?key|api[-_]?token|authorization|client[-_]?secret|connection[-_]?string|cookie|database[-_]?url|password|passwd|private[-_]?token|refresh[-_]?token|secret|token|webhook[-_]?secret))(?:=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
 const credentialAssignmentPattern = /(^|\s)([A-Za-z_][A-Za-z0-9_]*(?:ACCESS[-_]?(?:KEY|TOKEN)|ACCOUNT[-_]?KEY|API[-_]?KEY|API[-_]?TOKEN|AUTH(?:ORIZATION)?|CLIENT[-_]?SECRET|CONNECTION[-_]?STRING|COOKIE|CREDENTIAL|DATABASE[-_]?URL|PASSWORD|PASSWD|PRIVATE[-_]?TOKEN|REFRESH[-_]?TOKEN|SECRET|SHARED[-_]?ACCESS[-_]?KEY|TOKEN|WEBHOOK[-_]?SECRET)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi;
@@ -253,8 +258,8 @@ export async function evaluateForThread(
       return result;
     }
     core.activate(profile, request.threadId);
-    const result = core.evaluate(request);
-    if (result.decision === "allow" && !core.consumeToken(result.token?.id ?? "", request)) {
+    const result = await core.evaluate(request);
+    if (result.decision === "allow" && !await core.consumeToken(result.token?.id ?? "", request)) {
       return { decision: "abstain", reason: "authorization token is unavailable" };
     }
     await recordEvaluation(repository, request, result, binding.profileId, profile.policyRevision);
@@ -297,18 +302,17 @@ async function recordEvaluation(
   }
 }
 
-export async function activateProfile(
+export async function prepareProfileActivation(
   repository: PolicyRepository,
-  threadId: string,
   profileId: string,
   arguments_: Readonly<Record<string, unknown>> = {},
-): Promise<readonly string[]> {
+): Promise<PreparedProfileActivation> {
   const reviewedProfile = await repository.loadVerifiedProfile(profileId);
   if (reviewedProfile.policyRevision === "pending-review") {
     throw new Error("profile must be reviewed before activation");
   }
   const activation = reviewedProfile.activationMaterializer
-    ? materializeActivation(reviewedProfile.activationMaterializer, arguments_)
+    ? materializeActivation(reviewedProfile.activationMaterializer, arguments_, repository.root)
     : Object.keys(arguments_).length === 0 && reviewedProfile.allowedTargets.size > 0
       ? { targets: [...reviewedProfile.allowedTargets] }
       : undefined;
@@ -317,14 +321,35 @@ export async function activateProfile(
     throw new Error("profile activation requires exactly one target");
   }
   const profile = { ...reviewedProfile, allowedTargets: new Set(activation.targets) };
+  return { profile, targets: activation.targets };
+}
+
+export async function activatePreparedProfile(
+  repository: PolicyRepository,
+  threadId: string,
+  activation: PreparedProfileActivation,
+): Promise<readonly string[]> {
   const bindings = await repository.readState();
   await repository.writeState({ ...bindings, [threadId]: {
     allowedTargets: activation.targets,
-    fingerprint: fingerprint(profile),
-    policyRevision: profile.policyRevision,
-    profileId,
+    fingerprint: fingerprint(activation.profile),
+    policyRevision: activation.profile.policyRevision,
+    profileId: activation.profile.id,
   } });
   return activation.targets;
+}
+
+export async function activateProfile(
+  repository: PolicyRepository,
+  threadId: string,
+  profileId: string,
+  arguments_: Readonly<Record<string, unknown>> = {},
+): Promise<readonly string[]> {
+  return activatePreparedProfile(
+    repository,
+    threadId,
+    await prepareProfileActivation(repository, profileId, arguments_),
+  );
 }
 
 export async function disableProfile(

@@ -4,12 +4,18 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/github-pull-request.ts",
-    "language": "typescript"
+    "integrity": "d7eb2b4acd591b3383fc363659f13da34c48228ee0c0f602078d0d881eefce19",
+    "language": "typescript",
+    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "runtimeVersion": "2.8.1"
   },
   "targetScope": "single",
   "requestMaterializer": {
     "file": "materializers/requests/github-pull-request.ts",
-    "language": "typescript"
+    "integrity": "f859bd1bb68a8bbc3f7a0aa03df1d5e26beb4cdf82dbcf55bc372bcbf3215af7",
+    "language": "typescript",
+    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "runtimeVersion": "2.8.1"
   },
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",

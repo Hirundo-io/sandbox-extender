@@ -4,9 +4,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PolicyRepository } from "../src/index.js";
+import { materializerIntegrity } from "../src/materializer-policy.js";
+import type { MaterializerPermissionManifest } from "../src/types.js";
 
 const roots: string[] = [];
 const sharedMaterializerDirectory = join(process.cwd(), "shared", "materializers");
+const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
+
+async function materializerReference(
+  kind: "activation" | "requests",
+  name: string,
+  permissions: MaterializerPermissionManifest = emptyPermissions,
+) {
+  const source = await readFile(join(sharedMaterializerDirectory, kind, name), "utf8");
+  return {
+    file: `materializers/${kind}/${name}`,
+    integrity: materializerIntegrity(source, permissions, "2.8.1"),
+    language: "typescript" as const,
+    permissions,
+    runtimeVersion: "2.8.1",
+  };
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
@@ -210,10 +228,9 @@ describe("PolicyRepository", () => {
         }],
         id: "review",
         policyRevision: "pending-review",
-        requestMaterializer: {
-          file: "materializers/requests/github-repository.ts",
-          language: "typescript",
-        },
+        requestMaterializer: await materializerReference(
+          "requests", "github-repository.ts", { ...emptyPermissions, run: ["git"] },
+        ),
       },
       tests: [{
         expected: "allow",
@@ -221,7 +238,7 @@ describe("PolicyRepository", () => {
         request: {
           action: "claude.Bash",
           arguments: { command: "gh pr view --repo acme/example" },
-          resource: "/work/example",
+          resource: repo.root,
           threadId: "thread-1",
         },
       }],
@@ -250,10 +267,9 @@ describe("PolicyRepository", () => {
         groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
         id: "review",
         policyRevision: "pending-review",
-        requestMaterializer: {
-          file: "materializers/requests/github-repository.ts",
-          language: "typescript",
-        },
+        requestMaterializer: await materializerReference(
+          "requests", "github-repository.ts", { ...emptyPermissions, run: ["git"] },
+        ),
       },
       tests: [{
         expected: "allow",
@@ -261,7 +277,7 @@ describe("PolicyRepository", () => {
         request: {
           action: "claude.Bash",
           arguments: { command: "gh pr view --repo acme/example" },
-          resource: "/work/example",
+          resource: repo.root,
           threadId: "thread-1",
         },
       }],
@@ -273,8 +289,7 @@ describe("PolicyRepository", () => {
     await Bun.write(profileFile, JSON.stringify({
       ...reviewedProfile,
       requestMaterializer: {
-        file: "materializers/requests/github-pull-request.ts",
-        language: "typescript",
+        ...await materializerReference("requests", "github-pull-request.ts"),
       },
     }));
 
@@ -301,14 +316,8 @@ describe("PolicyRepository", () => {
         }],
         id: "babysitter",
         policyRevision: "pending-review",
-        activationMaterializer: {
-          file: "materializers/activation/github-pull-request.ts",
-          language: "typescript",
-        },
-        requestMaterializer: {
-          file: "materializers/requests/github-pull-request.ts",
-          language: "typescript",
-        },
+        activationMaterializer: await materializerReference("activation", "github-pull-request.ts"),
+        requestMaterializer: await materializerReference("requests", "github-pull-request.ts"),
         targetScope: "single",
       },
       tests: [{
@@ -318,7 +327,7 @@ describe("PolicyRepository", () => {
         request: {
           action: "codex.unified_exec",
           arguments: { command: "gh pr view 42 --repo acme/example" },
-          resource: "/work/example",
+          resource: root,
           threadId: "thread-1",
         },
       }],

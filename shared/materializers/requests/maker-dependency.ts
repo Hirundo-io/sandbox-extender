@@ -199,4 +199,6 @@ export async function runMakerDependencyMaterializer(
   return true;
 }
 
-if (import.meta.main && !await runMakerDependencyMaterializer(Bun.stdin.json())) process.exit(1);
+if (import.meta.main && !await runMakerDependencyMaterializer(new Response(Deno.stdin.readable).json())) {
+  Deno.exit(1);
+}

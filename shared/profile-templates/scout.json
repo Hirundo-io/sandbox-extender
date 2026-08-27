@@ -4,11 +4,17 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/target-set.ts",
-    "language": "typescript"
+    "integrity": "7ebcb6b21f05f666d310c4f51202c026f1a3c29c1b1cb39ae0f63b8959d1ce2f",
+    "language": "typescript",
+    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "runtimeVersion": "2.8.1"
   },
   "requestMaterializer": {
     "file": "materializers/requests/github-repository.ts",
-    "language": "typescript"
+    "integrity": "7e23d9259630fdb83978560fbcaadc61458d3e1c85e38a8f809e9a370a34fc5c",
+    "language": "typescript",
+    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": ["git"], "ffi": [] },
+    "runtimeVersion": "2.8.1"
   },
   "sessionContext": [
     "Use this profile only for inspection. Do not alter files or remote state."

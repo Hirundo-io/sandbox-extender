@@ -1,26 +1,21 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
 
 import { materializeGitHubRepository, runGitHubRepositoryMaterializer } from "./github-repository.js";
-
-const temporaryDirectories: string[] = [];
 
 function candidate(words: readonly unknown[], resource = "/work", workingDirectory = resource): unknown {
   return { command: { words }, resource, workingDirectory };
 }
 
-function repository(): string {
-  const directory = mkdtempSync(join(tmpdir(), "repository-materializer-"));
-  temporaryDirectories.push(directory);
-  Bun.spawnSync(["git", "-C", directory, "init", "--quiet"]);
-  return directory;
+function gitRemote(remote?: string) {
+  return (arguments_: readonly string[]) => {
+    expect(arguments_.slice(0, -1)).toEqual(["-C", "/work", "ls-remote", "--get-url", "--"]);
+    expect(typeof arguments_.at(-1)).toBe("string");
+    return {
+      code: remote === undefined ? 1 : 0,
+      stdout: new TextEncoder().encode(remote ?? ""),
+    };
+  };
 }
-
-afterEach(() => {
-  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { force: true, recursive: true });
-});
 
 describe("GitHub repository request materializer", () => {
   test("materializes GitHub operations and counts duplicate long options", () => {
@@ -32,22 +27,22 @@ describe("GitHub repository request materializer", () => {
   });
 
   test("materializes safe Git remote inspection", () => {
-    const directory = repository();
-    Bun.spawnSync(["git", "-C", directory, "remote", "add", "origin", "https://github.com/acme/example.git"]);
-    expect(materializeGitHubRepository(candidate(["git", "fetch", "--dry-run", "origin"], directory)))
+    const execute = gitRemote("https://github.com/acme/example.git");
+    expect(materializeGitHubRepository(candidate(["git", "fetch", "--dry-run", "origin"]), execute))
       .toEqual(expect.objectContaining({ argumentsSafe: true, operation: "git.fetch", remoteSafe: true }));
-    expect(materializeGitHubRepository(candidate(["git", "ls-remote", "--heads", "--", "origin", "refs/heads/main"], directory)))
+    expect(materializeGitHubRepository(
+      candidate(["git", "ls-remote", "--heads", "--", "origin", "refs/heads/main"]),
+      execute,
+    ))
       .toEqual(expect.objectContaining({ argumentsSafe: true, operation: "git.ls-remote", remoteSafe: true }));
   });
 
   test("reports unsafe and unavailable Git remotes", () => {
-    const directory = repository();
-    Bun.spawnSync(["git", "-C", directory, "remote", "add", "helper", "ext::sh -c id"]);
-    expect(materializeGitHubRepository(candidate(["git", "ls-remote", "helper"], directory)))
+    expect(materializeGitHubRepository(candidate(["git", "ls-remote", "helper"]), gitRemote("ext::sh -c id")))
       .toEqual(expect.objectContaining({ remoteSafe: false }));
-    expect(materializeGitHubRepository(candidate(["git", "ls-remote", "missing"], directory)))
+    expect(materializeGitHubRepository(candidate(["git", "ls-remote", "missing"]), gitRemote()))
       .toEqual(expect.objectContaining({ remoteSafe: false }));
-    expect(materializeGitHubRepository(candidate(["git", "ls-remote", "http://["], directory)))
+    expect(materializeGitHubRepository(candidate(["git", "ls-remote", "http://["]), gitRemote("http://[")))
       .toEqual(expect.objectContaining({ remoteSafe: false }));
   });
 

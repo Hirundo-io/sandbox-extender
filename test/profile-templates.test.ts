@@ -10,6 +10,8 @@ import { materializeMakerDependency } from "../shared/materializers/requests/mak
 
 const sharedDirectory = join(process.cwd(), "shared");
 const profileTemplateDirectory = join(sharedDirectory, "profile-templates");
+const workspaceTarget = process.cwd();
+const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] };
 
 function runGit(workspace: string, ...arguments_: string[]): void {
   const result = Bun.spawnSync(["git", "-C", workspace, ...arguments_]);
@@ -24,23 +26,46 @@ async function profileTemplate(name: string): Promise<Profile> {
   const allowedTargets = name === "babysitter"
     ? ["github:pull-request:acme/example#42"]
     : name === "maker"
-      ? ["/work/example"]
-      : ["/work/example", "github:repository:acme/example"];
+      ? [workspaceTarget]
+      : [workspaceTarget, "github:repository:acme/example"];
   return {
     ...profile,
     allowedTargets: new Set(allowedTargets),
     activationMaterializer: profile.activationMaterializer && {
       ...profile.activationMaterializer,
       file: join(sharedDirectory, profile.activationMaterializer.file),
+      reviewedSource: await readFile(join(sharedDirectory, profile.activationMaterializer.file), "utf8"),
     },
     requestMaterializer: profile.requestMaterializer && {
       ...profile.requestMaterializer,
       file: join(sharedDirectory, profile.requestMaterializer.file),
+      reviewedSource: await readFile(join(sharedDirectory, profile.requestMaterializer.file), "utf8"),
     },
   };
 }
 
 describe("shipped Profile templates", () => {
+  test("declares only permissions used by each materializer", async () => {
+    const babysitter = await profileTemplate("babysitter");
+    const maker = await profileTemplate("maker");
+    const scout = await profileTemplate("scout");
+
+    expect(babysitter.activationMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(babysitter.requestMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(maker.requestMaterializer?.permissions).toEqual({
+      ...emptyPermissions,
+      read: ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
+    });
+    expect(scout.activationMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(scout.requestMaterializer?.permissions).toEqual({ ...emptyPermissions, run: ["git"] });
+
+    for (const profile of [babysitter, maker, scout]) {
+      expect(profile.activationMaterializer?.reviewedSource).not.toMatch(/\bBun\b/);
+      expect(profile.requestMaterializer?.reviewedSource).not.toMatch(/\bBun\b/);
+    }
+  });
+
   test("request materializers describe disallowed operations for Cedar", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-materialized-facts-"));
     try {
@@ -99,7 +124,7 @@ describe("shipped Profile templates", () => {
       "gh repo list --repo acme/example",
       "gh label list --repo acme/example",
     ]) {
-      expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
+      expect((await core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: workspaceTarget, threadId: "thread-1" })).decision).toBe("allow");
     }
     for (const command of [
       "gh pr merge 42",
@@ -111,9 +136,9 @@ describe("shipped Profile templates", () => {
       "gh pr view 42 --repo=acme/example --repo acme/other",
       "gh pr view 42 --repo acme/example --json title --json url",
     ]) {
-      expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
+      expect((await core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: workspaceTarget, threadId: "thread-1" })).decision).toBe("abstain");
     }
-  });
+  }, 20_000);
 
   test("Scout permits safe Git remotes and rejects executable remote helpers", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-scout-"));
@@ -155,9 +180,9 @@ describe("shipped Profile templates", () => {
           resource: workspace,
           threadId: "thread-1",
         };
-        const result = core.evaluate(request);
-        expect(result.decision).toBe("allow");
-        expect(core.consumeToken(result.token!.id, request)).toBe(true);
+        const result = await core.evaluate(request);
+        if (result.decision !== "allow") throw new Error(`${command}: ${result.reason}`);
+        expect(await core.consumeToken(result.token!.id, request)).toBe(true);
       }
 
       for (const command of [
@@ -171,17 +196,17 @@ describe("shipped Profile templates", () => {
         "git ls-remote --upload-pack=sh origin",
         "cd nested && git ls-remote origin",
       ]) {
-        expect(core.evaluate({
+        expect((await core.evaluate({
           action: "codex.unified_exec",
           arguments: { command },
           resource: workspace,
           threadId: "thread-1",
-        }).decision).toBe("abstain");
+        })).decision).toBe("abstain");
       }
     } finally {
       await rm(workspace, { force: true, recursive: true });
     }
-  });
+  }, 20_000);
 
   test("Maker permits lock-focused dependency changes inside the effective workspace", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-maker-"));
@@ -211,9 +236,9 @@ describe("shipped Profile templates", () => {
           resource: workspace,
           threadId: "thread-1",
         };
-        const result = core.evaluate(request);
-        expect(result.decision).toBe("allow");
-        expect(core.consumeToken(result.token!.id, request)).toBe(true);
+        const result = await core.evaluate(request);
+        if (result.decision !== "allow") throw new Error(`${command}: ${result.reason}`);
+        expect(await core.consumeToken(result.token!.id, request)).toBe(true);
       }
       const builtinRequest = {
         action: "codex.unified_exec",
@@ -221,16 +246,16 @@ describe("shipped Profile templates", () => {
         resource: workspace,
         threadId: "thread-1",
       };
-      const builtinResult = core.evaluate(builtinRequest);
+      const builtinResult = await core.evaluate(builtinRequest);
       expect(builtinResult.decision).toBe("allow");
-      expect(core.consumeToken(builtinResult.token!.id, builtinRequest)).toBe(true);
+      expect(await core.consumeToken(builtinResult.token!.id, builtinRequest)).toBe(true);
       expect(maker.sessionContext).toContain(
         "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
       );
     } finally {
       await rm(workspace, { force: true, recursive: true });
     }
-  });
+  }, 20_000);
 
   test("Maker abstains from destination, configuration, lifecycle, and interpreter escapes", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-maker-deny-"));
@@ -279,18 +304,18 @@ describe("shipped Profile templates", () => {
         "pixi run postinstall",
         "sh -c 'npm install zod'",
       ]) {
-        expect(core.evaluate({
+        expect((await core.evaluate({
           action: "codex.unified_exec",
           arguments: { command },
           resource: workspace,
           threadId: "thread-1",
-        }).decision).toBe("abstain");
+        })).decision).toBe("abstain");
       }
     } finally {
       await rm(workspace, { force: true, recursive: true });
       await rm(outside, { force: true, recursive: true });
     }
-  });
+  }, 30_000);
 
   test("Babysitter scopes inspection and comments to one explicit pull request", async () => {
     const core = new PolicyCore();
@@ -304,7 +329,7 @@ describe("shipped Profile templates", () => {
       'gh pr comment 42 --repo acme/example --body "Reviewed."',
       'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Fixed in the latest revision."',
     ]) {
-      expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("allow");
+      expect((await core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: workspaceTarget, threadId: "thread-1" })).decision).toBe("allow");
     }
 
     for (const command of [
@@ -342,7 +367,7 @@ describe("shipped Profile templates", () => {
       'gh api --method POST repos/acme/example/pulls/42/comments/0987/replies -f body="Ambiguous comment ID."',
       'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Reviewed." --input payload.json',
     ]) {
-      expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
+      expect((await core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: workspaceTarget, threadId: "thread-1" })).decision).toBe("abstain");
     }
 
     const multipleTargets = await profileTemplate("babysitter");
@@ -353,16 +378,16 @@ describe("shipped Profile templates", () => {
         "github:pull-request:acme/example#43",
       ]),
     }, "thread-2");
-    expect(core.evaluate({
+    expect(await core.evaluate({
       action: "codex.unified_exec",
       arguments: { command: "gh pr view 42 --repo acme/example" },
-      resource: "/work/example",
+      resource: workspaceTarget,
       threadId: "thread-2",
     })).toEqual(expect.objectContaining({
       decision: "abstain",
       reason: "profile requires exactly one allowed target",
     }));
-  });
+  }, 30_000);
 
   test("Babysitter's Cedar policy decides from materialized request facts", async () => {
     const babysitter = await profileTemplate("babysitter");
@@ -376,7 +401,7 @@ describe("shipped Profile templates", () => {
       const request = {
         action: "codex.unified_exec",
         arguments: { command },
-        resource: "/work/example",
+        resource: workspaceTarget,
         threadId: "thread-1",
       };
       const context = {

@@ -5,7 +5,7 @@ Sandbox Extender is a developer tool for making agent permissions predictable an
 ## Language
 
 **Approval**:
-A user decision that permits a specific agent action under the host's existing permission mechanism.
+A user decision returned by the Agent Host that permits the exact operation and values it displayed. Approval authorizes a mutation or request; it does not authenticate the user's identity.
 _Avoid_: Consent, confirmation
 
 **Capability Rule**:
@@ -29,12 +29,16 @@ User-approved values supplied when activating a Profile, such as a repository, p
 _Avoid_: Template values, promotion arguments
 
 **Activation Materializer**:
-Profile-owned code that validates Activation Arguments and produces the Target set frozen into a Thread Binding.
+Profile-owned, reviewed code that validates Activation Arguments and produces the Target set frozen into a Thread Binding. Its declared Materializer Permission Manifest bounds its direct runtime authority.
 _Avoid_: Profile proposal materializer, target resolver
 
 **Request Materializer**:
-Read-only typed code that normalizes a shell command or MCP call into facts and entities for Cedar. It may reject malformed or unparseable input but never makes an authorization decision.
+Reviewed typed code that normalizes a shell command or MCP call into facts and entities for Cedar. It may reject malformed or unparseable input but never makes an authorization decision, and its direct runtime authority is bounded by a Materializer Permission Manifest.
 _Avoid_: Dynamic policy, target resolver, permission evaluator
+
+**Materializer Permission Manifest**:
+A data-only declaration of the read, write, environment, network, system, subprocess, and foreign-function access granted to one reviewed Materializer.
+_Avoid_: Runtime code, implicit permissions
 
 **Active Profile**:
 The sole Profile governing approvals for one agent thread at a time.
@@ -58,7 +62,7 @@ _Avoid_: Latest policy, live policy
 
 **Context Lookup**:
 Profile-owned code that derives bounded, trusted facts needed for policy evaluation, such as the current repository, branch, active cloud project, or current pull request. It is versioned and reviewed with the Profile rather than generated at evaluation time.
-Approving a Context Lookup approves trusted executable code that runs with the user's authority; it is not runtime-sandboxed.
+Approving a Context Lookup approves its reviewed code, runtime version, integrity, and Materializer Permission Manifest.
 _Avoid_: Dynamic policy code, arbitrary evaluation command
 
 **Extension Decision**:
@@ -90,7 +94,7 @@ A reusable, explicit collection of Target identifiers referenced by a Profile. T
 _Avoid_: Wildcard scope, implicit provider selector
 
 **Executable Segment**:
-One command within a shell structure that is independently normalized and authorized. A compound shell request abstains if any segment cannot be normalized.
+One concrete command within a supported shell structure that is independently normalized and authorized. Loop segments carry their control-flow role and repetition facts; a compound request abstains if any segment cannot be represented safely.
 _Avoid_: Compound-command allowance
 
 **Authorization Test**:

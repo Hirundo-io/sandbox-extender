@@ -35,12 +35,20 @@ For example, this Profile allows only Codex shell requests from one workspace:
 
 Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists.
 
-Profile mutations require a separate user authorization created by the CLI,
-not the plugin's MCP server. Each authorization names the host thread, the
-exact MCP operation, and a SHA-256 digest of the operation's canonical
-arguments. The artifact and CLI output do not retain or echo the arguments. It
-expires after two minutes and can be claimed only once. Create it immediately
-before the matching MCP call:
+## Profile mutation Approval
+
+Profile mutations use MCP elicitation. Before changing the Policy Repository or
+a Thread Binding, the Agent Host displays the exact operation, Profile, Policy
+Revision, Activation Arguments, and Targets where they apply. The mutation runs
+only after the host returns `accept` with the confirmation field set. `decline`,
+`cancel`, malformed responses, and transport failures do not mutate anything.
+This Approval is authorization for one operation, not identity authentication.
+
+Clients without form elicitation use the compatibility CLI. Its authorization
+names the host thread and operation and stores only a SHA-256 digest of the
+canonical arguments. It expires after two minutes and can be claimed once.
+Run it only after an MCP mutation reports that elicitation is unsupported, then
+retry the unchanged MCP call:
 
 ```sh
 bun run authorize:mutation -- <operation> \
@@ -48,7 +56,7 @@ bun run authorize:mutation -- <operation> \
   --arguments-json '<operation-arguments-without-threadId>'
 ```
 
-For example, authorize one activation with:
+For example:
 
 ```sh
 bun run authorize:mutation -- activate_profile \
@@ -60,9 +68,9 @@ Use `{}` or omit `--arguments-json` for
 `initialize_policy_repository` and `disable_profile`. The other argument
 objects match their MCP inputs with `threadId` removed. Run the command with
 `--help` to see each operation's shape. A mismatched, malformed, or expired
-authorization fails closed and is consumed, so create a new one before
-retrying. The agent can still evaluate requests without a mutation
-authorization.
+authorization fails closed and is consumed. Do not use the fallback after a
+decline, cancel, or unrelated elicitation failure. Request evaluation remains
+available without mutation Approval.
 
 The disabled `shared/profile-templates/scout.json`,
 `shared/profile-templates/maker.json`, and
@@ -85,10 +93,71 @@ the only authorization language. The bundled implementations live under
 `shared/materializers/activation/`.
 
 Materializers are Profile-owned, engineer-reviewed executable code. Approving
-their Policy Revision approves them to run with the user's authority. They are
-not runtime-sandboxed. Activation verifies each materializer reference and its
-current source bytes against the reviewed Git commit. Missing or changed code
-makes activation or evaluation fail closed.
+their Policy Revision approves the exact source artifact, Deno runtime version,
+and data-only permission manifest. Sandbox Extender runs them with the
+repository-local Deno 2.8.1 binary, `--no-prompt`, frozen and cached-only
+dependency settings, the actual request working directory, a five-second
+timeout, and 64 KiB stdout and stderr limits. It rejects relative, package, and
+dynamic imports, so the integrity digest covers the complete self-contained
+source plus the canonical manifest and runtime version.
+
+The manifest has explicit arrays for `read`, `write`, `env`, `net`, `sys`,
+`run`, and `ffi`. Policy Core turns those values into Deno flags. Profile JSON
+contains references and data only. `run` and `ffi` are high-authority grants.
+A permitted subprocess keeps its normal OS credentials, filesystem access, and
+network access; Deno's other flags do not sandbox that subprocess.
+
+These permissions describe the materializer process, not the request that
+Cedar may authorize afterward. A materializer that parses a `gh` command needs
+no `run` or `net` permission. A materializer that calls `Deno.Command("gh")`
+needs `run: ["gh"]`, but it still does not need `net`: the `gh` subprocess uses
+its normal OS authority. Filesystem inspection through Deno or a `node:fs`
+compatibility API needs an explicit `read` declaration.
+
+Bun installs Deno as a production dependency. `package.json` lists `deno` as a
+trusted lifecycle dependency because its official postinstall selects the
+platform binary. No other package receives lifecycle trust.
+
+### Supported shell subset
+
+Shell requests use the Bash grammar by default and accept the shared POSIX `sh`
+subset. The compiler authorizes every concrete segment in ordinary sequences,
+pipelines, `&&` and `||` chains without ambiguous state changes, brace groups,
+safe subshells, finite literal `for` loops, and simple `while` or `until` loops.
+Finite loops resolve quoted variables and safe unquoted variables into concrete
+arguments. Capability Rules receive the loop kind, condition or body role,
+iteration number for finite loops, and whether repetition is finite or
+potentially unbounded.
+
+The whole request abstains on `if`, `case`, functions, arithmetic control flow,
+dynamic command names, assignments, command or process substitution, unsafe
+parameter expansion, redirection, background execution, ambiguous conditional
+`cd`, shell-state mutation that cannot be modeled, parse errors, or expansion
+limits. Zsh is not part of the contract because the repository has no Zsh
+fixtures.
+
+### Reviewed `gh` Context Lookup example
+
+[`shared/materializers/requests/github-current-pull-request.ts`](shared/materializers/requests/github-current-pull-request.ts)
+runs `gh pr view --json number,url` in the request working directory and derives
+one canonical pull-request Target. A Profile can reference the reviewed file
+with this data-only declaration:
+
+```json
+{
+  "file": "materializers/requests/github-current-pull-request.ts",
+  "integrity": "2f06b209ce5ec4a5ae88566b4dd4049726b557c1d16ebef4672ff16c9052de91",
+  "language": "typescript",
+  "permissions": {
+    "read": [], "write": [], "env": [], "net": [], "sys": [],
+    "run": ["gh"], "ffi": []
+  },
+  "runtimeVersion": "2.8.1"
+}
+```
+
+The `gh` process retains normal OS authority. Review the command and its output
+validation before accepting that `run` declaration.
 
 ## Development
 

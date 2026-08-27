@@ -7,7 +7,20 @@ import { createHash } from "node:crypto";
 import { PolicyRepository } from "../src/policy-repository.js";
 import { activateProfile, disableProfile, evaluateForThread } from "../src/policy-service.js";
 import { PolicyCore } from "../src/policy-core.js";
+import { materializerIntegrity } from "../src/materializer-policy.js";
 import type { Profile } from "../src/types.js";
+
+const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
+
+function materializerReference(file: string, source: string) {
+  return {
+    file,
+    integrity: materializerIntegrity(source, emptyPermissions, "2.8.1"),
+    language: "typescript" as const,
+    permissions: emptyPermissions,
+    runtimeVersion: "2.8.1",
+  };
+}
 
 const request = {
   action: "codex.unified_exec",
@@ -91,26 +104,25 @@ describe("policy service", () => {
     try {
       await mkdir(join(root, "materializers", "activation"), { recursive: true });
       await mkdir(join(root, "materializers", "requests"), { recursive: true });
-      await writeFile(
-        join(root, "materializers", "activation", "github-pull-request.ts"),
-        await readFile(join(process.cwd(), "shared", "materializers", "activation", "github-pull-request.ts"), "utf8"),
+      const activationSource = await readFile(
+        join(process.cwd(), "shared", "materializers", "activation", "github-pull-request.ts"), "utf8",
       );
-      await writeFile(
-        join(root, "materializers", "requests", "github-pull-request.ts"),
-        await readFile(join(process.cwd(), "shared", "materializers", "requests", "github-pull-request.ts"), "utf8"),
+      const requestSource = await readFile(
+        join(process.cwd(), "shared", "materializers", "requests", "github-pull-request.ts"), "utf8",
       );
+      await writeFile(join(root, "materializers", "activation", "github-pull-request.ts"), activationSource);
+      await writeFile(join(root, "materializers", "requests", "github-pull-request.ts"), requestSource);
       const pullRequestRequest = {
         action: "codex.unified_exec",
         arguments: { command: "gh pr view 42 --repo acme/example" },
-        resource: "/work/example",
+        resource: process.cwd(),
         threadId: "thread-activation",
       };
       await repository.writeProposal({
         profile: {
-          activationMaterializer: {
-            file: "materializers/activation/github-pull-request.ts",
-            language: "typescript",
-          },
+          activationMaterializer: materializerReference(
+            "materializers/activation/github-pull-request.ts", activationSource,
+          ),
           allowedTargets: [],
           groupings: [{
             id: "view",
@@ -120,10 +132,9 @@ describe("policy service", () => {
           }],
           id: "babysitter",
           policyRevision: "pending-review",
-          requestMaterializer: {
-            file: "materializers/requests/github-pull-request.ts",
-            language: "typescript",
-          },
+          requestMaterializer: materializerReference(
+            "materializers/requests/github-pull-request.ts", requestSource,
+          ),
           targetScope: "single",
         },
         tests: [{
@@ -382,7 +393,7 @@ describe("policy service", () => {
     };
     const repository = stubRepository(profile);
     const originalConsumeToken = PolicyCore.prototype.consumeToken;
-    PolicyCore.prototype.consumeToken = () => false;
+    PolicyCore.prototype.consumeToken = async () => false;
     try {
       const result = await evaluateForThread(repository, request);
       expect(result.decision).toBe("abstain");
