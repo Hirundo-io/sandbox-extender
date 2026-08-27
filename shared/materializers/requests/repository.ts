@@ -33,6 +33,14 @@ function toMaterializerInput(candidate: unknown): MaterializerInput {
   return { command, resource: candidateRecord.resource, workingDirectory: candidateRecord.workingDirectory };
 }
 
+function isDenseStringArray(candidate: unknown): candidate is string[] {
+  if (!Array.isArray(candidate)) return false;
+  for (let index = 0; index < candidate.length; index += 1) {
+    if (typeof candidate[index] !== "string") return false;
+  }
+  return true;
+}
+
 function duplicateLongOptionCount(words: readonly string[]): number {
   const options = words.filter((word) => word.startsWith("--")).map((word) => word.split("=", 1)[0]);
   return options.length - new Set(options).size;
@@ -140,7 +148,7 @@ export function materializeRepository(
   const materializerInput = toMaterializerInput(candidate);
   const words = materializerInput.command?.words;
   if (typeof materializerInput.resource !== "string" || typeof materializerInput.workingDirectory !== "string" ||
-    !Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
+    !isDenseStringArray(words)) return undefined;
   if (words[0] === "git") return gitOperation(materializerInput.resource, materializerInput.workingDirectory, words, execute);
   if (words[0] === "gh") return githubOperation(words);
   return undefined;

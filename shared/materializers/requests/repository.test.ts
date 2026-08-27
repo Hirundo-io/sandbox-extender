@@ -73,6 +73,7 @@ describe("repository request materializer", () => {
 
   test.each([
     undefined, null, {}, { command: null }, candidate(["git", 1]), candidate(["other"]),
+    candidate(Object.assign(["git", "fetch", "--dry-run"], { length: 4 })),
     candidate(["gh", "pr", "view"]), candidate(["gh", "pr", "view", "--repo", "invalid"]),
     candidate(["git", "fetch", "origin"]), candidate(["git", "fetch", "--dry-run", "-x"]),
     candidate(["git", "push", "origin"]), candidate(["git", "ls-remote", "--upload-pack=sh", "origin"]),
