@@ -24,13 +24,13 @@ type DenoCommand = new (
   options: { readonly args: string[]; readonly stderr: "null"; readonly stdout: "piped" },
 ) => { outputSync(): CommandOutput };
 
-function input(candidate: unknown): MaterializerInput {
+function toMaterializerInput(candidate: unknown): MaterializerInput {
   if (typeof candidate !== "object" || candidate === null) return {};
-  const value = candidate as Record<string, unknown>;
-  const command = typeof value.command === "object" && value.command !== null
-    ? value.command as { readonly words?: unknown }
+  const candidateRecord = candidate as Record<string, unknown>;
+  const command = typeof candidateRecord.command === "object" && candidateRecord.command !== null
+    ? candidateRecord.command as { readonly words?: unknown }
     : undefined;
-  return { command, resource: value.resource, workingDirectory: value.workingDirectory };
+  return { command, resource: candidateRecord.resource, workingDirectory: candidateRecord.workingDirectory };
 }
 
 function duplicateLongOptionCount(words: readonly string[]): number {
@@ -137,11 +137,11 @@ export function materializeRepository(
   candidate: unknown,
   execute: RunGit = runGit,
 ): RepositoryOperation | undefined {
-  const value = input(candidate);
-  const words = value.command?.words;
-  if (typeof value.resource !== "string" || typeof value.workingDirectory !== "string" ||
+  const materializerInput = toMaterializerInput(candidate);
+  const words = materializerInput.command?.words;
+  if (typeof materializerInput.resource !== "string" || typeof materializerInput.workingDirectory !== "string" ||
     !Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
-  if (words[0] === "git") return gitOperation(value.resource, value.workingDirectory, words, execute);
+  if (words[0] === "git") return gitOperation(materializerInput.resource, materializerInput.workingDirectory, words, execute);
   if (words[0] === "gh") return githubOperation(words);
   return undefined;
 }

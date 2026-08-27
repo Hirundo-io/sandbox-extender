@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +25,11 @@ const disableProfile = {
   arguments: {},
   operation: "disable_profile",
 } as const satisfies ProfileMutationIntent;
+
+function authorizationPath(root: string, threadId: string): string {
+  const threadDigest = createHash("sha256").update(threadId, "utf8").digest("hex");
+  return join(root, "state", `mutation-authorization-${threadDigest}.json`);
+}
 
 async function withAuthorizationRoot(
   run: (root: string) => Promise<void>,
@@ -126,7 +132,7 @@ describe("profile mutation authorization", () => {
       await authorizeProfileMutation(root, "thread-1", intent);
 
       const artifact = await readFile(
-        join(root, "state", "mutation-authorization.json"),
+        authorizationPath(root, "thread-1"),
         "utf8",
       );
       expect(artifact).not.toContain(distinctiveValue);
@@ -160,7 +166,7 @@ describe("profile mutation authorization", () => {
       await authorizeProfileMutation(root, "thread-1", activateFirstProfile);
       await expect(
         consumeProfileMutationAuthorization(root, "thread-2", activateFirstProfile),
-      ).rejects.toThrow("another thread");
+      ).rejects.toThrow("authorization is required");
 
       await authorizeProfileMutation(root, "thread-1", activateFirstProfile);
       await expect(
@@ -182,6 +188,32 @@ describe("profile mutation authorization", () => {
       ]);
       expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
       expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    });
+  });
+
+  test("keeps concurrent authorizations isolated by thread", async () => {
+    await withAuthorizationRoot(async (root) => {
+      await Promise.all([
+        authorizeProfileMutation(root, "thread-1", activateFirstProfile),
+        authorizeProfileMutation(root, "thread-2", activateSecondProfile),
+      ]);
+      await Promise.all([
+        expect(consumeProfileMutationAuthorization(root, "thread-1", activateFirstProfile)).resolves.toBeUndefined(),
+        expect(consumeProfileMutationAuthorization(root, "thread-2", activateSecondProfile)).resolves.toBeUndefined(),
+      ]);
+    });
+  });
+
+  test("rejects a mismatched artifact at a thread-specific path", async () => {
+    await withAuthorizationRoot(async (root) => {
+      await authorizeProfileMutation(root, "thread-1", activateFirstProfile);
+      await copyFile(
+        authorizationPath(root, "thread-1"),
+        authorizationPath(root, "thread-2"),
+      );
+      await expect(
+        consumeProfileMutationAuthorization(root, "thread-2", activateFirstProfile),
+      ).rejects.toThrow("another thread");
     });
   });
 });

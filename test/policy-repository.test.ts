@@ -118,6 +118,17 @@ describe("PolicyRepository", () => {
     expect(audit).toContain("profileId: review");
   });
 
+  test("serializes concurrent audit appends", async () => {
+    const repo = await repository();
+    await Promise.all([
+      repo.appendAudit({ event: "first" }),
+      repo.appendAudit({ event: "second" }),
+    ]);
+    const audit = await readFile(join(repo.root, "audit.yaml"), "utf8");
+    expect(audit).toContain("event: first");
+    expect(audit).toContain("event: second");
+  });
+
   test("refuses to persist an invalid thread binding", async () => {
     const repo = await repository();
     await expect(repo.writeState({ "thread-1": {

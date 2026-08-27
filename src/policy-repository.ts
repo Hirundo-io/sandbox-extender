@@ -207,7 +207,7 @@ function profileFromDisk(root: string, profile: DiskProfile): Profile {
 }
 
 export class PolicyRepository {
-  #stateMutation = Promise.resolve();
+  #repositoryMutation = Promise.resolve();
 
   constructor(readonly root: string) {}
 
@@ -330,27 +330,33 @@ export class PolicyRepository {
   async updateState(
     update: (bindings: Readonly<Record<string, ProfileBinding>>) => Readonly<Record<string, ProfileBinding>>,
   ): Promise<void> {
-    const mutation = this.#stateMutation.then(async () => {
+    await this.#serializeMutation(async () => {
       await this.writeState(update(await this.readState()));
     });
-    this.#stateMutation = mutation.catch(() => undefined);
-    await mutation;
   }
 
   async appendAudit(entry: Readonly<Record<string, unknown>>): Promise<void> {
-    const file = join(this.root, "audit.yaml");
-    let entries: unknown[] = [];
-    try {
-      const candidate: unknown = parse(await readFile(file, "utf8"));
-      entries = auditEntriesSchema.parse(candidate);
-    } catch (error) {
-      if (!isMissingFile(error)) {
-        throw error;
+    await this.#serializeMutation(async () => {
+      const file = join(this.root, "audit.yaml");
+      let entries: unknown[] = [];
+      try {
+        const candidate: unknown = parse(await readFile(file, "utf8"));
+        entries = auditEntriesSchema.parse(candidate);
+      } catch (error) {
+        if (!isMissingFile(error)) {
+          throw error;
+        }
       }
-    }
 
-    entries.push({ ...entry, timestamp: new Date().toISOString() });
-    await writeFile(file, stringify(entries), "utf8");
+      entries.push({ ...entry, timestamp: new Date().toISOString() });
+      await writeFile(file, stringify(entries), "utf8");
+    });
+  }
+
+  async #serializeMutation(mutation: () => Promise<void>): Promise<void> {
+    const queued = this.#repositoryMutation.then(mutation);
+    this.#repositoryMutation = queued.catch(() => undefined);
+    await queued;
   }
 
   async #verifyProposalTests(

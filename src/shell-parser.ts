@@ -107,7 +107,7 @@ function resolveParts(
     parsedValue += value;
     if (!quoted) unquotedSafetyScan += "\0";
   }
-  return !quoted && unsafeUnquotedReconstruction(unquotedSafetyScan) ? undefined : parsedValue;
+  return quoted || !unsafeUnquotedReconstruction(unquotedSafetyScan) ? parsedValue : undefined;
 }
 
 function resolveWord(word: Word, variables: Variables): string | undefined {

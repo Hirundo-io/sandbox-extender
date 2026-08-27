@@ -72,8 +72,9 @@ export type ProfileMutationAuthorization = {
   readonly expiresAt: string;
 };
 
-function authorizationFile(root: string): string {
-  return join(root, "state", "mutation-authorization.json");
+function authorizationFile(root: string, threadId: string): string {
+  const threadDigest = createHash("sha256").update(threadId, "utf8").digest("hex");
+  return join(root, "state", `mutation-authorization-${threadDigest}.json`);
 }
 
 function canonicalJsonValue(value: unknown): unknown {
@@ -155,7 +156,7 @@ export async function authorizeProfileMutation(
     threadId: nonEmptyStringSchema.parse(threadId),
     version: 1 as const,
   };
-  const file = authorizationFile(root);
+  const file = authorizationFile(root, authorization.threadId);
   const temporaryFile = `${file}.${authorization.nonce}.tmp`;
   await mkdir(join(root, "state"), { recursive: true });
   try {
@@ -177,7 +178,7 @@ export async function consumeProfileMutationAuthorization(
   intent: ProfileMutationIntent,
   now = new Date(),
 ): Promise<void> {
-  const file = authorizationFile(root);
+  const file = authorizationFile(root, threadId);
   const claimedFile = `${file}.${randomUUID()}.consuming`;
   try {
     await rename(file, claimedFile);
