@@ -4,9 +4,9 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/github-pull-request.ts",
-    "integrity": "d7eb2b4acd591b3383fc363659f13da34c48228ee0c0f602078d0d881eefce19",
+    "integrity": "e4ef39eef56adf7ccc91f21229c8059991ddb012bfdf24ba6f33fb9eaf313059",
     "language": "typescript",
-    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": ["gh"], "ffi": [] },
     "runtimeVersion": "2.8.1"
   },
   "targetScope": "single",

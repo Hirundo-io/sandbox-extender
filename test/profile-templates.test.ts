@@ -50,7 +50,7 @@ describe("shipped Profile templates", () => {
     const maker = await profileTemplate("maker");
     const scout = await profileTemplate("scout");
 
-    expect(babysitter.activationMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(babysitter.activationMaterializer?.permissions).toEqual({ ...emptyPermissions, run: ["gh"] });
     expect(babysitter.requestMaterializer?.permissions).toEqual(emptyPermissions);
     expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(maker.requestMaterializer?.permissions).toEqual({

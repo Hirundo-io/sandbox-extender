@@ -81,10 +81,12 @@ Profile. It contains the Profile's target scope, ordered groupings, Cedar
 policies, session guidance, and optional reviewed executable components.
 
 Profile activation accepts explicit arguments. Babysitter accepts a repository
-and pull-request number, Maker accepts an absolute workspace, and Scout accepts
-an explicit target set. The Activation Materializer validates those arguments
-and freezes its targets into the thread binding. Promotion reviews reusable
-rules and materializer code; it does not choose a target.
+and pull-request number. It can instead accept an absolute working directory
+and resolve that workspace's current pull request with reviewed `gh` output.
+Maker accepts an absolute workspace, and Scout accepts an explicit target set.
+The Activation Materializer validates those arguments and freezes its targets
+into the thread binding. Promotion reviews reusable rules and materializer
+code; it does not choose a target.
 
 Request Materializers parse shell or MCP input into typed facts for Cedar. They
 may reject malformed input, but they do not allow or deny operations. Cedar is
@@ -138,15 +140,18 @@ fixtures.
 
 ### Reviewed `gh` Context Lookup example
 
-[`shared/materializers/requests/github-current-pull-request.ts`](shared/materializers/requests/github-current-pull-request.ts)
-runs `gh pr view --json number,url` in the request working directory and derives
-one canonical pull-request Target. A Profile can reference the reviewed file
-with this data-only declaration:
+Babysitter's
+[`shared/materializers/activation/github-pull-request.ts`](shared/materializers/activation/github-pull-request.ts)
+runs `gh pr view --json number,url` when activation receives
+`{"workingDirectory":"/absolute/current/workspace"}` instead of an explicit
+repository and pull-request number. It validates the returned GitHub URL and
+number before freezing one canonical pull-request Target. Its Profile uses this
+data-only declaration:
 
 ```json
 {
-  "file": "materializers/requests/github-current-pull-request.ts",
-  "integrity": "2f06b209ce5ec4a5ae88566b4dd4049726b557c1d16ebef4672ff16c9052de91",
+  "file": "materializers/activation/github-pull-request.ts",
+  "integrity": "e4ef39eef56adf7ccc91f21229c8059991ddb012bfdf24ba6f33fb9eaf313059",
   "language": "typescript",
   "permissions": {
     "read": [], "write": [], "env": [], "net": [], "sys": [],
