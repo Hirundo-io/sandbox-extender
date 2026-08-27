@@ -11,6 +11,7 @@ import type {
 
 const defaultMaxIterations = 64;
 const defaultMaxSegments = 256;
+const unquotedGlobPattern = /[*?\[]/;
 const shellStateMutations = new Set([
   ".", "alias", "builtin", "declare", "eval", "exec", "export", "local", "read", "readonly",
   "set", "shift", "source", "trap", "typeset", "umask", "unalias", "unset",
@@ -58,7 +59,15 @@ function simpleVariable(text: string): string | undefined {
 }
 
 function unsafeUnquotedValue(value: string): boolean {
-  return /[\s*?\[]/.test(value);
+  return value.startsWith("~") || /\s/.test(value) || unquotedGlobPattern.test(value);
+}
+
+function unsafeUnquotedLiteral(part: Extract<WordPart, { type: "Literal" }>, first: boolean): boolean {
+  return unquotedGlobPattern.test(part.value) || first && part.text.startsWith("~");
+}
+
+function unsafeUnquotedReconstruction(value: string): boolean {
+  return value.startsWith("~") || unquotedGlobPattern.test(value);
 }
 
 function resolveParts(
@@ -67,15 +76,24 @@ function resolveParts(
   quoted: boolean,
 ): string | undefined {
   let result = "";
+  let unquotedResult = "";
   for (const part of parts) {
-    if (part.type === "Literal" || part.type === "SingleQuoted" || part.type === "AnsiCQuoted") {
+    if (part.type === "Literal") {
+      if (!quoted && unsafeUnquotedLiteral(part, unquotedResult.length === 0)) return undefined;
       result += part.value;
+      unquotedResult += quoted ? "\0" : part.value;
       continue;
     }
-    if (part.type === "DoubleQuoted" || part.type === "LocaleString") {
+    if (part.type === "SingleQuoted" || part.type === "AnsiCQuoted") {
+      result += part.value;
+      unquotedResult += "\0";
+      continue;
+    }
+    if (part.type === "DoubleQuoted") {
       const value = resolveParts(part.parts, variables, true);
       if (value === undefined) return undefined;
       result += value;
+      unquotedResult += "\0";
       continue;
     }
     const name = part.type === "SimpleExpansion"
@@ -88,8 +106,9 @@ function resolveParts(
     const value = variables.get(name);
     if (value === undefined || !quoted && unsafeUnquotedValue(value)) return undefined;
     result += value;
+    if (!quoted) unquotedResult += value;
   }
-  return result;
+  return !quoted && unsafeUnquotedReconstruction(unquotedResult) ? undefined : result;
 }
 
 function resolveWord(word: Word, variables: Variables): string | undefined {

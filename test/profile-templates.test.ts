@@ -213,6 +213,7 @@ describe("shipped Profile templates", () => {
     try {
       const nested = join(workspace, "packages", "app");
       await mkdir(nested, { recursive: true });
+      await mkdir(join(workspace, "~", "literal"), { recursive: true });
       const core = new PolicyCore();
       const maker = await profileTemplate("maker");
       core.activate({ ...maker, allowedTargets: new Set([workspace]) }, "thread-1");
@@ -229,6 +230,7 @@ describe("shipped Profile templates", () => {
         "pixi remove python --no-install --offline --no-config --manifest-path .",
         "pixi lock --no-install --offline --no-config --manifest-path .",
         "cd packages/app && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
+        "cd \"~/literal\" && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
       ]) {
         const request = {
           action: "codex.unified_exec",
@@ -276,6 +278,11 @@ describe("shipped Profile templates", () => {
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces --location=project --prefix . --cache .cache/npm",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache .cache/npm --userconfig .npmrc",
         "npm exec eslint",
+        "bun add zod --ignore-scripts --lockfile-only --cwd ~/outside --cache-dir .cache/bun",
+        "cd ~",
+        "cd ~/outside",
+        "cd ~ && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
+        "cd ~/outside && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         "bun add zod --ignore-scripts --lockfile-only --cwd ../outside --cache-dir .cache/bun",
         "bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir /tmp/bun-cache",
         "bun add zod --trust --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",

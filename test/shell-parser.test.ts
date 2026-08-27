@@ -34,6 +34,36 @@ describe("shell compiler", () => {
     expect(await compileShell('for item in "two words"; do echo $item; done')).toBeUndefined();
   });
 
+  test("rejects unquoted tilde and pathname expansion", async () => {
+    for (const script of [
+      "cd ~",
+      "bun add zod --cwd ~/outside",
+      "for loopVariable in outside; do echo ~/$loopVariable; done",
+      "echo *.ts",
+      "echo file?.ts",
+      "echo [ab].ts",
+      "for extension in ts; do echo *.$extension; done",
+      "for extension in ts; do echo file?.$extension; done",
+      "for extension in ts; do echo [ab].$extension; done",
+    ]) {
+      expect(await compileShell(script)).toBeUndefined();
+    }
+  });
+
+  test("preserves quoted tilde and glob text as literal", async () => {
+    expect(await compileShell('echo "~/literal" "*.ts" "file?.ts" "[ab].ts"')).toEqual([
+      { source: 'echo "~/literal" "*.ts" "file?.ts" "[ab].ts"', words: [
+        "echo", "~/literal", "*.ts", "file?.ts", "[ab].ts",
+      ] },
+    ]);
+    expect(await compileShell('for extension in ts; do echo "*.$extension"; done')).toEqual([
+      {
+        controlFlow: "for", iteration: 0, repetition: "finite", role: "body",
+        source: 'echo "*.$extension"', words: ["echo", "*.ts"],
+      },
+    ]);
+  });
+
   test.each(["while", "until"] as const)("authorizes %s conditions and bodies with control-flow facts", async (kind) => {
     expect(await compileShell(`${kind} test -f ready; do echo waiting; done`)).toEqual([
       {
@@ -60,6 +90,11 @@ describe("shell compiler", () => {
     "name=echo; $name unsafe",
     "echo $(printf unsafe)",
     "echo ${value:-$(printf unsafe)}",
+    "echo $((1 + 2))",
+    "echo <(printf unsafe)",
+    "echo foo{one,two}",
+    "echo @(one|two)",
+    'echo $"translated"',
     "echo unsafe > output",
     "source script.sh",
     "npm i &&",
