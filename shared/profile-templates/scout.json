@@ -10,8 +10,8 @@
     "runtimeVersion": "2.8.1"
   },
   "requestMaterializer": {
-    "file": "materializers/requests/github-repository.ts",
-    "integrity": "24c756fc922abf02bc52737009e7e91f39b3ccbbdbcac0da8d78dab46a80d4eb",
+    "file": "materializers/requests/repository.ts",
+    "integrity": "1cecdd6d9fd37ed9efb3ca6df99d45aad7463291777096d9f7aef06da80d009c",
     "language": "typescript",
     "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": ["git"], "ffi": [] },
     "runtimeVersion": "2.8.1"

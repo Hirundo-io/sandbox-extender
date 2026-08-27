@@ -8,7 +8,7 @@ import { validatePlugin } from "../src/plugin-validation.js";
 
 const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
 
-function requestMaterializerReference(file = "materializers/requests/github-repository.ts") {
+function requestMaterializerReference(file = "materializers/requests/repository.ts") {
   return {
     file,
     integrity: materializerIntegrity("", emptyPermissions, "2.8.1"),
@@ -42,7 +42,7 @@ async function writePlugin(root: string): Promise<void> {
   await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
     requestMaterializer: requestMaterializerReference(),
   }));
-  await writeFile(join(root, "shared", "materializers", "requests", "github-repository.ts"), "");
+  await writeFile(join(root, "shared", "materializers", "requests", "repository.ts"), "");
 }
 
 describe("plugin validation", () => {

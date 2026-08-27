@@ -146,11 +146,12 @@ export async function authorizeProfileMutation(
   intent: ProfileMutationIntent,
   now = new Date(),
 ): Promise<ProfileMutationAuthorization> {
+  const parsedIntent = mutationIntentSchema.parse(intent);
   const authorization = {
-    argumentsDigest: argumentsDigest(intent.arguments),
+    argumentsDigest: argumentsDigest(parsedIntent.arguments),
     expiresAt: new Date(now.getTime() + AUTHORIZATION_TTL_MS).toISOString(),
     nonce: randomUUID(),
-    operation: intent.operation,
+    operation: parsedIntent.operation,
     threadId: nonEmptyStringSchema.parse(threadId),
     version: 1 as const,
   };

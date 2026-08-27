@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { materializerIntegrity, workingDirectoryPermission } from "./materializer-policy.js";
-import { materializeActivation, materializeRequest } from "./materializer-runtime.js";
+import { materializerIntegrity, requestResourcePermission, workingDirectoryPermission } from "./materializer-policy.js";
+import { assertSupportedPlatform, materializeActivation, materializeRequest } from "./materializer-runtime.js";
 import type { ActivationMaterializer, MaterializerPermissionManifest, RequestMaterializer } from "./types.js";
 
 const noPermissions = {
@@ -57,6 +57,11 @@ function request() {
 }
 
 describe("materializer runtime", () => {
+  test("rejects Linux musl before materialization", () => {
+    expect(() => assertSupportedPlatform("linux", true)).toThrow("requires glibc");
+    expect(() => assertSupportedPlatform("linux", false)).not.toThrow();
+  });
+
   test("materializes activation arguments with the exact local Deno runtime", () => {
     expect(materializeActivation(
       activationMaterializer(activationSource),
@@ -93,6 +98,38 @@ describe("materializer runtime", () => {
         .toEqual({ context: { value: "allowed" }, resource: "/work" });
     } finally {
       rmSync(workingDirectory, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects a symlinked approved request resource", () => {
+    const outside = mkdtempSync(join(tmpdir(), "materializer-outside-"));
+    const root = mkdtempSync(join(tmpdir(), "materializer-root-"));
+    const link = join(root, "linked");
+    try {
+      symlinkSync(outside, link);
+      const permissions = { ...noPermissions, read: [requestResourcePermission] };
+      expect(materializeRequest(requestMaterializer(requestSource, permissions), {
+        ...request(),
+        resource: link,
+      }, link)).toBeUndefined();
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+      rmSync(outside, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects a materializer working directory outside its approved request resource", () => {
+    const resource = realpathSync(mkdtempSync(join(tmpdir(), "materializer-resource-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "materializer-outside-")));
+    try {
+      const permissions = { ...noPermissions, read: [requestResourcePermission] };
+      expect(materializeRequest(requestMaterializer(requestSource, permissions), {
+        ...request(),
+        resource,
+      }, outside)).toBeUndefined();
+    } finally {
+      rmSync(resource, { force: true, recursive: true });
+      rmSync(outside, { force: true, recursive: true });
     }
   });
 

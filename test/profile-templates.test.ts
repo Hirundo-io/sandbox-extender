@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -209,7 +209,7 @@ describe("shipped Profile templates", () => {
   }, 20_000);
 
   test("Maker permits lock-focused dependency changes inside the effective workspace", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-maker-"));
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "sandbox-extender-maker-")));
     try {
       const nested = join(workspace, "packages", "app");
       await mkdir(nested, { recursive: true });
@@ -260,7 +260,7 @@ describe("shipped Profile templates", () => {
   }, 20_000);
 
   test("Maker abstains from destination, configuration, lifecycle, and interpreter escapes", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-maker-deny-"));
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "sandbox-extender-maker-deny-")));
     const outside = await mkdtemp(join(tmpdir(), "sandbox-extender-maker-outside-"));
     try {
       await symlink(outside, join(workspace, "linked-cache"));

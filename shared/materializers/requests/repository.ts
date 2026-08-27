@@ -77,18 +77,22 @@ function effectiveGitRemote(
   return effectiveRemote.length > 0 && !effectiveRemote.includes("\n") ? effectiveRemote : undefined;
 }
 
+function isGitHubHost(hostname: string): boolean {
+  return hostname === "github.com" || hostname.endsWith(".github.com");
+}
+
 function isSafeGitRemote(remote: string | undefined): boolean {
   if (!remote || /^[A-Za-z][A-Za-z0-9+.-]*::/.test(remote)) return false;
   if (/^(?:https?|ssh|git):\/\//.test(remote)) {
     try {
       const url = new URL(remote);
-      return url.password.length === 0 && (/^\[[0-9A-Fa-f:.]+\]$/.test(url.hostname) ||
-        /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(url.hostname));
+      return url.password.length === 0 && isGitHubHost(url.hostname.toLowerCase());
     } catch {
       return false;
     }
   }
-  return /^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?:[A-Za-z0-9._~/%+-]+(?:\/[A-Za-z0-9._~/%+-]+)*$/.test(remote);
+  const scp = /^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?):[A-Za-z0-9._~/%+-]+(?:\/[A-Za-z0-9._~/%+-]+)*$/.exec(remote);
+  return Boolean(scp && isGitHubHost(scp[1]!.toLowerCase()));
 }
 
 function gitOperation(
@@ -129,7 +133,7 @@ function githubOperation(words: readonly string[]): RepositoryOperation | undefi
   };
 }
 
-export function materializeGitHubRepository(
+export function materializeRepository(
   candidate: unknown,
   execute: RunGit = runGit,
 ): RepositoryOperation | undefined {
@@ -142,15 +146,15 @@ export function materializeGitHubRepository(
   return undefined;
 }
 
-export async function runGitHubRepositoryMaterializer(
+export async function runRepositoryMaterializer(
   candidate: Promise<unknown>,
   write: (value: string) => void = console.log,
 ): Promise<boolean> {
-  const materialized = materializeGitHubRepository(await candidate);
+  const materialized = materializeRepository(await candidate);
   if (!materialized) return false;
   const { resource, ...context } = materialized;
   write(JSON.stringify({ context, resource }));
   return true;
 }
 
-if (import.meta.main) Deno.exit(await runGitHubRepositoryMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);
+if (import.meta.main) Deno.exit(await runRepositoryMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);

@@ -258,11 +258,14 @@ export async function evaluateForThread(
       return result;
     }
     core.activate(profile, request.threadId);
-    const result = await core.evaluate(request);
-    if (result.decision === "allow" && !await core.consumeToken(result.token?.id ?? "", request)) {
-      return { decision: "abstain", reason: "authorization token is unavailable" };
+    const evaluated = await core.evaluate(request);
+    if (evaluated.decision === "allow" && !await core.consumeToken(evaluated.token?.id ?? "", request)) {
+      const result = { decision: "abstain" as const, reason: "authorization token is unavailable" };
+      await recordEvaluation(repository, request, result, binding.profileId, profile.policyRevision);
+      return result;
     }
-    await recordEvaluation(repository, request, result, binding.profileId, profile.policyRevision);
+    await recordEvaluation(repository, request, evaluated, binding.profileId, profile.policyRevision);
+    const { token: _, ...result } = evaluated;
     return result;
   } catch {
     return { decision: "abstain", reason: "policy repository is unavailable" };
@@ -329,13 +332,12 @@ export async function activatePreparedProfile(
   threadId: string,
   activation: PreparedProfileActivation,
 ): Promise<readonly string[]> {
-  const bindings = await repository.readState();
-  await repository.writeState({ ...bindings, [threadId]: {
+  await repository.updateState((bindings) => ({ ...bindings, [threadId]: {
     allowedTargets: activation.targets,
     fingerprint: fingerprint(activation.profile),
     policyRevision: activation.profile.policyRevision,
     profileId: activation.profile.id,
-  } });
+  } }));
   return activation.targets;
 }
 
@@ -356,7 +358,8 @@ export async function disableProfile(
   repository: PolicyRepository,
   threadId: string,
 ): Promise<void> {
-  const bindings = await repository.readState();
-  const { [threadId]: _, ...remaining } = bindings;
-  await repository.writeState(remaining);
+  await repository.updateState((bindings) => {
+    const { [threadId]: _, ...remaining } = bindings;
+    return remaining;
+  });
 }

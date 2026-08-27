@@ -41,9 +41,23 @@ describe("profile mutation authorization", () => {
     expect(parseProfileMutationIntent(disableProfile)).toEqual(disableProfile);
     await withAuthorizationRoot(async (root) => {
       await expect(authorizeProfileMutation(root, "thread-1", {
-        arguments: { invalid: undefined },
-        operation: "disable_profile",
-      } as unknown as ProfileMutationIntent)).rejects.toThrow("JSON values");
+        arguments: {
+          action: "codex.unified_exec",
+          arguments: { invalid: undefined },
+          profileId: "review-profile",
+          resource: "/workspace",
+        },
+        operation: "propose_profile",
+      } as unknown as ProfileMutationIntent)).rejects.toThrow();
+    });
+  });
+
+  test("rejects extra authorization intent fields", async () => {
+    await withAuthorizationRoot(async (root) => {
+      await expect(authorizeProfileMutation(root, "thread-1", {
+        ...disableProfile,
+        unexpected: "not part of the consumed intent",
+      } as unknown as ProfileMutationIntent)).rejects.toThrow();
     });
   });
   test("rejects an authorization for another operation", async () => {

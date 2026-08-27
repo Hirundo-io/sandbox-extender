@@ -83,6 +83,10 @@ policies, session guidance, and optional reviewed executable components.
 Profile activation accepts explicit arguments. Babysitter accepts a repository
 and pull-request number. It can instead accept an absolute working directory
 and resolve that workspace's current pull request with reviewed `gh` output.
+Profiles deliberately apply their rules to the agent's working directory. When
+you activate a Profile with a working-directory argument, expect its reviewed
+materializer to access that folder with the permissions declared in the Profile;
+activate it only for a workspace you intend the Profile to inspect.
 Maker accepts an absolute workspace, and Scout accepts an explicit target set.
 The Activation Materializer validates those arguments and freezes its targets
 into the thread binding. Promotion reviews reusable rules and materializer
@@ -119,6 +123,10 @@ compatibility API needs an explicit `read` declaration.
 Bun installs Deno as a production dependency. `package.json` lists `deno` as a
 trusted lifecycle dependency because its official postinstall selects the
 platform binary. No other package receives lifecycle trust.
+
+Linux installations currently require glibc. Musl-based distributions such as
+Alpine Linux are unsupported and fail with an explicit unsupported-platform
+error before a materializer starts.
 
 ### Supported shell subset
 

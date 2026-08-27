@@ -189,7 +189,26 @@ function isMissingFile(error: unknown): boolean {
   );
 }
 
+function profileFromDisk(root: string, profile: DiskProfile): Profile {
+  const activationMaterializer = profile.activationMaterializer && {
+    ...profile.activationMaterializer,
+    file: join(root, profile.activationMaterializer.file),
+  };
+  const requestMaterializer = profile.requestMaterializer && {
+    ...profile.requestMaterializer,
+    file: join(root, profile.requestMaterializer.file),
+  };
+  return {
+    ...profile,
+    allowedTargets: new Set(profile.allowedTargets),
+    activationMaterializer,
+    requestMaterializer,
+  };
+}
+
 export class PolicyRepository {
+  #stateMutation = Promise.resolve();
+
   constructor(readonly root: string) {}
 
   async loadProfile(profileId: string): Promise<Profile> {
@@ -201,20 +220,7 @@ export class PolicyRepository {
       throw new Error(`${file} does not match its requested profile ID`);
     }
 
-    const activationMaterializer = profile.activationMaterializer && {
-      ...profile.activationMaterializer,
-      file: join(this.root, profile.activationMaterializer.file),
-    };
-    const requestMaterializer = profile.requestMaterializer && {
-      ...profile.requestMaterializer,
-      file: join(this.root, profile.requestMaterializer.file),
-    };
-    return {
-      ...profile,
-      allowedTargets: new Set(profile.allowedTargets),
-      activationMaterializer,
-      requestMaterializer,
-    };
+    return profileFromDisk(this.root, profile);
   }
 
   async loadVerifiedProfile(profileId: string): Promise<Profile> {
@@ -229,7 +235,7 @@ export class PolicyRepository {
       throw new Error("profile must be reviewed before activation");
     }
     verifyReviewedProfile(this.root, profileId, diskProfile);
-    const profile = await this.loadProfile(profileId);
+    const profile = profileFromDisk(this.root, diskProfile);
     const activationMaterializer = profile.activationMaterializer &&
       await verifiedMaterializer(this.root, diskProfile.policyRevision, profile.activationMaterializer);
     const requestMaterializer = profile.requestMaterializer &&
@@ -319,6 +325,16 @@ export class PolicyRepository {
     const file = join(this.root, "state", "thread-bindings.json");
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, `${JSON.stringify(bindings, null, 2)}\n`, "utf8");
+  }
+
+  async updateState(
+    update: (bindings: Readonly<Record<string, ProfileBinding>>) => Readonly<Record<string, ProfileBinding>>,
+  ): Promise<void> {
+    const mutation = this.#stateMutation.then(async () => {
+      await this.writeState(update(await this.readState()));
+    });
+    this.#stateMutation = mutation.catch(() => undefined);
+    await mutation;
   }
 
   async appendAudit(entry: Readonly<Record<string, unknown>>): Promise<void> {

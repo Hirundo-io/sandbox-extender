@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import type { ActivationMaterializer, MaterializerPermissionManifest, RequestMaterializer } from "./types.js";
 
@@ -21,8 +22,12 @@ function canonicalPermissions(permissions: MaterializerPermissionManifest): Mate
 }
 
 function pathForms(path: string): readonly string[] {
-  const canonical = realpathSync(path);
-  return canonical === path ? [path] : [path, canonical];
+  return [realpathSync(path)];
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const path = relative(root, candidate);
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
 function resolvedPermissions(
@@ -67,6 +72,17 @@ export function denoPermissionFlags(
   workingDirectory: string,
   requestResource?: string,
 ): string[] {
+  const usesRequestResource = permissionNames.some((name) => permissions[name].includes(requestResourcePermission));
+  if (requestResource && usesRequestResource) {
+    const canonicalResource = realpathSync(requestResource);
+    const canonicalWorkingDirectory = realpathSync(workingDirectory);
+    if (canonicalResource !== resolve(requestResource)) {
+      throw new Error("approved request resource must be a canonical path");
+    }
+    if (!isWithin(canonicalResource, canonicalWorkingDirectory)) {
+      throw new Error("materializer working directory is outside the approved request resource");
+    }
+  }
   return permissionNames.flatMap((name) => permissions[name].flatMap((value) =>
     resolvedPermissions(value, workingDirectory, requestResource)
       .map((resolved) => `--allow-${name}=${resolved}`)));

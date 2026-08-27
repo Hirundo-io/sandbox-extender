@@ -153,7 +153,9 @@ describe("policy service", () => {
       })).toEqual(["github:pull-request:acme/example#42"]);
       expect((await repository.readState())[pullRequestRequest.threadId]?.allowedTargets)
         .toEqual(["github:pull-request:acme/example#42"]);
-      expect((await evaluateForThread(repository, pullRequestRequest)).decision).toBe("allow");
+      const allowed = await evaluateForThread(repository, pullRequestRequest);
+      expect(allowed.decision).toBe("allow");
+      expect(allowed.token).toBeUndefined();
       expect((await evaluateForThread(repository, {
         ...pullRequestRequest,
         arguments: { command: "gh pr view 43 --repo acme/example" },
@@ -392,11 +394,19 @@ describe("policy service", () => {
       groupings: [{ evaluate: () => "allow", id: "allow" }], id: "reviewed", policyRevision: "a".repeat(40),
     };
     const repository = stubRepository(profile);
+    let auditEntry: Readonly<Record<string, unknown>> | undefined;
+    repository.appendAudit = async (entry) => {
+      auditEntry = entry;
+    };
     const originalConsumeToken = PolicyCore.prototype.consumeToken;
     PolicyCore.prototype.consumeToken = async () => false;
     try {
       const result = await evaluateForThread(repository, request);
       expect(result.decision).toBe("abstain");
+      expect(auditEntry).toEqual(expect.objectContaining({
+        decision: "abstain",
+        reason: "authorization token is unavailable",
+      }));
     } finally {
       PolicyCore.prototype.consumeToken = originalConsumeToken;
     }

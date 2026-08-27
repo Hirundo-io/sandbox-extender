@@ -115,6 +115,7 @@ export type ProfileProposal = {
     readonly groupings: readonly CedarGrouping[];
     readonly id: string;
     readonly policyRevision: string;
+    readonly sessionContext?: readonly string[];
     readonly targetScope?: "single";
     readonly requestMaterializer?: Omit<RequestMaterializer, "reviewedSource">;
   };

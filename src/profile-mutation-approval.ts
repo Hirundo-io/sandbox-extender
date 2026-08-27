@@ -37,7 +37,7 @@ function line(label: string, value: string | undefined): string {
 }
 
 function approvalMessage(intent: ProfileMutationIntent, details: MutationApprovalDetails): string {
-  const targets = details.targets?.length ? details.targets.join(", ") : undefined;
+  const targets = details.targets?.length ? details.targets.map((target) => JSON.stringify(target)).join(", ") : undefined;
   return [
     "Approve this Sandbox Extender Profile mutation?",
     line("Operation", intent.operation),
@@ -51,7 +51,8 @@ function approvalMessage(intent: ProfileMutationIntent, details: MutationApprova
 
 function isUnsupportedElicitation(error: unknown): boolean {
   return (error instanceof Error && error.message === "Client does not support form elicitation.") ||
-    (error instanceof McpError && error.code === ErrorCode.MethodNotFound);
+    (error instanceof McpError && (error.code === ErrorCode.MethodNotFound ||
+      error.code === ErrorCode.InvalidParams && /(?:form.*(?:not supported|unsupported)|(?:not supported|unsupported).*form)/i.test(error.message)));
 }
 
 /** Requests host-mediated user approval, with the legacy CLI artifact as a compatibility fallback. */

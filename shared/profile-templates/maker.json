@@ -4,7 +4,7 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/local-workspace.ts",
-    "integrity": "006a3afd8794ea5a1cdde934cb77d50c89a0ead24f054dff70b4a05e1bcee113",
+    "integrity": "b5f9a4a59d67b07b778007fc7af4129f088507afe4246ab34e794f0d8078cbd3",
     "language": "typescript",
     "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
     "runtimeVersion": "2.8.1"

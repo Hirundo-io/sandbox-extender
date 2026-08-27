@@ -42,6 +42,13 @@ describe("PolicyCore", () => {
     expect((await core.evaluate(request)).decision).toBe("abstain");
   });
 
+  test("rejects empty in-memory grouping IDs", () => {
+    const core = new PolicyCore();
+    expect(() => core.activate(profile({
+      groupings: [{ id: "", evaluate: () => "allow" }],
+    }), request.threadId)).toThrow("grouping IDs must not be empty");
+  });
+
   test("abstains when the resolved target is outside the profile scope", async () => {
     const core = new PolicyCore();
     core.activate(profile({ allowedTargets: new Set() }), request.threadId);
@@ -365,7 +372,7 @@ describe("PolicyCore", () => {
   });
 
   test("resolves every compound command before authorizing it", async () => {
-    const file = join(process.cwd(), "shared", "materializers", "requests", "github-repository.ts");
+    const file = join(process.cwd(), "shared", "materializers", "requests", "repository.ts");
     const reviewedSource = readFileSync(file, "utf8");
     const core = new PolicyCore();
     core.activate(profile({

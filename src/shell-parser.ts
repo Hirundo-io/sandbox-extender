@@ -74,24 +74,24 @@ function resolveParts(
   variables: Variables,
   quoted: boolean,
 ): string | undefined {
-  let result = "";
+  let parsedValue = "";
   let unquotedSafetyScan = "";
   for (const part of parts) {
     if (part.type === "Literal") {
       if (!quoted && unsafeUnquotedLiteral(part, unquotedSafetyScan.length === 0)) return undefined;
-      result += part.value;
+      parsedValue += part.value;
       unquotedSafetyScan += quoted ? "\0" : part.value;
       continue;
     }
     if (part.type === "SingleQuoted" || part.type === "AnsiCQuoted") {
-      result += part.value;
+      parsedValue += part.value;
       unquotedSafetyScan += "\0";
       continue;
     }
     if (part.type === "DoubleQuoted") {
       const value = resolveParts(part.parts, variables, true);
       if (value === undefined) return undefined;
-      result += value;
+      parsedValue += value;
       unquotedSafetyScan += "\0";
       continue;
     }
@@ -104,10 +104,10 @@ function resolveParts(
     if (!name) return undefined;
     const value = variables.get(name);
     if (value === undefined || !quoted && unsafeExpandedValue(value)) return undefined;
-    result += value;
+    parsedValue += value;
     if (!quoted) unquotedSafetyScan += "\0";
   }
-  return !quoted && unsafeUnquotedReconstruction(unquotedSafetyScan) ? undefined : result;
+  return !quoted && unsafeUnquotedReconstruction(unquotedSafetyScan) ? undefined : parsedValue;
 }
 
 function resolveWord(word: Word, variables: Variables): string | undefined {

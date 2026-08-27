@@ -60,6 +60,23 @@ async function commitPolicyRevision(root: string): Promise<string> {
 }
 
 describe("PolicyRepository", () => {
+  test("serializes concurrent thread-binding updates", async () => {
+    const repo = await repository();
+    const binding = {
+      allowedTargets: ["github:repository:acme/example"],
+      fingerprint: "0".repeat(64),
+      policyRevision: "a".repeat(40),
+      profileId: "review",
+    };
+    await Promise.all([
+      repo.updateState((bindings) => ({ ...bindings, "thread-1": binding })),
+      repo.updateState((bindings) => ({ ...bindings, "thread-2": binding })),
+    ]);
+    expect(Object.keys(await repo.readState()).sort()).toEqual(["thread-1", "thread-2"]);
+    await expect(repo.updateState(() => ({ invalid: binding, "": binding }))).rejects.toThrow();
+    await expect(repo.updateState((bindings) => bindings)).resolves.toBeUndefined();
+  });
+
   test("loads a Cedar profile and persists thread bindings", async () => {
     const repo = await repository();
     await mkdir(join(repo.root, "profiles"));
@@ -218,7 +235,7 @@ describe("PolicyRepository", () => {
   test("runs request-materializer authorization tests from the reviewed revision", async () => {
     const repo = await repository();
     await repo.initialize();
-    await installMaterializer(repo.root, "requests", "github-repository.ts");
+    await installMaterializer(repo.root, "requests", "repository.ts");
     await repo.writeProposal({
       profile: {
         allowedTargets: ["github:repository:acme/example"],
@@ -229,7 +246,7 @@ describe("PolicyRepository", () => {
         id: "review",
         policyRevision: "pending-review",
         requestMaterializer: await materializerReference(
-          "requests", "github-repository.ts", { ...emptyPermissions, run: ["git"] },
+          "requests", "repository.ts", { ...emptyPermissions, run: ["git"] },
         ),
       },
       tests: [{
@@ -248,18 +265,18 @@ describe("PolicyRepository", () => {
     await expect(repo.promoteProposal("review", revision)).resolves.toBeUndefined();
     await expect(repo.loadVerifiedProfile("review")).resolves.toBeDefined();
     await Bun.write(
-      join(repo.root, "materializers", "requests", "github-repository.ts"),
+      join(repo.root, "materializers", "requests", "repository.ts"),
       "console.log(JSON.stringify({resource:'github:repository:evil/example',context:{}}));\n",
     );
     await expect(repo.loadVerifiedProfile("review")).rejects.toThrow(
-      "materializer materializers/requests/github-repository.ts does not match policy revision",
+      "materializer materializers/requests/repository.ts does not match policy revision",
     );
   });
 
   test("rejects a request-materializer reference change after review", async () => {
     const repo = await repository();
     await repo.initialize();
-    await installMaterializer(repo.root, "requests", "github-repository.ts");
+    await installMaterializer(repo.root, "requests", "repository.ts");
     await installMaterializer(repo.root, "requests", "github-pull-request.ts");
     await repo.writeProposal({
       profile: {
@@ -268,7 +285,7 @@ describe("PolicyRepository", () => {
         id: "review",
         policyRevision: "pending-review",
         requestMaterializer: await materializerReference(
-          "requests", "github-repository.ts", { ...emptyPermissions, run: ["git"] },
+          "requests", "repository.ts", { ...emptyPermissions, run: ["git"] },
         ),
       },
       tests: [{

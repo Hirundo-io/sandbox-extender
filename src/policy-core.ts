@@ -258,6 +258,11 @@ function materializeProfileRequest(
   command?: ShellCommandContext,
 ): { readonly context?: Readonly<Record<string, unknown>>; readonly request: NormalizedRequest } | undefined {
   if (!profile.requestMaterializer) return { request };
+  const permissions = profile.requestMaterializer.permissions;
+  const executable = command?.words[0];
+  const materializerCanInspectResource = permissions.read.length > 0 || permissions.write.length > 0 ||
+    permissions.ffi.length > 0 || executable !== undefined && permissions.run.includes(executable);
+  if (materializerCanInspectResource && !profile.allowedTargets.has(request.resource)) return undefined;
   const materialized = materializeRequest(profile.requestMaterializer, request, workingDirectory, command);
   return materialized
     ? { context: materialized.context, request: { ...request, resource: materialized.resource } }
@@ -357,6 +362,9 @@ export class PolicyCore {
     if (!threadId) {
       throw new Error("threadId is required");
     }
+    if (profile.groupings.some((grouping) => grouping.id.length === 0)) {
+      throw new Error("grouping IDs must not be empty");
+    }
 
     this.#activeProfiles.set(threadId, { profile, threadId });
   }
@@ -438,7 +446,7 @@ export class PolicyCore {
       }
       const result = evaluateCommand(profile, resolvedRequest, commandContext, materializedRequest.context);
       if (result.decision !== "allow") return result;
-      if (result.matchedGroupingId) matchedGroupingIds.push(result.matchedGroupingId);
+      if (result.matchedGroupingId !== undefined) matchedGroupingIds.push(result.matchedGroupingId);
       resolvedTargets.push(resolvedRequest.resource);
     }
 

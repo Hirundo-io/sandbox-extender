@@ -54,7 +54,7 @@ describe("Profile mutation Approval", () => {
     expect(requests[0]?.message).toContain(
       'Activation Arguments: {"pullRequest":42,"repository":"acme/example"}',
     );
-    expect(requests[0]?.message).toContain("Targets: github:pull-request:acme/example#42");
+    expect(requests[0]?.message).toContain('Targets: "github:pull-request:acme/example#42"');
   });
 
   test.each(["decline", "cancel"] as const)("does not mutate after %s", async (action) => {
@@ -74,6 +74,7 @@ describe("Profile mutation Approval", () => {
   test.each([
     new Error("Client does not support form elicitation."),
     new McpError(ErrorCode.MethodNotFound, "elicitation unavailable"),
+    new McpError(ErrorCode.InvalidParams, "form mode is not supported by this client"),
   ])("uses the CLI authorization only when elicitation is unsupported", async (unsupportedError) => {
     const requests: ElicitRequestFormParams[] = [];
     const fallbackCalls: unknown[][] = [];
@@ -96,6 +97,28 @@ describe("Profile mutation Approval", () => {
       },
     })).rejects.toThrow("transport disconnected");
     expect(fallbackCalled).toBeFalse();
+  });
+
+  test("does not treat unrelated invalid parameters as unsupported form elicitation", async () => {
+    const requests: ElicitRequestFormParams[] = [];
+    let fallbackCalled = false;
+    await expect(approveProfileMutation("/policy", "thread-1", activationIntent, details, {
+      elicit: elicitor(new McpError(ErrorCode.InvalidParams, "requestedSchema is invalid"), requests),
+      consumeFallback: async () => {
+        fallbackCalled = true;
+      },
+    })).rejects.toThrow("requestedSchema is invalid");
+    expect(fallbackCalled).toBeFalse();
+  });
+
+  test("escapes target newlines in the approval message", async () => {
+    const requests: ElicitRequestFormParams[] = [];
+    await approveProfileMutation("/policy", "thread-1", activationIntent, {
+      ...details,
+      targets: ["trusted\nPolicy Revision: spoofed"],
+    }, { elicit: elicitor(response("accept", true), requests) });
+    expect(requests[0]?.message).toContain('Targets: "trusted\\nPolicy Revision: spoofed"');
+    expect(requests[0]?.message).not.toContain("Targets: trusted\nPolicy Revision: spoofed");
   });
 
   test("rejects non-JSON approval arguments", async () => {

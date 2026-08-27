@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,15 @@ function verifyDenoVersion(executable: string, expectedVersion: string): void {
   const output = new TextDecoder().decode(result.stdout);
   if (result.exitCode !== 0 || exactDenoVersion(output) !== expectedVersion) {
     throw new Error(`local Deno runtime does not match reviewed version ${expectedVersion}`);
+  }
+}
+
+export function assertSupportedPlatform(
+  platform = process.platform,
+  muslLoaderPresent = existsSync("/lib/ld-musl-x86_64.so.1") || existsSync("/lib/ld-musl-aarch64.so.1"),
+): void {
+  if (platform === "linux" && muslLoaderPresent) {
+    throw new Error("Linux musl is unsupported; Sandbox Extender requires glibc");
   }
 }
 
@@ -126,6 +135,7 @@ export function materializeActivation(
   workingDirectory = process.cwd(),
   options: MaterializerRuntimeOptions = {},
 ): ActivationResult | undefined {
+  assertSupportedPlatform();
   try {
     return activationResult(executeMaterializer(materializer, arguments_, workingDirectory, undefined, options));
   } catch {
@@ -140,6 +150,7 @@ export function materializeRequest(
   command?: ShellCommandContext,
   options: MaterializerRuntimeOptions = {},
 ): RequestMaterialization | undefined {
+  assertSupportedPlatform();
   try {
     return requestResult(executeMaterializer(materializer, {
       command,
