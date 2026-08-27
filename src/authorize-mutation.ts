@@ -11,11 +11,11 @@ Operations:
   initialize_policy_repository  arguments: {}
   propose_profile               arguments: {"action":"...","arguments":{},"profileId":"...","resource":"..."}
   promote_profile               arguments: {"policyRevision":"<40-character-commit-id>","profileId":"..."}
-  activate_profile              arguments: {"profileId":"..."}
+  activate_profile              arguments: {"arguments":{},"profileId":"..."}
   disable_profile               arguments: {}
 
 Example:
-  bun run authorize:mutation -- activate_profile --thread-id <host-thread-id> --arguments-json '{"profileId":"review-current-pr"}'`;
+  bun run authorize:mutation -- activate_profile --thread-id <host-thread-id> --arguments-json '{"arguments":{"repository":"owner/repository","pullRequest":42},"profileId":"babysitter"}'`;
 
 type CliInput = {
   readonly argumentsJson: string;

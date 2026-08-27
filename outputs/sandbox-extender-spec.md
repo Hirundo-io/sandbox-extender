@@ -63,7 +63,7 @@ A Profile is a named, user-activated composition of Groupings for a defined kind
 - If a resume, fork, rename, or machine move cannot be safely matched to its thread binding, the profile is disabled.
 - A missing, invalid, incompatible, or unavailable policy state disables the profile and makes every extension request abstain.
 
-Disabled templates may ship, but no profile is active by default. Initial templates are `Scout` for read-oriented external inspection and `Maker` for repository-scoped writes.
+Disabled Profile templates may ship, but no Profile is active by default. Initial Profile templates are `Scout` for read-oriented external inspection and `Maker` for repository-scoped writes.
 
 ## Targets and live bindings
 
@@ -95,13 +95,13 @@ If required context cannot be resolved or is inconsistent with the request, eval
 
 ## Adapters and lookups
 
-Adapters are typed normalization code. Profile-owned TypeScript resolvers are trusted executable code reviewed with the Policy Repository and run with the user's authority; approving a Policy Revision that contains a resolver approves that code. Resolver references and source bytes are verified against the reviewed revision before use. Resolvers are not runtime-sandboxed and must not execute the requested operation during authorization.
+Request Materializers are typed normalization code. Profile-owned TypeScript materializers are trusted executable code reviewed with the Policy Repository and run with the user's authority; approving a Policy Revision that contains a materializer approves that code. Materializer references and source bytes are verified against the reviewed revision before use. Materializers are not runtime-sandboxed and must not execute the requested operation during authorization.
 
 - Shell adapters parse compound syntax and independently authorize every executable segment in pipelines, `&&`, `||`, redirections, subshells, assignments, and substitutions. If any segment cannot be normalized, the full request abstains.
 - MCP adapters use server identity, tool name, JSON-schema-validated arguments, and declared target extractors. Servers or tools lacking an adapter abstain.
 - Context lookups are read-only and versioned as part of the Profile. They may resolve facts such as the PR for the current repository and branch.
 
-Read-only behavior is an engineer-review contract in the first release; no additional runtime sandboxing of trusted resolver code is required at this stage.
+Read-only behavior is an engineer-review contract in the first release; no additional runtime sandboxing of trusted materializer code is required at this stage.
 
 ## Learning, approval, and testing
 

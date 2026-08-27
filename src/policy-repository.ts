@@ -6,17 +6,13 @@ import { parse, stringify } from "yaml";
 import { z } from "zod";
 
 import { PolicyCore } from "./policy-core.js";
+import { materializeActivation } from "./materializer-runtime.js";
 import {
+  activationMaterializerSchema,
   policyRevisionSchema,
   profileIdSchema,
-  pullRequestBindingSchema,
-  targetResolverSchema,
+  requestMaterializerSchema,
 } from "./schemas.js";
-import {
-  materializePullRequestProfile,
-  materializePullRequestProfileForTarget,
-} from "./pull-request-binding.js";
-import type { PullRequestCommandRunner } from "./pull-request-binding.js";
 import type {
   AuthorizationTest,
   Profile,
@@ -32,25 +28,27 @@ const cedarGroupingSchema = z.object({
   ])),
 }).strict();
 const diskProfileSchema = z.object({
+  activationMaterializer: activationMaterializerSchema.optional(),
   allowedTargets: z.array(z.string().min(1)),
   groupings: z.array(cedarGroupingSchema),
   id: profileIdSchema,
   policyRevision: z.string().min(1),
   sessionContext: z.array(z.string().min(1)).optional(),
   targetScope: z.literal("single").optional(),
-  targetResolver: targetResolverSchema.optional(),
+  requestMaterializer: requestMaterializerSchema.optional(),
 }).strict();
 const diskProposalSchema = diskProfileSchema.extend({
   policyRevision: z.literal("pending-review"),
-  pullRequestBinding: pullRequestBindingSchema.optional(),
 }).strict();
 const bindingsSchema = z.record(z.string().min(1), z.object({
+  allowedTargets: z.array(z.string().min(1)).min(1),
   fingerprint: z.string().length(64),
   policyRevision: z.string().min(1),
   profileId: profileIdSchema,
 }).strict());
 const auditEntriesSchema = z.array(z.record(z.string(), z.unknown()));
 const authorizationTestsSchema = z.array(z.object({
+  activationArguments: z.record(z.string(), z.unknown()).optional(),
   expected: z.enum(["allow", "deny", "abstain"]),
   name: z.string().min(1),
   request: z.object({
@@ -128,13 +126,7 @@ function reconstructReviewedProfile(
     throw new Error(`${proposalFile} does not match its requested profile ID`);
   }
 
-  const reviewedProfile: DiskProfile = proposal.pullRequestBinding
-    ? materializePullRequestProfileForTarget(
-      { ...proposal, pullRequestBinding: proposal.pullRequestBinding },
-      liveProfile.allowedTargets[0] ?? "",
-    )
-    : proposal;
-  return { ...reviewedProfile, policyRevision: liveProfile.policyRevision };
+  return { ...proposal, policyRevision: liveProfile.policyRevision };
 }
 
 function verifyReviewedProfile(
@@ -148,7 +140,7 @@ function verifyReviewedProfile(
   }
 }
 
-async function readVerifiedResolverSource(
+async function readVerifiedMaterializerSource(
   root: string,
   policyRevision: string,
   relativePath: string,
@@ -156,7 +148,7 @@ async function readVerifiedResolverSource(
   const reviewedSource = readCommittedFile(root, policyRevision, relativePath);
   const currentSource = await readFile(join(root, relativePath), "utf8");
   if (currentSource !== reviewedSource) {
-    throw new Error(`resolver ${relativePath} does not match policy revision ${policyRevision}`);
+    throw new Error(`materializer ${relativePath} does not match policy revision ${policyRevision}`);
   }
   return reviewedSource;
 }
@@ -171,10 +163,7 @@ function isMissingFile(error: unknown): boolean {
 }
 
 export class PolicyRepository {
-  constructor(
-    readonly root: string,
-    private readonly pullRequestCommandRunner?: PullRequestCommandRunner,
-  ) {}
+  constructor(readonly root: string) {}
 
   async loadProfile(profileId: string): Promise<Profile> {
     profileIdSchema.parse(profileId);
@@ -185,14 +174,19 @@ export class PolicyRepository {
       throw new Error(`${file} does not match its requested profile ID`);
     }
 
-    const targetResolver = profile.targetResolver && {
-      ...profile.targetResolver,
-      file: join(this.root, profile.targetResolver.file),
+    const activationMaterializer = profile.activationMaterializer && {
+      ...profile.activationMaterializer,
+      file: join(this.root, profile.activationMaterializer.file),
+    };
+    const requestMaterializer = profile.requestMaterializer && {
+      ...profile.requestMaterializer,
+      file: join(this.root, profile.requestMaterializer.file),
     };
     return {
       ...profile,
       allowedTargets: new Set(profile.allowedTargets),
-      targetResolver,
+      activationMaterializer,
+      requestMaterializer,
     };
   }
 
@@ -209,16 +203,26 @@ export class PolicyRepository {
     }
     verifyReviewedProfile(this.root, profileId, diskProfile);
     const profile = await this.loadProfile(profileId);
-    if (!profile.targetResolver) return profile;
-    const relativePath = relative(this.root, profile.targetResolver.file);
-    const reviewedSource = await readVerifiedResolverSource(
-      this.root,
-      diskProfile.policyRevision,
-      relativePath,
-    );
+    const activationMaterializer = profile.activationMaterializer && {
+      ...profile.activationMaterializer,
+      reviewedSource: await readVerifiedMaterializerSource(
+        this.root,
+        diskProfile.policyRevision,
+        relative(this.root, profile.activationMaterializer.file),
+      ),
+    };
+    const requestMaterializer = profile.requestMaterializer && {
+      ...profile.requestMaterializer,
+      reviewedSource: await readVerifiedMaterializerSource(
+        this.root,
+        diskProfile.policyRevision,
+        relative(this.root, profile.requestMaterializer.file),
+      ),
+    };
     return {
       ...profile,
-      targetResolver: { ...profile.targetResolver, reviewedSource },
+      activationMaterializer,
+      requestMaterializer,
     };
   }
 
@@ -273,14 +277,8 @@ export class PolicyRepository {
     if (proposal.id !== profileId) {
       throw new Error(`${proposalFile} does not match its requested profile ID`);
     }
-    const profile: DiskProfile = proposal.pullRequestBinding
-      ? materializePullRequestProfile(
-        { ...proposal, pullRequestBinding: proposal.pullRequestBinding },
-        this.pullRequestCommandRunner,
-      )
-      : proposal;
-    await this.#verifyProposalTests(profile, profileId, policyRevision);
-    const reviewedProfile = { ...profile, policyRevision };
+    await this.#verifyProposalTests(proposal, profileId, policyRevision);
+    const reviewedProfile = { ...proposal, policyRevision };
     await writeFile(
       join(this.root, "profiles", `${profileId}.json`),
       `${JSON.stringify(reviewedProfile, null, 2)}\n`,
@@ -336,22 +334,38 @@ export class PolicyRepository {
       testFile,
     ));
     const tests = authorizationTestsSchema.parse(candidate);
-    const targetResolver = profile.targetResolver && {
-      ...profile.targetResolver,
-      file: join(this.root, profile.targetResolver.file),
+    const activationMaterializer = profile.activationMaterializer && {
+      ...profile.activationMaterializer,
+      file: join(this.root, profile.activationMaterializer.file),
       reviewedSource: readCommittedFile(
         this.root,
         policyRevision,
-        profile.targetResolver.file,
+        profile.activationMaterializer.file,
       ),
     };
-    const reviewedProfile: Profile = {
-      ...profile,
-      allowedTargets: new Set(profile.allowedTargets),
-      policyRevision,
-      targetResolver,
+    const requestMaterializer = profile.requestMaterializer && {
+      ...profile.requestMaterializer,
+      file: join(this.root, profile.requestMaterializer.file),
+      reviewedSource: readCommittedFile(
+        this.root,
+        policyRevision,
+        profile.requestMaterializer.file,
+      ),
     };
     for (const authorizationTest of tests) {
+      const activation = activationMaterializer
+        ? materializeActivation(activationMaterializer, authorizationTest.activationArguments ?? {})
+        : { targets: profile.allowedTargets };
+      if (!activation) {
+        throw new Error(`authorization test activation failed: ${authorizationTest.name}`);
+      }
+      const reviewedProfile: Profile = {
+        ...profile,
+        activationMaterializer,
+        allowedTargets: new Set(activation.targets),
+        policyRevision,
+        requestMaterializer,
+      };
       const core = new PolicyCore();
       core.activate(reviewedProfile, authorizationTest.request.threadId);
       const result = core.evaluate(authorizationTest.request);

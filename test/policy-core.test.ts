@@ -333,8 +333,8 @@ describe("PolicyCore", () => {
         id: "read",
         evaluate: () => "allow",
       }],
-      targetResolver: {
-        file: join(process.cwd(), "shared", "resolvers", "github-repository.ts"),
+      requestMaterializer: {
+        file: join(process.cwd(), "shared", "materializers", "requests", "github-repository.ts"),
         language: "typescript",
       },
     }), request.threadId);

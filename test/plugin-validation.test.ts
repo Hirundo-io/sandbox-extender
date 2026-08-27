@@ -11,8 +11,8 @@ async function writePlugin(root: string): Promise<void> {
   await mkdir(join(root, "hooks"));
   await mkdir(join(root, "skills"));
   await mkdir(join(root, "src"));
-  await mkdir(join(root, "shared", "templates"), { recursive: true });
-  await mkdir(join(root, "shared", "resolvers"), { recursive: true });
+  await mkdir(join(root, "shared", "profile-templates"), { recursive: true });
+  await mkdir(join(root, "shared", "materializers", "requests"), { recursive: true });
   await writeFile(join(root, "src", "mcp-server.ts"), "");
   await writeFile(join(root, ".claude-plugin", "plugin.json"),
     JSON.stringify({ name: "test", version: "1" }));
@@ -26,10 +26,10 @@ async function writePlugin(root: string): Promise<void> {
   await writeFile(join(root, "hooks", "hooks.codex.json"), JSON.stringify({
     hooks: { PermissionRequest: [{ hooks: [{ command: "bun hook.ts", type: "command" }] }] },
   }));
-  await writeFile(join(root, "shared", "templates", "scout.json"), JSON.stringify({
-    targetResolver: { file: "resolvers/github-repository.ts", language: "typescript" },
+  await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
+    requestMaterializer: { file: "materializers/requests/github-repository.ts", language: "typescript" },
   }));
-  await writeFile(join(root, "shared", "resolvers", "github-repository.ts"), "");
+  await writeFile(join(root, "shared", "materializers", "requests", "github-repository.ts"), "");
 }
 
 describe("plugin validation", () => {
@@ -49,12 +49,12 @@ describe("plugin validation", () => {
       await expect(validatePlugin(root)).rejects.toThrow();
       await writeFile(join(root, ".claude-plugin", "plugin.json"),
         JSON.stringify({ name: "test", version: "1" }));
-      await writeFile(join(root, "shared", "templates", "scout.json"), JSON.stringify({
-        targetResolver: { file: "../../arbitrary-code.ts", language: "typescript" },
+      await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
+        requestMaterializer: { file: "../../arbitrary-code.ts", language: "typescript" },
       }));
       await expect(validatePlugin(root)).rejects.toThrow();
-      await writeFile(join(root, "shared", "templates", "scout.json"), JSON.stringify({
-        targetResolver: { file: "resolvers/github-repository.ts", language: "typescript" },
+      await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
+        requestMaterializer: { file: "materializers/requests/github-repository.ts", language: "typescript" },
       }));
       await writeFile(join(root, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: "../../outside.json",

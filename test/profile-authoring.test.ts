@@ -29,6 +29,12 @@ function commitPolicyRevision(root: string): string {
 }
 
 describe("profile authoring", () => {
+  test("rejects compound observed shell commands", () => {
+    expect(() => proposeProfile("review-profile", {
+      action: "codex.unified_exec", arguments: { command: "git status && git diff" },
+      resource: "/workspace", threadId: "thread-1",
+    })).toThrow("one authorization case");
+  });
   test("writes a narrow proposal and promotes it only with a review revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-authoring-"));
     try {

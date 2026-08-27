@@ -9,6 +9,7 @@ export type NormalizedRequest = {
 
 export type EvaluationContext = {
   readonly command?: ShellCommandContext;
+  readonly materialized?: Readonly<Record<string, unknown>>;
   readonly policyRevision: string;
   readonly profileId: string;
   readonly request: NormalizedRequest;
@@ -40,6 +41,7 @@ export type CedarGrouping = {
 export type PolicyGrouping = Grouping | CedarGrouping;
 
 export type Profile = {
+  readonly activationMaterializer?: ActivationMaterializer;
   readonly allowedTargets: ReadonlySet<string>;
   readonly groupings: readonly PolicyGrouping[];
   readonly id: string;
@@ -47,23 +49,20 @@ export type Profile = {
   readonly sessionContext?: readonly string[];
   /** Requires exactly one reviewed target before this profile can authorize. */
   readonly targetScope?: "single";
-  readonly targetResolver?: TargetResolver;
+  readonly requestMaterializer?: RequestMaterializer;
 };
 
 /** References engineer-reviewed executable code in the Policy Repository. */
-export type TargetResolver = {
+type MaterializerReference = {
   readonly file: string;
   readonly language: "typescript";
   /** Source loaded from and verified against the Profile's reviewed Git revision. */
   readonly reviewedSource?: string;
 };
 
-export type PullRequestBinding = {
-  /** Absolute local Git workspace used only to resolve this profile at promotion. */
-  readonly workspace: string;
-  /** An optional active-branch default, a local PR number, or owner/repository#number. */
-  readonly pullRequest?: string;
-};
+export type ActivationMaterializer = MaterializerReference;
+
+export type RequestMaterializer = MaterializerReference;
 
 export type DecisionToken = {
   readonly expiresAt: Date;
@@ -85,6 +84,7 @@ export type EvaluationResult = {
 };
 
 export type ProfileBinding = {
+  readonly allowedTargets: readonly string[];
   readonly fingerprint: string;
   readonly policyRevision: string;
   readonly profileId: string;
@@ -93,18 +93,18 @@ export type ProfileBinding = {
 export type ProfileProposal = {
   readonly profile: {
     readonly allowedTargets: readonly string[];
+    readonly activationMaterializer?: Omit<ActivationMaterializer, "reviewedSource">;
     readonly groupings: readonly CedarGrouping[];
     readonly id: string;
     readonly policyRevision: string;
     readonly targetScope?: "single";
-    readonly targetResolver?: Omit<TargetResolver, "reviewedSource">;
-    /** Proposal-only input materialized into a static PR target during promotion. */
-    readonly pullRequestBinding?: PullRequestBinding;
+    readonly requestMaterializer?: Omit<RequestMaterializer, "reviewedSource">;
   };
   readonly tests: readonly AuthorizationTest[];
 };
 
 export type AuthorizationTest = {
+  readonly activationArguments?: Readonly<Record<string, unknown>>;
   readonly expected: Decision;
   readonly name: string;
   readonly request: NormalizedRequest;

@@ -20,6 +20,22 @@ _Avoid_: Sandbox replacement, full access
 A named, user-activated grouping of capability rules for a defined kind of work and a bounded target.
 _Avoid_: Mode, policy bundle
 
+**Profile Template**:
+A disabled starting point for creating a Profile. A Profile Template has no authority until it is copied into the Policy Repository, reviewed, promoted, and activated.
+_Avoid_: Example policy, policy template, built-in profile
+
+**Activation Arguments**:
+User-approved values supplied when activating a Profile, such as a repository, pull request, workspace, or cloud project. They do not change the reviewed Capability Rules.
+_Avoid_: Template values, promotion arguments
+
+**Activation Materializer**:
+Profile-owned code that validates Activation Arguments and produces the Target set frozen into a Thread Binding.
+_Avoid_: Profile proposal materializer, target resolver
+
+**Request Materializer**:
+Read-only typed code that normalizes a shell command or MCP call into facts and entities for Cedar. It may reject malformed or unparseable input but never makes an authorization decision.
+_Avoid_: Dynamic policy, target resolver, permission evaluator
+
 **Active Profile**:
 The sole Profile governing approvals for one agent thread at a time.
 _Avoid_: Session profile, combined profile
@@ -42,7 +58,7 @@ _Avoid_: Latest policy, live policy
 
 **Context Lookup**:
 Profile-owned code that derives bounded, trusted facts needed for policy evaluation, such as the current repository, branch, active cloud project, or current pull request. It is versioned and reviewed with the Profile rather than generated at evaluation time.
-Approving a lookup resolver approves trusted executable code that runs with the user's authority; it is not runtime-sandboxed.
+Approving a Context Lookup approves trusted executable code that runs with the user's authority; it is not runtime-sandboxed.
 _Avoid_: Dynamic policy code, arbitrary evaluation command
 
 **Extension Decision**:
@@ -58,7 +74,7 @@ The explicit sequence of Rules and rule groupings within a Profile. Profiles def
 _Avoid_: Implicit precedence, most-specific match
 
 **Thread Binding**:
-The association between one Active Profile and one identifiable Agent Host thread. If the binding cannot be safely recognized after a resume, fork, rename, or move, the Profile is disabled.
+The association between one Active Profile, its frozen Target set, and one identifiable Agent Host thread. If the binding cannot be safely recognized after a resume, fork, rename, or move, the Profile is disabled.
 _Avoid_: Session inheritance, profile carry-over
 
 **Live Binding**:
@@ -72,10 +88,6 @@ _Avoid_: Unbounded live target, implied scope
 **Target Set**:
 A reusable, explicit collection of Target identifiers referenced by a Profile. Target Sets are the first supported way to share scope; provider-aware dynamic selection is deferred.
 _Avoid_: Wildcard scope, implicit provider selector
-
-**Adapter**:
-Read-only typed code that normalizes shell-command or MCP-call input into the Cedar authorization model. It cannot execute the requested operation during evaluation.
-_Avoid_: Tool executor, dynamic rule
 
 **Executable Segment**:
 One command within a shell structure that is independently normalized and authorized. A compound shell request abstains if any segment cannot be normalized.

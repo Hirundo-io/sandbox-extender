@@ -6,16 +6,17 @@ import { join } from "node:path";
 import {
   authorizeProfileMutation,
   consumeProfileMutationAuthorization,
+  parseProfileMutationIntent,
 } from "../src/mutation-authorization.js";
 import type { ProfileMutationIntent } from "../src/mutation-authorization.js";
 
 const activateFirstProfile = {
-  arguments: { profileId: "first-profile" },
+  arguments: { arguments: { repository: "acme/example" }, profileId: "first-profile" },
   operation: "activate_profile",
 } as const satisfies ProfileMutationIntent;
 
 const activateSecondProfile = {
-  arguments: { profileId: "second-profile" },
+  arguments: { arguments: { repository: "acme/other" }, profileId: "second-profile" },
   operation: "activate_profile",
 } as const satisfies ProfileMutationIntent;
 
@@ -36,6 +37,15 @@ async function withAuthorizationRoot(
 }
 
 describe("profile mutation authorization", () => {
+  test("parses mutation intents and rejects non-JSON argument values", async () => {
+    expect(parseProfileMutationIntent(disableProfile)).toEqual(disableProfile);
+    await withAuthorizationRoot(async (root) => {
+      await expect(authorizeProfileMutation(root, "thread-1", {
+        arguments: { invalid: undefined },
+        operation: "disable_profile",
+      } as unknown as ProfileMutationIntent)).rejects.toThrow("JSON values");
+    });
+  });
   test("rejects an authorization for another operation", async () => {
     await withAuthorizationRoot(async (root) => {
       await authorizeProfileMutation(root, "thread-1", activateFirstProfile);

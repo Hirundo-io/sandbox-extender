@@ -19,9 +19,11 @@ export function evaluateCedarGrouping(
   try {
     const answer = isAuthorized({
       action: entity("Action", context.request.action),
-      context: context.command
-        ? { arguments: cedarValue(context.request.arguments), command: cedarValue(context.command) }
-        : { arguments: cedarValue(context.request.arguments) },
+      context: {
+        arguments: cedarValue(context.request.arguments),
+        ...(context.command ? { command: cedarValue(context.command) } : {}),
+        ...(context.materialized ? { materialized: cedarValue(context.materialized) } : {}),
+      },
       entities: [],
       policies: { staticPolicies: cedarPolicies(grouping.policies) },
       principal: entity("AgentThread", context.request.threadId),

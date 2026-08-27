@@ -3,7 +3,6 @@ export { PolicyRepository } from "./policy-repository.js";
 export { handlePermissionRequest, normalizeHookRequest } from "./hook.js";
 export { activateProfile, disableProfile, evaluateForThread } from "./policy-service.js";
 export { proposeProfile } from "./profile-authoring.js";
-export { materializePullRequestProfile, resolvePullRequestBinding } from "./pull-request-binding.js";
 export { getPolicyRoot } from "./policy-root.js";
 export { hostSchema, normalizedRequestSchema, profileIdSchema } from "./schemas.js";
 export type {
@@ -19,7 +18,7 @@ export type {
   Profile,
   ProfileBinding,
   ProfileProposal,
-  PullRequestBinding,
+  ActivationMaterializer,
+  RequestMaterializer,
   AuthorizationTest,
 } from "./types.js";
-export type { PullRequestCommandRunner } from "./pull-request-binding.js";

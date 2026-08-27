@@ -91,9 +91,7 @@ function descendants(node: SyntaxNode, type: string): SyntaxNode[] {
 
 function isStaticCommand(command: SyntaxNode): boolean {
   const firstChild = command.firstNamedChild;
-  if (!firstChild || firstChild.type !== "command_name") {
-    return false;
-  }
+  if (!firstChild || firstChild.type !== "command_name") return false;
   return descendants(command, "command").length === 1 &&
     !descendants(command, "error").length &&
     !hasUnsafeDescendant(command);

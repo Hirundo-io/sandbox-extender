@@ -1,0 +1,37 @@
+{
+  "id": "scout",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "activationMaterializer": {
+    "file": "materializers/activation/target-set.ts",
+    "language": "typescript"
+  },
+  "requestMaterializer": {
+    "file": "materializers/requests/github-repository.ts",
+    "language": "typescript"
+  },
+  "sessionContext": [
+    "Use this profile only for inspection. Do not alter files or remote state."
+  ],
+  "groupings": [
+    {
+      "id": "read-only-inspection",
+      "policies": {
+        "allowRemoteInspection": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.materialized.argumentsSafe && context.materialized.duplicateOptionCount == 0 &&",
+          "  context.materialized.remoteSafe &&",
+          "  [",
+          "    \"github.issue.list\", \"github.issue.view\", \"github.label.list\",",
+          "    \"github.pr.checks\", \"github.pr.diff\", \"github.pr.list\", \"github.pr.view\",",
+          "    \"github.release.list\", \"github.release.view\", \"github.repo.list\", \"github.repo.view\",",
+          "    \"github.run.list\", \"github.run.view\", \"github.workflow.list\", \"github.workflow.view\",",
+          "    \"git.fetch\", \"git.ls-remote\"",
+          "  ].contains(context.materialized.operation)",
+          "};"
+        ]
+      }
+    }
+  ]
+}

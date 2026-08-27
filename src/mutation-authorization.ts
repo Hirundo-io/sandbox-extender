@@ -45,7 +45,10 @@ const mutationIntentSchema = z.discriminatedUnion("operation", [
     operation: z.literal("promote_profile"),
   }).strict(),
   z.object({
-    arguments: z.object({ profileId: profileIdSchema }).strict(),
+    arguments: z.object({
+      arguments: requestArgumentsSchema,
+      profileId: profileIdSchema,
+    }).strict(),
     operation: z.literal("activate_profile"),
   }).strict(),
   z.object({
@@ -179,8 +182,7 @@ export async function consumeProfileMutationAuthorization(
     await rename(file, claimedFile);
   } catch (error) {
     if (isMissingFile(error)) {
-      throw new Error("a user mutation authorization is required");
-    }
+      throw new Error("a user mutation authorization is required"); }
     throw error;
   }
 

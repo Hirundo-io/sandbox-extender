@@ -31,10 +31,7 @@
       "src/hook-cli.ts",
       "src/mcp-server.ts",
       "src/index.ts",
-      "test/**/*.test.ts"
-    ],
-    "ignore": [
-      "shared/resolvers/**/*.ts"
+      "{shared,src,test}/**/*.test.ts"
     ],
     "ignoreExportsUsedInFile": true
   },

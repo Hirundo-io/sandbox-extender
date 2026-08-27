@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { PolicyCore } from "./policy-core.js";
 import { PolicyRepository } from "./policy-repository.js";
+import { materializeActivation } from "./materializer-runtime.js";
 import type { EvaluationResult, NormalizedRequest } from "./types.js";
 
 const credentialOptionPattern = /(^|\s)(--(?:access[-_]?key|access[-_]?token|api[-_]?key|api[-_]?token|authorization|client[-_]?secret|connection[-_]?string|cookie|database[-_]?url|password|passwd|private[-_]?token|refresh[-_]?token|secret|token|webhook[-_]?secret))(?:=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
@@ -225,7 +226,8 @@ function fingerprint(profile: import("./types.js").Profile): string {
     policyRevision: profile.policyRevision,
     sessionContext: profile.sessionContext ?? [],
     targetScope: profile.targetScope,
-    targetResolver: profile.targetResolver,
+    activationMaterializer: profile.activationMaterializer,
+    requestMaterializer: profile.requestMaterializer,
   })).digest("hex");
 }
 
@@ -242,10 +244,10 @@ export async function evaluateForThread(
       return result;
     }
     const core = new PolicyCore();
-    const profile = await repository.loadVerifiedProfile(binding.profileId);
+    const reviewedProfile = await repository.loadVerifiedProfile(binding.profileId);
+    const profile = { ...reviewedProfile, allowedTargets: new Set(binding.allowedTargets) };
     if (profile.policyRevision === "pending-review" ||
-      profile.policyRevision !== binding.policyRevision ||
-      fingerprint(profile) !== binding.fingerprint) {
+      profile.policyRevision !== binding.policyRevision || fingerprint(profile) !== binding.fingerprint) {
       const result = { decision: "abstain" as const, reason: "active profile no longer matches review" };
       await recordEvaluation(repository, request, result, binding.profileId, binding.policyRevision);
       return result;
@@ -299,17 +301,30 @@ export async function activateProfile(
   repository: PolicyRepository,
   threadId: string,
   profileId: string,
-): Promise<void> {
-  const profile = await repository.loadVerifiedProfile(profileId);
-  if (profile.policyRevision === "pending-review") {
+  arguments_: Readonly<Record<string, unknown>> = {},
+): Promise<readonly string[]> {
+  const reviewedProfile = await repository.loadVerifiedProfile(profileId);
+  if (reviewedProfile.policyRevision === "pending-review") {
     throw new Error("profile must be reviewed before activation");
   }
+  const activation = reviewedProfile.activationMaterializer
+    ? materializeActivation(reviewedProfile.activationMaterializer, arguments_)
+    : Object.keys(arguments_).length === 0 && reviewedProfile.allowedTargets.size > 0
+      ? { targets: [...reviewedProfile.allowedTargets] }
+      : undefined;
+  if (!activation) throw new Error("profile activation arguments could not be materialized");
+  if (reviewedProfile.targetScope === "single" && activation.targets.length !== 1) {
+    throw new Error("profile activation requires exactly one target");
+  }
+  const profile = { ...reviewedProfile, allowedTargets: new Set(activation.targets) };
   const bindings = await repository.readState();
   await repository.writeState({ ...bindings, [threadId]: {
+    allowedTargets: activation.targets,
     fingerprint: fingerprint(profile),
     policyRevision: profile.policyRevision,
     profileId,
   } });
+  return activation.targets;
 }
 
 export async function disableProfile(

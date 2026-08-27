@@ -3,11 +3,13 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { materializePullRequestProfile, PolicyCore, type CedarGrouping, type Profile } from "../src/index.js";
+import { PolicyCore, type CedarGrouping, type Profile } from "../src/index.js";
 import { evaluateCedarGrouping } from "../src/cedar.js";
+import { materializeGitHubPullRequest } from "../shared/materializers/requests/github-pull-request.js";
+import { materializeMakerDependency } from "../shared/materializers/requests/maker-dependency.js";
 
 const sharedDirectory = join(process.cwd(), "shared");
-const templateDirectory = join(sharedDirectory, "templates");
+const profileTemplateDirectory = join(sharedDirectory, "profile-templates");
 
 function runGit(workspace: string, ...arguments_: string[]): void {
   const result = Bun.spawnSync(["git", "-C", workspace, ...arguments_]);
@@ -16,51 +18,68 @@ function runGit(workspace: string, ...arguments_: string[]): void {
   }
 }
 
-async function template(name: string): Promise<Profile> {
-  const candidate: unknown = JSON.parse(await readFile(join(templateDirectory, `${name}.json`), "utf8"));
+async function profileTemplate(name: string): Promise<Profile> {
+  const candidate: unknown = JSON.parse(await readFile(join(profileTemplateDirectory, `${name}.json`), "utf8"));
   const profile = candidate as Omit<Profile, "allowedTargets"> & { allowedTargets: string[] };
-  if (name === "babysitter") {
-    const reviewedProfile = {
-      ...profile,
-      pullRequestBinding: {
-        pullRequest: "acme/example#42",
-        workspace: "/work/example",
-      },
-    } as unknown as Parameters<typeof materializePullRequestProfile>[0];
-    const materialized = materializePullRequestProfile(reviewedProfile, (command) => {
-      if (command[0] === "git") return "/work/example";
-      return JSON.stringify({ url: "https://github.com/acme/example/pull/42" });
-    });
-    const { pullRequestBinding: _pullRequestBinding, ...staticProfile } = profile as typeof profile & {
-      pullRequestBinding: unknown;
-    };
-    return {
-      ...staticProfile,
-      ...materialized,
-      allowedTargets: new Set(materialized.allowedTargets),
-      targetResolver: materialized.targetResolver && {
-        ...materialized.targetResolver,
-        file: join(sharedDirectory, materialized.targetResolver.file),
-      },
-    };
-  }
-  const allowedTargets = profile.allowedTargets.length > 0
-    ? profile.allowedTargets
-    : ["/work/example", "github:repository:acme/example"];
+  const allowedTargets = name === "babysitter"
+    ? ["github:pull-request:acme/example#42"]
+    : name === "maker"
+      ? ["/work/example"]
+      : ["/work/example", "github:repository:acme/example"];
   return {
     ...profile,
     allowedTargets: new Set(allowedTargets),
-    targetResolver: profile.targetResolver && {
-      ...profile.targetResolver,
-      file: join(sharedDirectory, profile.targetResolver.file),
+    activationMaterializer: profile.activationMaterializer && {
+      ...profile.activationMaterializer,
+      file: join(sharedDirectory, profile.activationMaterializer.file),
+    },
+    requestMaterializer: profile.requestMaterializer && {
+      ...profile.requestMaterializer,
+      file: join(sharedDirectory, profile.requestMaterializer.file),
     },
   };
 }
 
-describe("shipped profiles", () => {
+describe("shipped Profile templates", () => {
+  test("request materializers describe disallowed operations for Cedar", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-materialized-facts-"));
+    try {
+      const makerOperation = materializeMakerDependency({
+        command: { words: ["npm", "install", "zod"] },
+        resource: workspace,
+        workingDirectory: workspace,
+      });
+      expect(makerOperation).toEqual(expect.objectContaining({
+        command: "install",
+        manager: "npm",
+        optionCount: 0,
+      }));
+
+      const pullRequestOperation = materializeGitHubPullRequest({
+        command: { words: ["gh", "pr", "merge", "42", "--repo", "acme/example"] },
+      });
+      expect(pullRequestOperation).toEqual(expect.objectContaining({
+        operation: "github.pull-request.merge",
+        resource: "github:pull-request:acme/example#42",
+      }));
+
+      const maker = await profileTemplate("maker");
+      const { resource: _resource, ...materialized } = makerOperation!;
+      expect(evaluateCedarGrouping(maker.groupings[0] as CedarGrouping, {
+        materialized,
+        policyRevision: maker.policyRevision,
+        profileId: maker.id,
+        request: { action: "codex.unified_exec", arguments: { command: "npm install zod" }, resource: workspace, threadId: "t" },
+        resolvedTarget: workspace,
+      })).toBe("abstain");
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+    }
+  });
+
   test("Scout permits GitHub inspection but not changes", async () => {
     const core = new PolicyCore();
-    core.activate(await template("scout"), "thread-1");
+    core.activate(await profileTemplate("scout"), "thread-1");
 
     for (const command of [
       "gh pr diff 42 --repo acme/example",
@@ -115,7 +134,7 @@ describe("shipped profiles", () => {
       runGit(nested, "init", "--quiet");
       runGit(nested, "remote", "add", "origin", "ext::sh -c id");
 
-      const scout = await template("scout");
+      const scout = await profileTemplate("scout");
       const core = new PolicyCore();
       core.activate({
         ...scout,
@@ -170,7 +189,7 @@ describe("shipped profiles", () => {
       const nested = join(workspace, "packages", "app");
       await mkdir(nested, { recursive: true });
       const core = new PolicyCore();
-      const maker = await template("maker");
+      const maker = await profileTemplate("maker");
       core.activate({ ...maker, allowedTargets: new Set([workspace]) }, "thread-1");
 
       for (const command of [
@@ -219,7 +238,7 @@ describe("shipped profiles", () => {
     try {
       await symlink(outside, join(workspace, "linked-cache"));
       const core = new PolicyCore();
-      const maker = await template("maker");
+      const maker = await profileTemplate("maker");
       core.activate({ ...maker, allowedTargets: new Set([workspace]) }, "thread-1");
 
       for (const command of [
@@ -275,7 +294,7 @@ describe("shipped profiles", () => {
 
   test("Babysitter scopes inspection and comments to one explicit pull request", async () => {
     const core = new PolicyCore();
-    core.activate(await template("babysitter"), "thread-1");
+    core.activate(await profileTemplate("babysitter"), "thread-1");
 
     for (const command of [
       "gh pr view 42 --repo acme/example",
@@ -326,7 +345,7 @@ describe("shipped profiles", () => {
       expect(core.evaluate({ action: "codex.unified_exec", arguments: { command }, resource: "/work/example", threadId: "thread-1" }).decision).toBe("abstain");
     }
 
-    const multipleTargets = await template("babysitter");
+    const multipleTargets = await profileTemplate("babysitter");
     core.activate({
       ...multipleTargets,
       allowedTargets: new Set([
@@ -345,8 +364,8 @@ describe("shipped profiles", () => {
     }));
   });
 
-  test("Babysitter's Cedar policy itself rejects another pull request", async () => {
-    const babysitter = await template("babysitter");
+  test("Babysitter's Cedar policy decides from materialized request facts", async () => {
+    const babysitter = await profileTemplate("babysitter");
     const grouping = babysitter.groupings[0] as CedarGrouping;
     expect(grouping.policies).toHaveProperty("allowReviewThreadReplies");
 
@@ -361,6 +380,14 @@ describe("shipped profiles", () => {
         threadId: "thread-1",
       };
       const context = {
+        materialized: {
+          bodyPresent: true,
+          operation: command.startsWith("gh api")
+            ? "github.review-comment.reply"
+            : "github.pull-request.view",
+          trailingArgumentCount: 0,
+          trailingArguments: [],
+        },
         policyRevision: babysitter.policyRevision,
         profileId: babysitter.id,
         request,
@@ -370,7 +397,7 @@ describe("shipped profiles", () => {
       expect(evaluateCedarGrouping(grouping, context)).toBe("allow");
       expect(evaluateCedarGrouping(grouping, {
         ...context,
-        resolvedTarget: "github:pull-request:acme/example#43",
+        materialized: { ...context.materialized, operation: "github.pull-request.merge" },
       })).toBe("abstain");
     }
   });

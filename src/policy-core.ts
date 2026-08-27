@@ -7,6 +7,7 @@ import type {
   ShellCommandContext,
 } from "./types.js";
 import { evaluateCedarGrouping } from "./cedar.js";
+import { materializeRequest } from "./materializer-runtime.js";
 import { parseShellCommands, parseShellWords } from "./shell-parser.js";
 import { realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -250,37 +251,17 @@ function changeDirectory(
   return resolvesWithinWorkspace(root, currentDirectory, path);
 }
 
-function resolveProfileTarget(
+function materializeProfileRequest(
   profile: Profile,
   request: NormalizedRequest,
   workingDirectory = request.resource,
   command?: ShellCommandContext,
-): NormalizedRequest | undefined {
-  if (!profile.targetResolver) return request;
-  try {
-    const process = Bun.spawnSync({
-      cmd: profile.targetResolver.reviewedSource === undefined
-        ? ["bun", profile.targetResolver.file]
-        : ["bun", "--eval", profile.targetResolver.reviewedSource],
-      stdin: new TextEncoder().encode(JSON.stringify({
-        localTarget: request.resource,
-        requestArguments: request.arguments,
-        commandArguments: command?.arguments,
-        commandExecutable: command?.executable,
-        commandSubcommand: command?.subcommand,
-        commandWords: command?.words,
-        workingDirectory,
-      })),
-      stderr: "ignore",
-      stdout: "pipe",
-    });
-    const resource = new TextDecoder().decode(process.stdout).trim();
-    return process.exitCode === 0 && resource.length > 0 && !resource.includes("\n")
-      ? { ...request, resource }
-      : undefined;
-  } catch {
-    return undefined;
-  }
+): { readonly context?: Readonly<Record<string, unknown>>; readonly request: NormalizedRequest } | undefined {
+  if (!profile.requestMaterializer) return { request };
+  const materialized = materializeRequest(profile.requestMaterializer, request, workingDirectory, command);
+  return materialized
+    ? { context: materialized.context, request: { ...request, resource: materialized.resource } }
+    : undefined;
 }
 
 function hasValidTargetScope(profile: Profile): boolean {
@@ -291,9 +272,11 @@ function evaluateCommand(
   profile: Profile,
   request: NormalizedRequest,
   command?: ShellCommandContext,
+  materialized?: Readonly<Record<string, unknown>>,
 ): EvaluationResult {
   const context = {
     command,
+    materialized,
     policyRevision: profile.policyRevision,
     profileId: profile.id,
     request,
@@ -442,17 +425,18 @@ export class PolicyCore {
             words,
           }
         : undefined;
-      const resolvedRequest = resolveProfileTarget(profile, commandRequest, workingDirectory, commandContext);
-      if (!resolvedRequest) {
-        return { decision: "abstain", reason: "profile could not resolve the request target" };
+      const materializedRequest = materializeProfileRequest(profile, commandRequest, workingDirectory, commandContext);
+      if (!materializedRequest) {
+        return { decision: "abstain", reason: "profile could not materialize the request" };
       }
+      const resolvedRequest = materializedRequest.request;
       if (!profile.allowedTargets.has(resolvedRequest.resource)) {
         return {
           decision: "abstain",
           reason: "resolved target is outside the allowed target set",
         };
       }
-      const result = evaluateCommand(profile, resolvedRequest, commandContext);
+      const result = evaluateCommand(profile, resolvedRequest, commandContext, materializedRequest.context);
       if (result.decision !== "allow") return result;
       if (result.matchedGroupingId) matchedGroupingIds.push(result.matchedGroupingId);
       resolvedTargets.push(resolvedRequest.resource);

@@ -53,7 +53,7 @@ For example, authorize one activation with:
 ```sh
 bun run authorize:mutation -- activate_profile \
   --thread-id <host-thread-id> \
-  --arguments-json '{"profileId":"review-current-pr"}'
+  --arguments-json '{"arguments":{"repository":"owner/repository","pullRequest":42},"profileId":"babysitter"}'
 ```
 
 Use `{}` or omit `--arguments-json` for
@@ -64,27 +64,31 @@ authorization fails closed and is consumed, so create a new one before
 retrying. The agent can still evaluate requests without a mutation
 authorization.
 
-The disabled `shared/templates/scout.json`, `shared/templates/maker.json`, and
-`shared/templates/babysitter.json` files are starting points only. Their
+The disabled `shared/profile-templates/scout.json`,
+`shared/profile-templates/maker.json`, and
+`shared/profile-templates/babysitter.json` files are Profile templates. Their
 `pending-review` revision prevents activation until you copy, scope, review,
-and promote them. The babysitter template has a proposal-only
-`pullRequestBinding`. Set its absolute `workspace` and its fully qualified,
-reviewable `pullRequest` as `owner/repository#42`. Promotion verifies the PR
-and freezes its canonical target into both `allowedTargets` and the Cedar
-`resource` condition; the binding is not retained after promotion. Requiring
-the full PR identity lets later activation reconstruct the materialized
-profile exactly from the reviewed Git revision.
+and promote them. A Profile template is not itself a Cedar policy or an active
+Profile. It contains the Profile's target scope, ordered groupings, Cedar
+policies, session guidance, and optional reviewed executable components.
 
-Profiles may reference a resolver such as
-`{"file":"resolvers/github-repository.ts","language":"typescript"}`. A
-resolver is profile-owned, engineer-reviewed executable code: approving its
-Policy Revision approves that code to run with the same user authority as
-Sandbox Extender itself. It is not runtime-sandboxed. Activation verifies both
-the resolver reference and its current source bytes against the reviewed Git
-commit, and any missing or changed resolver makes evaluation abstain. Keep
-resolver code narrow, readable, and dedicated to target normalization; copy
-the matching files from `shared/resolvers/` when starting from a bundled
-template.
+Profile activation accepts explicit arguments. Babysitter accepts a repository
+and pull-request number, Maker accepts an absolute workspace, and Scout accepts
+an explicit target set. The Activation Materializer validates those arguments
+and freezes its targets into the thread binding. Promotion reviews reusable
+rules and materializer code; it does not choose a target.
+
+Request Materializers parse shell or MCP input into typed facts for Cedar. They
+may reject malformed input, but they do not allow or deny operations. Cedar is
+the only authorization language. The bundled implementations live under
+`shared/materializers/requests/`, while activation implementations live under
+`shared/materializers/activation/`.
+
+Materializers are Profile-owned, engineer-reviewed executable code. Approving
+their Policy Revision approves them to run with the user's authority. They are
+not runtime-sandboxed. Activation verifies each materializer reference and its
+current source bytes against the reviewed Git commit. Missing or changed code
+makes activation or evaluation fail closed.
 
 ## Development
 

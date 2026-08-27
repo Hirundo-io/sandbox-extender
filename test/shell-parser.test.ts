@@ -20,7 +20,7 @@ describe("shell parser", () => {
     expect(parseShellCommands("npm i zod > install.log")).toBeUndefined();
   });
 
-  test("splits static command words once for policy resolvers", () => {
+  test("splits static command words once for request materializers", () => {
     expect(parseShellWords('npm install "package name" --cache=.cache/npm')).toEqual([
       "npm",
       "install",
@@ -29,5 +29,13 @@ describe("shell parser", () => {
     ]);
     expect(parseShellWords("npm install 'unterminated")).toBeUndefined();
     expect(parseShellWords("npm install trailing\\")).toBeUndefined();
+  });
+
+  test("preserves escaped characters in static words", () => {
+    expect(parseShellWords("printf one\\ two")).toEqual(["printf", "one two"]);
+  });
+
+  test("rejects a shell command without a command name", () => {
+    expect(parseShellCommands("> file")).toBeUndefined();
   });
 });

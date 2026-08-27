@@ -3,7 +3,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { z } from "zod";
 
-import { targetResolverSchema } from "./schemas.js";
+import { activationMaterializerSchema, requestMaterializerSchema } from "./schemas.js";
 
 const commandHookSchema = z.object({
   command: z.string().min(1),
@@ -32,8 +32,9 @@ const claudePluginSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
 }).loose();
-const resolverTemplateSchema = z.object({
-  targetResolver: targetResolverSchema.optional(),
+const profileTemplateSchema = z.object({
+  activationMaterializer: activationMaterializerSchema.optional(),
+  requestMaterializer: requestMaterializerSchema.optional(),
 }).loose();
 
 function resolveInsideRoot(root: string, entry: string): string {
@@ -55,18 +56,21 @@ async function validateFile(file: string): Promise<void> {
   await access(file);
 }
 
-async function validateResolverTemplates(root: string): Promise<void> {
+async function validateProfileTemplates(root: string): Promise<void> {
   const sharedDirectory = resolveInsideRoot(root, "shared");
-  const templateDirectory = resolveInsideRoot(sharedDirectory, "templates");
-  const entries = await readdir(templateDirectory, { withFileTypes: true });
+  const profileTemplateDirectory = resolveInsideRoot(sharedDirectory, "profile-templates");
+  const entries = await readdir(profileTemplateDirectory, { withFileTypes: true });
   await Promise.all(entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
     .map(async (entry) => {
-      const template = resolverTemplateSchema.parse(
-        await readJson(join(templateDirectory, entry.name)),
+      const profileTemplate = profileTemplateSchema.parse(
+        await readJson(join(profileTemplateDirectory, entry.name)),
       );
-      if (template.targetResolver) {
-        await validateFile(resolveInsideRoot(sharedDirectory, template.targetResolver.file));
+      if (profileTemplate.activationMaterializer) {
+        await validateFile(resolveInsideRoot(sharedDirectory, profileTemplate.activationMaterializer.file));
+      }
+      if (profileTemplate.requestMaterializer) {
+        await validateFile(resolveInsideRoot(sharedDirectory, profileTemplate.requestMaterializer.file));
       }
     }));
 }
@@ -83,5 +87,5 @@ export async function validatePlugin(root: string): Promise<void> {
   for (const server of Object.values(codexPlugin.mcpServers)) {
     await validateFile(resolveInsideRoot(root, server.args[0]!));
   }
-  await validateResolverTemplates(root);
+  await validateProfileTemplates(root);
 }

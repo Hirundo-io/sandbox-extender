@@ -110,19 +110,21 @@ server.registerTool(
   {
     description: "Activate a reviewed policy profile for one agent thread.",
     inputSchema: {
+      arguments: requestArgumentsSchema,
       profileId: profileIdSchema,
       threadId: nonEmptyStringSchema,
     },
   },
-  async ({ profileId, threadId }) => {
+  async ({ arguments: activationArguments, profileId, threadId }) => {
     await authorizeMutation(threadId, {
-      arguments: { profileId },
+      arguments: { arguments: activationArguments, profileId },
       operation: "activate_profile",
     });
-    await activateProfile(repository, threadId, profileId);
+    const allowedTargets = await activateProfile(repository, threadId, profileId, activationArguments);
     const profile = await repository.loadProfile(profileId);
     return text(JSON.stringify({
       message: `Activated ${profileId} for ${threadId}.`,
+      allowedTargets,
       sessionContext: profile.sessionContext ?? [],
     }));
   },

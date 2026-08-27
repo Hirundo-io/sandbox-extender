@@ -4,10 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PolicyRepository } from "../src/index.js";
-import type { PullRequestCommandRunner } from "../src/index.js";
 
 const roots: string[] = [];
-const sharedResolverDirectory = join(process.cwd(), "shared", "resolvers");
+const sharedMaterializerDirectory = join(process.cwd(), "shared", "materializers");
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { force: true, recursive: true })));
@@ -19,11 +18,11 @@ async function repository(): Promise<PolicyRepository> {
   return new PolicyRepository(root);
 }
 
-async function installResolver(root: string, name: string): Promise<void> {
-  await mkdir(join(root, "resolvers"), { recursive: true });
+async function installMaterializer(root: string, kind: "activation" | "requests", name: string): Promise<void> {
+  await mkdir(join(root, "materializers", kind), { recursive: true });
   await Bun.write(
-    join(root, "resolvers", name),
-    await readFile(join(sharedResolverDirectory, name), "utf8"),
+    join(root, "materializers", kind, name),
+    await readFile(join(sharedMaterializerDirectory, kind, name), "utf8"),
   );
 }
 
@@ -63,6 +62,7 @@ describe("PolicyRepository", () => {
 
     const profile = await repo.loadProfile("review");
     const binding = {
+      allowedTargets: ["github:pull-request:acme/example#42"],
       fingerprint: "0".repeat(64),
       policyRevision: profile.policyRevision,
       profileId: profile.id,
@@ -86,6 +86,7 @@ describe("PolicyRepository", () => {
   test("refuses to persist an invalid thread binding", async () => {
     const repo = await repository();
     await expect(repo.writeState({ "thread-1": {
+      allowedTargets: ["github:repository:acme/example"],
       fingerprint: "short",
       policyRevision: "revision-1",
       profileId: "review",
@@ -138,7 +139,7 @@ describe("PolicyRepository", () => {
     expect((await repo.loadProfile("review")).policyRevision).toBe(revision);
   });
 
-  test("verifies every no-resolver profile field against the reviewed proposal", async () => {
+  test("verifies every Profile field against the reviewed proposal", async () => {
     const repo = await repository();
     await repo.writeProposal({
       profile: {
@@ -196,10 +197,10 @@ describe("PolicyRepository", () => {
     );
   });
 
-  test("runs target-resolver authorization tests from the reviewed revision", async () => {
+  test("runs request-materializer authorization tests from the reviewed revision", async () => {
     const repo = await repository();
     await repo.initialize();
-    await installResolver(repo.root, "github-repository.ts");
+    await installMaterializer(repo.root, "requests", "github-repository.ts");
     await repo.writeProposal({
       profile: {
         allowedTargets: ["github:repository:acme/example"],
@@ -209,8 +210,8 @@ describe("PolicyRepository", () => {
         }],
         id: "review",
         policyRevision: "pending-review",
-        targetResolver: {
-          file: "resolvers/github-repository.ts",
+        requestMaterializer: {
+          file: "materializers/requests/github-repository.ts",
           language: "typescript",
         },
       },
@@ -230,27 +231,27 @@ describe("PolicyRepository", () => {
     await expect(repo.promoteProposal("review", revision)).resolves.toBeUndefined();
     await expect(repo.loadVerifiedProfile("review")).resolves.toBeDefined();
     await Bun.write(
-      join(repo.root, "resolvers", "github-repository.ts"),
-      "console.log('github:repository:evil/example');\n",
+      join(repo.root, "materializers", "requests", "github-repository.ts"),
+      "console.log(JSON.stringify({resource:'github:repository:evil/example',context:{}}));\n",
     );
     await expect(repo.loadVerifiedProfile("review")).rejects.toThrow(
-      "resolver resolvers/github-repository.ts does not match policy revision",
+      "materializer materializers/requests/github-repository.ts does not match policy revision",
     );
   });
 
-  test("rejects a resolver-reference change after review", async () => {
+  test("rejects a request-materializer reference change after review", async () => {
     const repo = await repository();
     await repo.initialize();
-    await installResolver(repo.root, "github-repository.ts");
-    await installResolver(repo.root, "github-pull-request.ts");
+    await installMaterializer(repo.root, "requests", "github-repository.ts");
+    await installMaterializer(repo.root, "requests", "github-pull-request.ts");
     await repo.writeProposal({
       profile: {
         allowedTargets: ["github:repository:acme/example"],
         groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
         id: "review",
         policyRevision: "pending-review",
-        targetResolver: {
-          file: "resolvers/github-repository.ts",
+        requestMaterializer: {
+          file: "materializers/requests/github-repository.ts",
           language: "typescript",
         },
       },
@@ -271,8 +272,8 @@ describe("PolicyRepository", () => {
     const reviewedProfile = JSON.parse(await readFile(profileFile, "utf8")) as Record<string, unknown>;
     await Bun.write(profileFile, JSON.stringify({
       ...reviewedProfile,
-      targetResolver: {
-        file: "resolvers/github-pull-request.ts",
+      requestMaterializer: {
+        file: "materializers/requests/github-pull-request.ts",
         language: "typescript",
       },
     }));
@@ -282,41 +283,36 @@ describe("PolicyRepository", () => {
     );
   });
 
-  test("freezes a babysitter proposal's resolved target into the reviewed profile", async () => {
-    const run: PullRequestCommandRunner = (command) => {
-      if (command.join(" ") === "git rev-parse --show-toplevel") return "/work/example";
-      if (command.join(" ") === "gh pr view 42 --repo acme/example --json url") {
-        return JSON.stringify({ url: "https://github.com/acme/example/pull/42" });
-      }
-      return undefined;
-    };
+  test("keeps Babysitter reusable and tests it with activation arguments", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-babysitter-"));
     roots.push(root);
-    const repo = new PolicyRepository(root, run);
+    const repo = new PolicyRepository(root);
     await repo.initialize();
-    await installResolver(root, "github-pull-request.ts");
+    await installMaterializer(root, "activation", "github-pull-request.ts");
+    await installMaterializer(root, "requests", "github-pull-request.ts");
     await repo.writeProposal({
       profile: {
         allowedTargets: [],
         groupings: [{
           id: "pull-request",
           policies: {
-            allow: 'permit(principal, action, resource == Target::"__SANDBOX_EXTENDER_PULL_REQUEST_TARGET__");',
+            allow: 'permit(principal, action, resource) when { context.materialized.operation == "github.pull-request.view" };',
           },
         }],
         id: "babysitter",
         policyRevision: "pending-review",
-        pullRequestBinding: {
-          pullRequest: "acme/example#42",
-          workspace: "/work/example",
+        activationMaterializer: {
+          file: "materializers/activation/github-pull-request.ts",
+          language: "typescript",
         },
-        targetResolver: {
-          file: "resolvers/github-pull-request.ts",
+        requestMaterializer: {
+          file: "materializers/requests/github-pull-request.ts",
           language: "typescript",
         },
         targetScope: "single",
       },
       tests: [{
+        activationArguments: { pullRequest: 42, repository: "acme/example" },
         expected: "allow",
         name: "allows only the frozen pull request",
         request: {
@@ -333,11 +329,11 @@ describe("PolicyRepository", () => {
 
     const persisted: unknown = JSON.parse(await readFile(join(root, "profiles", "babysitter.json"), "utf8"));
     expect(persisted).toEqual(expect.objectContaining({
-      allowedTargets: ["github:pull-request:acme/example#42"],
+      activationMaterializer: expect.objectContaining({ file: "materializers/activation/github-pull-request.ts" }),
+      allowedTargets: [],
       policyRevision: revision,
     }));
-    expect(JSON.stringify(persisted)).toContain('Target::\\"github:pull-request:acme/example#42\\"');
-    expect(JSON.stringify(persisted)).not.toContain("pullRequestBinding");
+    expect(JSON.stringify(persisted)).not.toContain("acme/example#42");
   });
 
   test("rejects a revision without the reviewed proposal and tests", async () => {

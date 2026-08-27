@@ -124,7 +124,7 @@ describe("host permission hooks", () => {
     }
   });
 
-  test("preserves raw command arguments for profile-specific target resolution", () => {
+  test("preserves raw command arguments for Profile request materialization", () => {
     expect(
       normalizeHookRequest(
         {
