@@ -16,6 +16,4 @@ export async function runLocalWorkspaceActivationMaterializer(
   return true;
 }
 
-if (import.meta.main && !await runLocalWorkspaceActivationMaterializer(new Response(Deno.stdin.readable).json())) {
-  Deno.exit(1);
-}
+if (import.meta.main) Deno.exit(await runLocalWorkspaceActivationMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);

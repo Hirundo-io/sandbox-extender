@@ -18,6 +18,4 @@ export async function runTargetSetActivationMaterializer(
   return true;
 }
 
-if (import.meta.main && !await runTargetSetActivationMaterializer(new Response(Deno.stdin.readable).json())) {
-  Deno.exit(1);
-}
+if (import.meta.main) Deno.exit(await runTargetSetActivationMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);

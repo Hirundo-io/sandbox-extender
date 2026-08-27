@@ -4,7 +4,7 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/github-pull-request.ts",
-    "integrity": "e4ef39eef56adf7ccc91f21229c8059991ddb012bfdf24ba6f33fb9eaf313059",
+    "integrity": "9e52dbaa28d1da1c13b7a5d36df73253bd44050cee34634660d4244b0c79bc3f",
     "language": "typescript",
     "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": ["gh"], "ffi": [] },
     "runtimeVersion": "2.8.1"
@@ -12,7 +12,7 @@
   "targetScope": "single",
   "requestMaterializer": {
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "f859bd1bb68a8bbc3f7a0aa03df1d5e26beb4cdf82dbcf55bc372bcbf3215af7",
+    "integrity": "6bfc1149692826d6ff4f97742114736d3dc6b23ab3b16d457bcaa1977413f867",
     "language": "typescript",
     "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
     "runtimeVersion": "2.8.1"

@@ -3,6 +3,14 @@ import { describe, expect, test } from "bun:test";
 import { compileShell } from "../src/shell-parser.js";
 
 describe("shell compiler", () => {
+  test("serializes concurrent syntax validation", async () => {
+    const scripts = Array.from({ length: 32 }, (_, index) => `echo concurrent-${index}`);
+
+    expect(await Promise.all(scripts.map((script) => compileShell(script)))).toEqual(
+      scripts.map((script) => [{ source: script, words: script.split(" ") }]),
+    );
+  });
+
   test("compiles sequences, pipelines, and a terminal cd conjunction", async () => {
     expect(await compileShell("cd app && npm i zod | tee install.log")).toEqual([
       { source: "cd app", words: ["cd", "app"] },
@@ -82,6 +90,19 @@ describe("shell compiler", () => {
     expect(await compileShell("cd safe || npm install")).toBeUndefined();
     expect(await compileShell("for item in one; do cd safe; npm install; done")).toBeUndefined();
     expect(await compileShell("while true; do export TARGET=unsafe; done")).toBeUndefined();
+    expect(await compileShell("export TARGET=unsafe | cat")).toBeUndefined();
+    expect(await compileShell("(echo unsafe) | cat")).toBeUndefined();
+  });
+
+  test("compiles brace groups and safe subshells", async () => {
+    expect(await compileShell("{ echo one; echo two; }")).toEqual([
+      { source: "echo one", words: ["echo", "one"] },
+      { source: "echo two", words: ["echo", "two"] },
+    ]);
+    expect(await compileShell("(echo one; echo two)")).toEqual([
+      { source: "echo one", words: ["echo", "one"] },
+      { source: "echo two", words: ["echo", "two"] },
+    ]);
   });
 
   test.each([

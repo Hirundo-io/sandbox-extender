@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   materializeGitHubPullRequestActivation,
+  runGh,
   runGitHubPullRequestActivationMaterializer,
 } from "./github-pull-request.js";
 
@@ -23,6 +24,16 @@ describe("GitHub pull request activation materializer", () => {
         return ghOutput({ number: 42, url: "https://github.com/Acme/Example/pull/42" });
       },
     )).toBe("github:pull-request:acme/example#42");
+  });
+
+  test("uses gh for an implicit current pull request", () => {
+    const output = ghOutput({ number: 42, url: "https://github.com/acme/example/pull/42" });
+    class Command {
+      outputSync() {
+        return output;
+      }
+    }
+    expect(runGh("/workspace", Command)).toEqual(output);
   });
 
   test("fails closed when current pull request lookup fails", () => {

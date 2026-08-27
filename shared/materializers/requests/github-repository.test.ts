@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { materializeGitHubRepository, runGitHubRepositoryMaterializer } from "./github-repository.js";
+import { materializeGitHubRepository, runGit, runGitHubRepositoryMaterializer } from "./github-repository.js";
 
 function candidate(words: readonly unknown[], resource = "/work", workingDirectory = resource): unknown {
   return { command: { words }, resource, workingDirectory };
@@ -35,6 +35,20 @@ describe("GitHub repository request materializer", () => {
       execute,
     ))
       .toEqual(expect.objectContaining({ argumentsSafe: true, operation: "git.ls-remote", remoteSafe: true }));
+    expect(materializeGitHubRepository(
+      candidate(["git", "ls-remote", "origin"]),
+      gitRemote("git@github.com:acme/example.git"),
+    )).toEqual(expect.objectContaining({ remoteSafe: true }));
+  });
+
+  test("uses git to resolve a remote by default", () => {
+    const output = { code: 0, stdout: new TextEncoder().encode("https://github.com/acme/example.git") };
+    class Command {
+      outputSync() {
+        return output;
+      }
+    }
+    expect(runGit(["status"], Command)).toEqual(output);
   });
 
   test("reports unsafe and unavailable Git remotes", () => {

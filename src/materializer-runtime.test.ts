@@ -127,6 +127,12 @@ describe("materializer runtime", () => {
     ] as const) {
       expect(materializeActivation(activationMaterializer(source), {}, process.cwd(), options)).toBeUndefined();
     }
+    expect(materializeActivation(
+      activationMaterializer(activationSource), {}, process.cwd(), { outputLimitBytes: 0 },
+    )).toBeUndefined();
+    expect(materializeActivation(
+      activationMaterializer(activationSource), {}, process.cwd(), { timeoutMs: 0 },
+    )).toBeUndefined();
   });
 
   test("validates materialized output shape", () => {

@@ -19,6 +19,11 @@ type CommandOutput = {
 
 type RunGit = (arguments_: readonly string[]) => CommandOutput;
 
+type DenoCommand = new (
+  command: string,
+  options: { readonly args: string[]; readonly stderr: "null"; readonly stdout: "piped" },
+) => { outputSync(): CommandOutput };
+
 function input(candidate: unknown): MaterializerInput {
   if (typeof candidate !== "object" || candidate === null) return {};
   const value = candidate as Record<string, unknown>;
@@ -53,8 +58,8 @@ function gitRemoteArgument(words: readonly string[]): { readonly argumentsSafe: 
     : undefined;
 }
 
-function runGit(arguments_: readonly string[]): CommandOutput {
-  return new Deno.Command("git", {
+export function runGit(arguments_: readonly string[], Command: DenoCommand = Deno.Command): CommandOutput {
+  return new Command("git", {
     args: [...arguments_],
     stderr: "null",
     stdout: "piped",
@@ -148,6 +153,4 @@ export async function runGitHubRepositoryMaterializer(
   return true;
 }
 
-if (import.meta.main && !await runGitHubRepositoryMaterializer(new Response(Deno.stdin.readable).json())) {
-  Deno.exit(1);
-}
+if (import.meta.main) Deno.exit(await runGitHubRepositoryMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);

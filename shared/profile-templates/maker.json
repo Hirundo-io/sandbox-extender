@@ -4,14 +4,14 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/local-workspace.ts",
-    "integrity": "4179af820c28102b62ee338dd87a941b4e8f2902a27df99e8c1d424b4b090856",
+    "integrity": "006a3afd8794ea5a1cdde934cb77d50c89a0ead24f054dff70b4a05e1bcee113",
     "language": "typescript",
     "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
     "runtimeVersion": "2.8.1"
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "07adcfa130da3cfad7f7e16e8720385c6708472d206a8a7f49f283bd8dc8a4f8",
+    "integrity": "a4fd46aea29e23ca865dd6f8dfa0b8fe19c2eb090402a2432f60b9f033d78a17",
     "language": "typescript",
     "permissions": { "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
     "runtimeVersion": "2.8.1"

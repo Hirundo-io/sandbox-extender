@@ -97,4 +97,14 @@ describe("Profile mutation Approval", () => {
     })).rejects.toThrow("transport disconnected");
     expect(fallbackCalled).toBeFalse();
   });
+
+  test("rejects non-JSON approval arguments", async () => {
+    const invalidIntent = {
+      arguments: { value: 1n },
+      operation: "activate_profile",
+    } as unknown as ProfileMutationIntent;
+    await expect(approveProfileMutation("/policy", "thread-1", invalidIntent, {}, {
+      elicit: async () => response("accept", true),
+    })).rejects.toThrow("only JSON values");
+  });
 });

@@ -13,6 +13,11 @@ type CommandOutput = {
 
 type RunGh = (workingDirectory: string) => CommandOutput;
 
+type DenoCommand = new (
+  command: string,
+  options: { readonly args: string[]; readonly cwd: string; readonly stderr: "null"; readonly stdout: "piped" },
+) => { outputSync(): CommandOutput };
+
 function canonicalTarget(repository: string, pullRequest: number): string | undefined {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ||
     !Number.isSafeInteger(pullRequest) || pullRequest <= 0) return undefined;
@@ -29,8 +34,8 @@ function activationArguments(candidate: unknown): GitHubPullRequestActivationArg
   };
 }
 
-function runGh(workingDirectory: string): CommandOutput {
-  return new Deno.Command("gh", {
+export function runGh(workingDirectory: string, Command: DenoCommand = Deno.Command): CommandOutput {
+  return new Command("gh", {
     args: ["pr", "view", "--json", "number,url"],
     cwd: workingDirectory,
     stderr: "null",
@@ -82,6 +87,4 @@ export async function runGitHubPullRequestActivationMaterializer(
   return true;
 }
 
-if (import.meta.main && !await runGitHubPullRequestActivationMaterializer(new Response(Deno.stdin.readable).json())) {
-  Deno.exit(1);
-}
+if (import.meta.main) Deno.exit(await runGitHubPullRequestActivationMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);

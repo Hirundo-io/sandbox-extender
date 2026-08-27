@@ -12,6 +12,7 @@ import type {
 const defaultMaxIterations = 64;
 const defaultMaxSegments = 256;
 const unquotedGlobPattern = /[*?\[]/;
+let shellSyntaxQueue = Promise.resolve();
 const shellStateMutations = new Set([
   ".", "alias", "builtin", "declare", "eval", "exec", "export", "local", "read", "readonly",
   "set", "shift", "source", "trap", "typeset", "umask", "unalias", "unset",
@@ -51,6 +52,18 @@ function validLimit(value: number): boolean {
 
 function dialectVariant(dialect: ShellDialect): number {
   return dialect === "posix" ? LangVariant.LangPOSIX : LangVariant.LangBash;
+}
+
+async function validateShellSyntax(script: string, dialect: ShellDialect): Promise<void> {
+  const { promise: nextParse, resolve: releaseQueue } = Promise.withResolvers<void>();
+  const previousParse = shellSyntaxQueue;
+  shellSyntaxQueue = nextParse;
+  await previousParse;
+  try {
+    await parseShellSyntax(script, { variant: dialectVariant(dialect) });
+  } finally {
+    releaseQueue();
+  }
 }
 
 function simpleVariable(text: string): string | undefined {
@@ -259,7 +272,7 @@ export async function compileShell(
   };
   if (!validLimit(resolvedOptions.maxIterations) || !validLimit(resolvedOptions.maxSegments)) return undefined;
   try {
-    await parseShellSyntax(script, { variant: dialectVariant(resolvedOptions.dialect) });
+    await validateShellSyntax(script, resolvedOptions.dialect);
     return compileTypedAst(script, parseTypedShell(script), resolvedOptions);
   } catch {
     return undefined;
