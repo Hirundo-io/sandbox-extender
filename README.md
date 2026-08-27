@@ -146,20 +146,10 @@ runs `gh pr view --json number,url` when activation receives
 `{"workingDirectory":"/absolute/current/workspace"}` instead of an explicit
 repository and pull-request number. It validates the returned GitHub URL and
 number before freezing one canonical pull-request Target. Its Profile uses this
-data-only declaration:
-
-```json
-{
-  "file": "materializers/activation/github-pull-request.ts",
-  "integrity": "e4ef39eef56adf7ccc91f21229c8059991ddb012bfdf24ba6f33fb9eaf313059",
-  "language": "typescript",
-  "permissions": {
-    "read": [], "write": [], "env": [], "net": [], "sys": [],
-    "run": ["gh"], "ffi": []
-  },
-  "runtimeVersion": "2.8.1"
-}
-```
+data-only declaration in the canonical
+[`shared/profile-templates/babysitter.json`](shared/profile-templates/babysitter.json)
+template. Use that file rather than copying its integrity digest into another
+profile or document.
 
 The `gh` process retains normal OS authority. Review the command and its output
 validation before accepting that `run` declaration.
