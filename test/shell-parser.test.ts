@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { compileShell } from "../src/shell-parser.js";
 
 describe("shell compiler", () => {
-  test("serializes concurrent syntax validation", async () => {
+  test("compiles concurrent requests independently", async () => {
     const scripts = Array.from({ length: 32 }, (_, index) => `echo concurrent-${index}`);
 
     expect(await Promise.all(scripts.map((script) => compileShell(script)))).toEqual(
@@ -39,6 +39,12 @@ describe("shell compiler", () => {
   test("supports safe unquoted loop variables and rejects field splitting", async () => {
     expect((await compileShell("for item in one two; do echo $item; done"))?.map((segment) => segment.words))
       .toEqual([["echo", "one"], ["echo", "two"]]);
+    expect(await compileShell('for item in "~"; do echo $item; done')).toEqual([
+      {
+        controlFlow: "for", iteration: 0, repetition: "finite", role: "body",
+        source: "echo $item", words: ["echo", "~"],
+      },
+    ]);
     expect(await compileShell('for item in "two words"; do echo $item; done')).toBeUndefined();
   });
 

@@ -1,4 +1,3 @@
-import { LangVariant, parse as parseShellSyntax } from "sh-syntax";
 import { parse as parseTypedShell } from "unbash";
 import type {
   AndOr,
@@ -12,7 +11,6 @@ import type {
 const defaultMaxIterations = 64;
 const defaultMaxSegments = 256;
 const unquotedGlobPattern = /[*?\[]/;
-let shellSyntaxQueue = Promise.resolve();
 const shellStateMutations = new Set([
   ".", "alias", "builtin", "declare", "eval", "exec", "export", "local", "read", "readonly",
   "set", "shift", "source", "trap", "typeset", "umask", "unalias", "unset",
@@ -50,28 +48,16 @@ function validLimit(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
 
-function dialectVariant(dialect: ShellDialect): number {
-  return dialect === "posix" ? LangVariant.LangPOSIX : LangVariant.LangBash;
-}
-
-async function validateShellSyntax(script: string, dialect: ShellDialect): Promise<void> {
-  const { promise: nextParse, resolve: releaseQueue } = Promise.withResolvers<void>();
-  const previousParse = shellSyntaxQueue;
-  shellSyntaxQueue = nextParse;
-  await previousParse;
-  try {
-    await parseShellSyntax(script, { variant: dialectVariant(dialect) });
-  } finally {
-    releaseQueue();
-  }
-}
-
 function simpleVariable(text: string): string | undefined {
   const match = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(text);
   return match?.[1] ?? match?.[2];
 }
 
-function unsafeUnquotedValue(value: string): boolean {
+function unsafeExpandedValue(value: string): boolean {
+  return /\s/.test(value) || unquotedGlobPattern.test(value);
+}
+
+function unsafeUnquotedLiteralValue(value: string): boolean {
   return value.startsWith("~") || /\s/.test(value) || unquotedGlobPattern.test(value);
 }
 
@@ -89,24 +75,24 @@ function resolveParts(
   quoted: boolean,
 ): string | undefined {
   let result = "";
-  let unquotedResult = "";
+  let unquotedSafetyScan = "";
   for (const part of parts) {
     if (part.type === "Literal") {
-      if (!quoted && unsafeUnquotedLiteral(part, unquotedResult.length === 0)) return undefined;
+      if (!quoted && unsafeUnquotedLiteral(part, unquotedSafetyScan.length === 0)) return undefined;
       result += part.value;
-      unquotedResult += quoted ? "\0" : part.value;
+      unquotedSafetyScan += quoted ? "\0" : part.value;
       continue;
     }
     if (part.type === "SingleQuoted" || part.type === "AnsiCQuoted") {
       result += part.value;
-      unquotedResult += "\0";
+      unquotedSafetyScan += "\0";
       continue;
     }
     if (part.type === "DoubleQuoted") {
       const value = resolveParts(part.parts, variables, true);
       if (value === undefined) return undefined;
       result += value;
-      unquotedResult += "\0";
+      unquotedSafetyScan += "\0";
       continue;
     }
     const name = part.type === "SimpleExpansion"
@@ -117,15 +103,15 @@ function resolveParts(
         : undefined;
     if (!name) return undefined;
     const value = variables.get(name);
-    if (value === undefined || !quoted && unsafeUnquotedValue(value)) return undefined;
+    if (value === undefined || !quoted && unsafeExpandedValue(value)) return undefined;
     result += value;
-    if (!quoted) unquotedResult += value;
+    if (!quoted) unquotedSafetyScan += "\0";
   }
-  return !quoted && unsafeUnquotedReconstruction(unquotedResult) ? undefined : result;
+  return !quoted && unsafeUnquotedReconstruction(unquotedSafetyScan) ? undefined : result;
 }
 
 function resolveWord(word: Word, variables: Variables): string | undefined {
-  if (!word.parts) return unsafeUnquotedValue(word.value) ? undefined : word.value;
+  if (!word.parts) return unsafeUnquotedLiteralValue(word.value) ? undefined : word.value;
   return resolveParts(word.parts, variables, false);
 }
 
@@ -271,10 +257,5 @@ export async function compileShell(
     maxSegments: options.maxSegments ?? defaultMaxSegments,
   };
   if (!validLimit(resolvedOptions.maxIterations) || !validLimit(resolvedOptions.maxSegments)) return undefined;
-  try {
-    await validateShellSyntax(script, resolvedOptions.dialect);
-    return compileTypedAst(script, parseTypedShell(script), resolvedOptions);
-  } catch {
-    return undefined;
-  }
+  return compileTypedAst(script, parseTypedShell(script), resolvedOptions);
 }
