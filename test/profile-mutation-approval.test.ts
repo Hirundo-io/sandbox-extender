@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ServerContext } from "@modelcontextprotocol/server";
 
 import type { ProfileMutationIntent } from "../src/mutation-authorization.js";
-import { requestProfileMutationApproval } from "../src/profile-mutation-approval.js";
+import { approvalNonceFor, requestProfileMutationApproval } from "../src/profile-mutation-approval.js";
 
 const intent = {
   arguments: { arguments: { pullRequest: 42, repository: "acme/example" }, profileId: "babysitter" },
@@ -21,6 +21,11 @@ function context(state?: unknown, inputResponses?: Record<string, unknown>): Ser
 }
 
 describe("profile mutation approval", () => {
+  test("reads the approval nonce only from verified continuation state", () => {
+    expect(approvalNonceFor(context())).toBeUndefined();
+    expect(approvalNonceFor(context({ details, intent, nonce: "continuation-nonce", threadId: "thread-1" }))).toBe("continuation-nonce");
+  });
+
   test("returns a continuation approval containing every bound value", async () => {
     const result = await requestProfileMutationApproval("thread-1", intent, details, context());
     expect(result.approval?.resultType).toBe("input_required");
