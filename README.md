@@ -99,6 +99,8 @@ MCP mutations use a continuation flow: the server returns the approval form
 and changes state only when Codex retries the request with an accepted
 response. An approved continuation is single-use and expires after two minutes;
 this avoids a nested host request and prevents a retry from rerunning a mutation.
+It is valid only while the same local MCP server process remains running; after
+a restart, submit the mutation again and approve its new continuation.
 
 For a human-operated, non-agent workflow, the standalone CLI performs the
 mutation directly from its explicit arguments. It does not create an

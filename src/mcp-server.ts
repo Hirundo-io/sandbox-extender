@@ -4,8 +4,11 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
 import { PolicyRepository } from "./policy-repository.js";
-import { approvalNonceFor, requestProfileMutationApproval } from "./profile-mutation-approval.js";
-import type { MutationApprovalDetails } from "./profile-mutation-approval.js";
+import {
+  approvalNonceFor,
+  requestProfileMutationApproval,
+  verifyProfileMutationRequestState,
+} from "./profile-mutation-approval.js";
 import { prepareProfileMutation } from "./profile-mutations.js";
 import type { PreparedProfileMutation } from "./profile-mutations.js";
 import { evaluateForThread } from "./policy-service.js";
@@ -34,10 +37,6 @@ function rememberPendingMutation(nonce: string, mutation: PreparedProfileMutatio
   pendingMutations.set(nonce, { expiresAt: Date.now() + 120_000, mutation });
 }
 
-async function authorizeMutation(threadId: string, intent: ProfileMutationIntent, details: MutationApprovalDetails, serverContext: ServerContext) {
-  return requestProfileMutationApproval(threadId, intent, details, serverContext);
-}
-
 async function runMutation(threadId: string, intent: ProfileMutationIntent, serverContext: ServerContext) {
   const retryNonce = approvalNonceFor(serverContext);
   const mutation = retryNonce === undefined
@@ -45,7 +44,7 @@ async function runMutation(threadId: string, intent: ProfileMutationIntent, serv
     : pendingMutationFor(retryNonce);
   if (mutation === undefined) throw new Error("profile mutation approval has expired; submit the mutation again");
 
-  const approval = await authorizeMutation(threadId, intent, mutation.approvalDetails, serverContext);
+  const approval = await requestProfileMutationApproval(threadId, intent, mutation.approvalDetails, serverContext);
   if (approval.approval !== undefined) {
     rememberPendingMutation(approval.nonce, mutation);
     return approval.approval;
@@ -55,7 +54,10 @@ async function runMutation(threadId: string, intent: ProfileMutationIntent, serv
 }
 
 export function buildServer(): McpServer {
-  const server = new McpServer({ name: "sandbox-extender", version: "0.1.2" });
+  const server = new McpServer(
+    { name: "sandbox-extender", version: "0.1.2" },
+    { requestState: { verify: verifyProfileMutationRequestState } },
+  );
 
   server.registerTool("initialize_policy_repository", {
     description: "Create the local directories used for profiles, proposals, tests, and thread state.", inputSchema: { threadId: nonEmptyStringSchema },

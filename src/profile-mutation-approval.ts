@@ -31,6 +31,8 @@ const requestStateCodec = createRequestStateCodec<ApprovalState>({
   ttlSeconds: 120,
 });
 
+export const verifyProfileMutationRequestState = requestStateCodec.verify;
+
 const claimedNonces = new Map<string, number>();
 
 function isPlainRecord(value: object): value is Record<string, unknown> {
