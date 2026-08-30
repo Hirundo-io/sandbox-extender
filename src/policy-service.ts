@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { PolicyCore } from "./policy-core.js";
-import { PolicyRepository } from "./policy-repository.js";
+import { PolicyRepository, ProfileStaleError } from "./policy-repository.js";
 import { materializeActivation } from "./materializer-runtime.js";
 import type { EvaluationResult, NormalizedRequest, Profile } from "./types.js";
 
@@ -246,6 +246,18 @@ function fingerprint(profile: import("./types.js").Profile): string {
   })).digest("hex");
 }
 
+function staleProfileStatus(
+  binding: import("./types.js").ProfileBinding,
+): Extract<ActiveProfileStatus, { readonly status: "stale" }> {
+  return {
+    status: "stale",
+    profileId: binding.profileId,
+    policyRevision: binding.policyRevision,
+    allowedTargets: binding.allowedTargets.map(redactSecretsInString),
+    reason: "active profile no longer matches review",
+  };
+}
+
 async function loadActiveProfile(
   repository: PolicyRepository,
   threadId: string,
@@ -268,23 +280,12 @@ async function loadActiveProfile(
       profile.policyRevision !== binding.policyRevision ||
       fingerprint(profile) !== binding.fingerprint
     ) {
-      return {
-        status: "stale",
-        profileId: binding.profileId,
-        policyRevision: binding.policyRevision,
-        allowedTargets: binding.allowedTargets,
-        reason: "active profile no longer matches review",
-      };
+      return staleProfileStatus(binding);
     }
     return { status: "active", binding, profile };
-  } catch {
-    return {
-      status: "stale",
-      profileId: binding.profileId,
-      policyRevision: binding.policyRevision,
-      allowedTargets: binding.allowedTargets,
-      reason: "active profile no longer matches review",
-    };
+  } catch (error) {
+    if (error instanceof ProfileStaleError) return staleProfileStatus(binding);
+    return { status: "unavailable", reason: "policy repository is unavailable" };
   }
 }
 
@@ -298,7 +299,7 @@ export async function getActiveProfileStatus(
     status: "active",
     profileId: activeProfile.profile.id,
     policyRevision: activeProfile.profile.policyRevision,
-    allowedTargets: activeProfile.binding.allowedTargets,
+    allowedTargets: activeProfile.binding.allowedTargets.map(redactSecretsInString),
   };
 }
 

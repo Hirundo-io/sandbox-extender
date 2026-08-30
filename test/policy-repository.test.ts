@@ -188,8 +188,29 @@ describe("PolicyRepository", () => {
       id: "pending",
       policyRevision: "pending-review",
     }));
+    await Bun.write(join(repo.root, "profiles", "invalid-revision.json"), JSON.stringify({
+      allowedTargets: ["github:repository:acme/example"],
+      groupings: [],
+      id: "invalid-revision",
+      policyRevision: "not-a-commit",
+    }));
 
     expect(await repo.listVerifiedProfiles()).toEqual(["reviewed"]);
+  });
+
+  test("reports policy repository failures while listing reviewed Profiles", async () => {
+    const repo = await repository();
+    await mkdir(join(repo.root, "profiles"));
+    await Bun.write(join(repo.root, "profiles", "reviewed.json"), JSON.stringify({
+      allowedTargets: ["github:repository:acme/example"],
+      groupings: [],
+      id: "reviewed",
+      policyRevision: "a".repeat(40),
+    }));
+
+    await expect(repo.listVerifiedProfiles()).rejects.toThrow(
+      "policy revision aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is not a Git commit",
+    );
   });
 
   test("only promotes a matching profile after every authorization test passes", async () => {

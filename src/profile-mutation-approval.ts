@@ -51,6 +51,7 @@ function approvalMessage(intent: ProfileMutationIntent, details: MutationApprova
 
 function isUnsupportedElicitation(error: unknown): boolean {
   return (error instanceof Error && error.message === "Client does not support form elicitation.") ||
+    (error instanceof Error && /CurrentWorkingDirectoryUnlinked.*Error creating transpiler/i.test(error.message)) ||
     (error instanceof McpError && (error.code === ErrorCode.MethodNotFound ||
       error.code === ErrorCode.InvalidParams && /(?:form.*(?:not supported|unsupported)|(?:not supported|unsupported).*form)/i.test(error.message)));
 }
