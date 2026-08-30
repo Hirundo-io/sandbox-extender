@@ -233,6 +233,10 @@ function redactAuditArguments(value: unknown, depth = 0): unknown {
   return "[unsupported audit value]";
 }
 
+export function redactSensitiveValue(value: unknown): unknown {
+  return redactAuditArguments(value);
+}
+
 function fingerprint(profile: import("./types.js").Profile): string {
   return createHash("sha256").update(JSON.stringify({
     allowedTargets: [...profile.allowedTargets].sort(),
@@ -421,12 +425,45 @@ export async function activateProfile(
   );
 }
 
+function bindingsMatch(
+  current: import("./types.js").ProfileBinding | undefined,
+  expected: import("./types.js").ProfileBinding | undefined,
+): boolean {
+  return current === expected || (
+    current !== undefined &&
+    expected !== undefined &&
+    current.profileId === expected.profileId &&
+    current.policyRevision === expected.policyRevision &&
+    current.allowedTargets.length === expected.allowedTargets.length &&
+    current.allowedTargets.every((target, index) => target === expected.allowedTargets[index])
+  );
+}
+
+async function removeBinding(
+  repository: PolicyRepository,
+  threadId: string,
+  expectedBinding?: import("./types.js").ProfileBinding,
+): Promise<void> {
+  await repository.updateState((bindings) => {
+    if (arguments.length === 3 && !bindingsMatch(bindings[threadId], expectedBinding)) {
+      throw new Error("active profile binding changed while awaiting approval");
+    }
+    const { [threadId]: _, ...remaining } = bindings;
+    return remaining;
+  });
+}
+
+export async function disablePreparedProfile(
+  repository: PolicyRepository,
+  threadId: string,
+  expectedBinding: import("./types.js").ProfileBinding | undefined,
+): Promise<void> {
+  await removeBinding(repository, threadId, expectedBinding);
+}
+
 export async function disableProfile(
   repository: PolicyRepository,
   threadId: string,
 ): Promise<void> {
-  await repository.updateState((bindings) => {
-    const { [threadId]: _, ...remaining } = bindings;
-    return remaining;
-  });
+  await removeBinding(repository, threadId);
 }

@@ -12,6 +12,7 @@ import {
   getActiveProfileStatus,
   PolicyRepository,
 } from "../src/index.js";
+import { disablePreparedProfile } from "../src/policy-service.js";
 import { PolicyCore } from "../src/policy-core.js";
 import { materializerIntegrity } from "../src/materializer-policy.js";
 import type { Profile } from "../src/types.js";
@@ -568,6 +569,33 @@ describe("policy service", () => {
       expect(revision).toHaveLength(40);
       await disableProfile(repository, request.threadId);
       expect(await repository.readState()).toEqual({});
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  test("does not disable a binding that changed after approval", async () => {
+    const { repository, root } = await createRepository();
+    const approvedBinding = {
+      allowedTargets: [request.resource],
+      fingerprint: "a".repeat(64),
+      policyRevision: "b".repeat(40),
+      profileId: "approved-profile",
+    };
+    const replacementBinding = { ...approvedBinding, profileId: "replacement-profile" };
+    try {
+      await repository.writeState({ [request.threadId]: replacementBinding });
+      await expect(disablePreparedProfile(repository, request.threadId, approvedBinding)).rejects.toThrow("changed while awaiting approval");
+      expect(await repository.readState()).toEqual({ [request.threadId]: replacementBinding });
+
+      await repository.writeState({ [request.threadId]: approvedBinding });
+      await expect(disablePreparedProfile(repository, request.threadId, approvedBinding)).resolves.toBeUndefined();
+      expect(await repository.readState()).toEqual({});
+
+      await repository.writeState({});
+      await expect(disablePreparedProfile(repository, request.threadId, undefined)).resolves.toBeUndefined();
+      await repository.writeState({ [request.threadId]: replacementBinding });
+      await expect(disablePreparedProfile(repository, request.threadId, undefined)).rejects.toThrow("changed while awaiting approval");
     } finally {
       await rm(root, { force: true, recursive: true });
     }

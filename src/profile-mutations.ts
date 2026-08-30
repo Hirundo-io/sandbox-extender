@@ -3,7 +3,7 @@ import { PolicyRepository } from "./policy-repository.js";
 import { proposeProfile } from "./profile-authoring.js";
 import {
   activatePreparedProfile,
-  disableProfile,
+  disablePreparedProfile,
   prepareProfileActivation,
 } from "./policy-service.js";
 import type { MutationApprovalDetails } from "./profile-mutation-approval.js";
@@ -72,9 +72,9 @@ export async function prepareProfileMutation(
               policyRevision: binding.policyRevision,
               profileId: binding.profileId,
               targets: binding.allowedTargets,
-            },
+        },
         execute: async () => {
-          await disableProfile(repository, threadId);
+          await disablePreparedProfile(repository, threadId, binding);
           return `Disabled the profile for ${threadId}.`;
         },
       };

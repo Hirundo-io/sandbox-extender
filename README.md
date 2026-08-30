@@ -219,6 +219,12 @@ validation before accepting that `run` declaration.
 
 ## Development
 
+Husky installs the versioned pre-commit hook when dependencies are installed.
+It first formats and lints staged JSON, Markdown, and TypeScript files with
+lint-staged, then runs the same audit, unused-code, type, plugin-validation,
+and coverage-test gates as CI. Run the complete gate on demand with
+`bun run check:commit`.
+
 ```sh
 bun test
 bun run audit

@@ -4,6 +4,7 @@ import { acceptedContent, createRequestStateCodec, inputRequired, type InputRequ
 import { z } from "zod";
 
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
+import { redactSensitiveValue } from "./policy-service.js";
 
 export type MutationApprovalDetails = {
   readonly activationArguments?: Readonly<Record<string, unknown>>;
@@ -14,9 +15,14 @@ export type MutationApprovalDetails = {
 
 type ApprovalState = {
   readonly details: MutationApprovalDetails;
-  readonly intent: ProfileMutationIntent;
+  readonly intent: SanitizedProfileMutationIntent;
   readonly nonce: string;
   readonly threadId: string;
+};
+
+type SanitizedProfileMutationIntent = {
+  readonly arguments: unknown;
+  readonly operation: ProfileMutationIntent["operation"];
 };
 
 export type ProfileMutationApproval = {
@@ -72,7 +78,7 @@ function line(label: string, value: string | undefined): string {
   return `${label}: ${value ?? "(not applicable)"}`;
 }
 
-function approvalMessage(threadId: string, intent: ProfileMutationIntent, details: MutationApprovalDetails): string {
+function approvalMessage(threadId: string, intent: SanitizedProfileMutationIntent, details: MutationApprovalDetails): string {
   const targets = details.targets?.length ? details.targets.map((target) => JSON.stringify(target)).join(", ") : undefined;
   return [
     "Approve this Sandbox Extender Profile mutation?",
@@ -86,12 +92,22 @@ function approvalMessage(threadId: string, intent: ProfileMutationIntent, detail
   ].join("\n");
 }
 
+function sanitizedApprovalValues(
+  intent: ProfileMutationIntent,
+  details: MutationApprovalDetails,
+): { readonly details: MutationApprovalDetails; readonly intent: SanitizedProfileMutationIntent } {
+  return {
+    details: redactSensitiveValue(details) as MutationApprovalDetails,
+    intent: { arguments: redactSensitiveValue(intent.arguments), operation: intent.operation },
+  };
+}
+
 export function approvalNonceFor(serverContext: ServerContext): string | undefined {
   const state = serverContext.mcpReq.requestState<ApprovalState>();
   return state?.nonce;
 }
 
-function matchesApprovalState(state: ApprovalState, threadId: string, intent: ProfileMutationIntent, details: MutationApprovalDetails): boolean {
+function matchesApprovalState(state: ApprovalState, threadId: string, intent: SanitizedProfileMutationIntent, details: MutationApprovalDetails): boolean {
   return state.threadId === threadId &&
     canonicalJson(state.intent) === canonicalJson(intent) &&
     canonicalJson(state.details) === canonicalJson(details);
@@ -104,9 +120,12 @@ export async function requestProfileMutationApproval(
   details: MutationApprovalDetails,
   serverContext: ServerContext,
 ): Promise<ProfileMutationApproval> {
+  canonicalJson(intent);
+  canonicalJson(details);
+  const sanitized = sanitizedApprovalValues(intent, details);
   const state = serverContext.mcpReq.requestState<ApprovalState>();
   if (state !== undefined) {
-    if (!matchesApprovalState(state, threadId, intent, details)) {
+    if (!matchesApprovalState(state, threadId, sanitized.intent, sanitized.details)) {
       throw new Error("profile mutation approval retry does not match the original request");
     }
     if (acceptedContent(serverContext.mcpReq.inputResponses, "approval", approvalResponseSchema) === undefined) {
@@ -119,7 +138,7 @@ export async function requestProfileMutationApproval(
   const approval = await inputRequired({
     inputRequests: {
       approval: inputRequired.elicit({
-        message: approvalMessage(threadId, intent, details),
+        message: approvalMessage(threadId, sanitized.intent, sanitized.details),
         requestedSchema: {
           type: "object",
           properties: { approve: { type: "boolean", title: "Approve Profile mutation", description: "Allow only the operation and values shown above.", default: false } },
@@ -127,7 +146,7 @@ export async function requestProfileMutationApproval(
         },
       }),
     },
-    requestState: await requestStateCodec.mint({ details, intent, nonce, threadId }, serverContext),
+    requestState: await requestStateCodec.mint({ details: sanitized.details, intent: sanitized.intent, nonce, threadId }, serverContext),
   });
   return { approval, nonce };
 }

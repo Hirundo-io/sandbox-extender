@@ -40,6 +40,27 @@ describe("profile mutation approval", () => {
     expect(message).toContain('Targets: "github:pull-request:acme/example#42"');
   });
 
+  test("redacts credentials from approval messages and continuation state", async () => {
+    const sensitiveIntent = {
+      arguments: { arguments: { authorization: "Bearer secret-token", nested: { password: "secret-password" } }, profileId: "babysitter" },
+      operation: "activate_profile",
+    } as const satisfies ProfileMutationIntent;
+    const sensitiveDetails = {
+      activationArguments: sensitiveIntent.arguments.arguments,
+      profileId: "babysitter",
+      targets: ["https://user:secret@example.test/repository?access_token=query-secret"],
+    };
+    const result = await requestProfileMutationApproval("thread-1", sensitiveIntent, sensitiveDetails, context());
+    const message = (result.approval?.inputRequests?.approval?.params as { message?: string } | undefined)?.message;
+    const payload = Buffer.from(result.approval?.requestState?.split(".")[1] ?? "", "base64url").toString();
+
+    for (const secret of ["secret-token", "secret-password", "user:secret", "query-secret"]) {
+      expect(message).not.toContain(secret);
+      expect(payload).not.toContain(secret);
+    }
+    expect(message).toContain("[redacted]");
+  });
+
   test("accepts only a matching approved retry", async () => {
     await expect(requestProfileMutationApproval("thread-1", intent, details, context({ details, intent, nonce: "matching-approved-retry", threadId: "thread-1" }, {
       approval: { action: "accept", content: { approve: true } },
