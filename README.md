@@ -85,18 +85,21 @@ Start by asking the agent to use the `sandbox-extender:create-profile` skill. It
 
 ## Profile mutation Approval
 
-Profile mutations use MCP elicitation. Before changing the Policy Repository or
-a Thread Binding, the Agent Host displays the exact operation, Profile, Policy
-Revision, Activation Arguments, and Targets where they apply. The mutation runs
-only after the host returns `accept` with the confirmation field set. `decline`,
-`cancel`, malformed responses, and transport failures do not mutate anything.
+Profile mutations use the MCP 2026-07-28 `input_required` retry flow. Before
+changing the Policy Repository or a Thread Binding, the Agent Host displays the
+exact operation, Profile, Policy Revision, Activation Arguments, and Targets
+where they apply. It retries the unchanged tool call with an explicit
+`approve: true` response. The server verifies a signed, two-minute request
+state bound to the original operation and `threadId`. `decline`, `cancel`,
+malformed responses, mismatched retries, and transport failures do not mutate
+anything.
 This Approval is authorization for one operation, not identity authentication.
 
-Clients without form elicitation use the compatibility CLI. Its authorization
-names the host thread and operation and stores only a SHA-256 digest of the
-canonical arguments. It expires after two minutes and can be claimed once.
-Run it only after an MCP mutation reports that elicitation is unsupported, then
-retry the unchanged MCP call:
+Hosts that cannot complete the required interaction use the compatibility CLI.
+Its authorization names the host thread and operation and stores only a
+SHA-256 digest of the canonical arguments. It expires after two minutes and can
+be claimed once. Run it only after an MCP mutation reports that it cannot
+complete the approval flow, then retry the unchanged MCP call:
 
 ```sh
 bun run authorize:mutation -- <operation> \
@@ -117,8 +120,8 @@ Use `{}` or omit `--arguments-json` for
 objects match their MCP inputs with `threadId` removed. Run the command with
 `--help` to see each operation's shape. A mismatched, malformed, or expired
 authorization fails closed and is consumed. Do not use the fallback after a
-decline, cancel, or unrelated elicitation failure. Request evaluation remains
-available without mutation Approval.
+decline, cancel, malformed retry, or unrelated interaction failure. Request
+evaluation remains available without mutation Approval.
 
 The disabled `shared/profile-templates/scout.json`,
 `shared/profile-templates/maker.json`, and

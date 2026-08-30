@@ -1,4 +1,13 @@
-import { ErrorCode, McpError, type ElicitRequestFormParams, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
+import { randomBytes } from "node:crypto";
+
+import {
+  acceptedContent,
+  createRequestStateCodec,
+  inputRequired,
+  type InputRequiredResult,
+  type ServerContext,
+} from "@modelcontextprotocol/server";
+import { z } from "zod";
 
 import { consumeProfileMutationAuthorization } from "./mutation-authorization.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
@@ -10,12 +19,22 @@ export type MutationApprovalDetails = {
   readonly targets?: readonly string[];
 };
 
-type ElicitApproval = (request: ElicitRequestFormParams) => Promise<ElicitResult>;
+type ApprovalState = {
+  readonly details: MutationApprovalDetails;
+  readonly intent: ProfileMutationIntent;
+  readonly threadId: string;
+};
 
 type ApprovalDependencies = {
   readonly consumeFallback?: typeof consumeProfileMutationAuthorization;
-  readonly elicit: ElicitApproval;
 };
+
+const approvalResponseSchema = z.object({ approve: z.literal(true) }).strict();
+const requestStateCodec = createRequestStateCodec<ApprovalState>({
+  bind: (ctx) => ctx.mcpReq.method,
+  key: randomBytes(32),
+  ttlSeconds: 120,
+});
 
 function canonicalJsonValue(value: unknown): unknown {
   if (value === null || typeof value === "boolean" || typeof value === "string") return value;
@@ -49,48 +68,81 @@ function approvalMessage(intent: ProfileMutationIntent, details: MutationApprova
   ].join("\n");
 }
 
-function isUnsupportedElicitation(error: unknown): boolean {
-  return (error instanceof Error && error.message === "Client does not support form elicitation.") ||
-    (error instanceof McpError && (error.code === ErrorCode.MethodNotFound ||
-      error.code === ErrorCode.InvalidParams && /(?:form.*(?:not supported|unsupported)|(?:not supported|unsupported).*form)/i.test(error.message)));
+function matchesApprovalState(
+  state: ApprovalState,
+  threadId: string,
+  intent: ProfileMutationIntent,
+  details: MutationApprovalDetails,
+): boolean {
+  return state.threadId === threadId &&
+    canonicalJson(state.intent) === canonicalJson(intent) &&
+    canonicalJson(state.details) === canonicalJson(details);
 }
 
-/** Requests host-mediated user approval, with the legacy CLI artifact as a compatibility fallback. */
-export async function approveProfileMutation(
+function isMissingFallback(error: unknown): boolean {
+  return error instanceof Error && error.message === "a user mutation authorization is required";
+}
+
+async function consumeFallbackIfAvailable(
+  root: string,
+  threadId: string,
+  intent: ProfileMutationIntent,
+  consumeFallback: typeof consumeProfileMutationAuthorization,
+): Promise<boolean> {
+  try {
+    await consumeFallback(root, threadId, intent);
+    return true;
+  } catch (error) {
+    if (isMissingFallback(error)) return false;
+    throw error;
+  }
+}
+
+/**
+ * Requests host approval through MCP's 2026-07-28 multi-round-trip flow.
+ * A matching short-lived CLI authorization is consumed only after a host has
+ * already been unable to complete that flow and the caller retries the tool.
+ */
+export async function requestProfileMutationApproval(
   root: string,
   threadId: string,
   intent: ProfileMutationIntent,
   details: MutationApprovalDetails,
-  dependencies: ApprovalDependencies,
-): Promise<void> {
-  let result: ElicitResult;
-  try {
-    result = await dependencies.elicit({
-      mode: "form",
-      message: approvalMessage(intent, details),
-      requestedSchema: {
-        type: "object",
-        properties: {
-          approve: {
-            type: "boolean",
-            title: "Approve Profile mutation",
-            description: "Allow only the operation and values shown above.",
-            default: false,
-          },
-        },
-        required: ["approve"],
-      },
-    });
-  } catch (error) {
-    if (!isUnsupportedElicitation(error)) throw error;
-    await (dependencies.consumeFallback ?? consumeProfileMutationAuthorization)(root, threadId, intent);
-    return;
+  ctx: ServerContext,
+  dependencies: ApprovalDependencies = {},
+): Promise<InputRequiredResult | undefined> {
+  const state = ctx.mcpReq.requestState<ApprovalState>();
+  if (state !== undefined) {
+    if (!matchesApprovalState(state, threadId, intent, details)) {
+      throw new Error("profile mutation approval retry does not match the original request");
+    }
+    if (acceptedContent(ctx.mcpReq.inputResponses, "approval", approvalResponseSchema) === undefined) {
+      throw new Error("profile mutation approval was not confirmed");
+    }
+    return undefined;
   }
 
-  if (result.action !== "accept") {
-    throw new Error(`profile mutation approval ${result.action}`);
-  }
-  if (result.content?.approve !== true) {
-    throw new Error("profile mutation approval was not confirmed");
-  }
+  const consumeFallback = dependencies.consumeFallback ?? consumeProfileMutationAuthorization;
+  if (await consumeFallbackIfAvailable(root, threadId, intent, consumeFallback)) return undefined;
+
+  return inputRequired({
+    inputRequests: {
+      approval: inputRequired.elicit({
+        message: approvalMessage(intent, details),
+        requestedSchema: {
+          type: "object",
+          properties: {
+            approve: {
+              type: "boolean",
+              title: "Approve Profile mutation",
+              description: "Allow only the operation and values shown above.",
+              default: false,
+            },
+          },
+          required: ["approve"],
+        },
+      }),
+    },
+    requestState: await requestStateCodec.mint({ details, intent, threadId }, ctx),
+  });
 }
