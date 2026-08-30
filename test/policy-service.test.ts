@@ -464,6 +464,22 @@ describe("policy service", () => {
     }
   });
 
+  test("fails closed when recording an allowed evaluation fails", async () => {
+    const profile: Profile = {
+      allowedTargets: new Set([request.resource]),
+      groupings: [{ evaluate: () => "allow", id: "allow" }], id: "reviewed", policyRevision: "a".repeat(40),
+    };
+    const repository = stubRepository(profile);
+    repository.appendAudit = async () => {
+      throw new Error("audit is unavailable");
+    };
+
+    expect(await evaluateForThread(repository, request)).toEqual({
+      decision: "abstain",
+      reason: "policy repository is unavailable",
+    });
+  });
+
   test("rejects pending and multi-target single-scope activation", async () => {
     const pending: Profile = { allowedTargets: new Set(["one"]), groupings: [], id: "pending", policyRevision: "pending-review" };
     await expect(activateProfile(stubRepository(pending), request.threadId, pending.id)).rejects.toThrow("reviewed");
