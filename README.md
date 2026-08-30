@@ -86,15 +86,19 @@ Start by asking the agent to use the `sandbox-extender:create-profile` skill. It
 ## Profile mutation Approval
 
 Profile mutations use MCP elicitation. Before changing the Policy Repository or
-a Thread Binding, the Agent Host displays the exact operation, Profile, Policy
-Revision, Activation Arguments, and Targets where they apply. The mutation runs
-only after the host returns `accept` with the confirmation field set. `decline`,
-`cancel`, malformed responses, and transport failures do not mutate anything.
-This Approval is authorization for one operation, not identity authentication.
+a Thread Binding, the Agent Host displays the exact operation, target Thread,
+Profile, Policy Revision, Activation Arguments, and Targets where they apply.
+The mutation runs only after the host returns `accept` with the confirmation
+field set. `decline`, `cancel`, malformed responses, and transport failures do
+not mutate anything. This Approval is authorization for one operation, not
+identity authentication. `threadId` is an MCP caller-supplied target: the
+engineer approving a mutation must verify the displayed target Thread before
+accepting it.
 
 MCP mutations use a continuation flow: the server returns the approval form
 and changes state only when Codex retries the request with an accepted
-response. This avoids a nested host request.
+response. An approved continuation is single-use and expires after two minutes;
+this avoids a nested host request and prevents a retry from rerunning a mutation.
 
 For a human-operated, non-agent workflow, the standalone CLI performs the
 mutation directly from its explicit arguments. It does not create an
