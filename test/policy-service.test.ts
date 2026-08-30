@@ -104,6 +104,23 @@ function stubRepository(profile: Profile, bindingOverrides: Record<string, unkno
 }
 
 describe("policy service", () => {
+  test("fails closed when the binding state cannot be read", async () => {
+    const unavailableRepository = {
+      readState: async () => {
+        throw new Error("state is unavailable");
+      },
+    } as unknown as PolicyRepository;
+
+    expect(await getActiveProfileStatus(unavailableRepository, request.threadId)).toEqual({
+      reason: "policy repository is unavailable",
+      status: "unavailable",
+    });
+    expect(await evaluateForThread(unavailableRepository, request)).toEqual({
+      decision: "abstain",
+      reason: "policy repository is unavailable",
+    });
+  });
+
   test("reports an active Profile only when its binding still matches review", async () => {
     const { repository, root } = await createRepository();
     try {
