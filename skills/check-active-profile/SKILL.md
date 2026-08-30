@@ -5,14 +5,17 @@ description: Check the Sandbox Extender profile active for the current coding-ag
 
 # Check the active profile
 
-Read `$HOME_FOLDER/.agents/sandbox-extender/state/thread-bindings.json` without
-changing it. If `HOME_FOLDER` is unset, use the current user's home directory.
-Look up the current coding host's thread ID in the top-level object.
+Call the `sandbox-extender` MCP tool `get_active_profile` with the current
+coding host's thread ID. It validates the bound Profile against its reviewed
+revision and binding fingerprint without changing the policy repository.
 
-If no binding exists, report that this thread has no active Sandbox Extender
-profile. Otherwise report the exact Profile ID, Policy Revision, and frozen
-`allowedTargets` from the binding. Those targets are the binding's scope, not a
-promise that every future request will be authorized.
+If the status is `inactive`, report that this thread has no active Sandbox
+Extender profile. If it is `active`, report the exact Profile ID, Policy
+Revision, and frozen `allowedTargets`. Those targets are the binding's scope,
+not a promise that every future request will be authorized.
+
+If the status is `stale`, report the binding as stale rather than active. If it
+is `unavailable`, report that the policy repository could not be verified.
 
 Do not activate, disable, initialize, repair, or remove a binding while
-checking it. A missing state file means there is no active Profile.
+checking it.

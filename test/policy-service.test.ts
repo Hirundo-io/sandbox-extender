@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 
 import { PolicyRepository } from "../src/policy-repository.js";
-import { activateProfile, disableProfile, evaluateForThread } from "../src/policy-service.js";
+import {
+  activateProfile,
+  disableProfile,
+  evaluateForThread,
+  getActiveProfileStatus,
+} from "../src/policy-service.js";
 import { PolicyCore } from "../src/policy-core.js";
 import { materializerIntegrity } from "../src/materializer-policy.js";
 import type { Profile } from "../src/types.js";
@@ -99,6 +104,36 @@ function stubRepository(profile: Profile, bindingOverrides: Record<string, unkno
 }
 
 describe("policy service", () => {
+  test("reports an active Profile only when its binding still matches review", async () => {
+    const { repository, root } = await createRepository();
+    try {
+      const revision = await writeReviewedProfile(repository, "review");
+      await activateProfile(repository, request.threadId, "review");
+      expect(await getActiveProfileStatus(repository, request.threadId)).toEqual({
+        allowedTargets: [request.resource],
+        policyRevision: revision,
+        profileId: "review",
+        status: "active",
+      });
+
+      await writeFile(join(root, "profiles", "review.json"), JSON.stringify({
+        allowedTargets: ["github:repository:acme/other"],
+        groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
+        id: "review",
+        policyRevision: revision,
+      }));
+      expect(await getActiveProfileStatus(repository, request.threadId)).toEqual({
+        allowedTargets: [request.resource],
+        policyRevision: revision,
+        profileId: "review",
+        reason: "active profile no longer matches review",
+        status: "stale",
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   test("freezes activation arguments into the thread binding", async () => {
     const { repository, root } = await createRepository();
     try {
@@ -165,7 +200,7 @@ describe("policy service", () => {
     }
   });
 
-  test("records inactive requests and fails closed for missing profile files", async () => {
+  test("records inactive requests and reports stale bindings for missing profile files", async () => {
     const { repository, root } = await createRepository();
     try {
       expect(await evaluateForThread(repository, request)).toEqual({
@@ -182,7 +217,7 @@ describe("policy service", () => {
       } });
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
-        reason: "policy repository is unavailable",
+        reason: "active profile no longer matches review",
       });
     } finally {
       await rm(root, { force: true, recursive: true });
@@ -446,13 +481,13 @@ describe("policy service", () => {
       }));
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
-        reason: "policy repository is unavailable",
+        reason: "active profile no longer matches review",
       });
 
       await writeProfile(root, "reviewed", "a".repeat(40));
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
-        reason: "policy repository is unavailable",
+        reason: "active profile no longer matches review",
       });
       expect(revision).toHaveLength(40);
       await disableProfile(repository, request.threadId);

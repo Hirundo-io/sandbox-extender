@@ -9,6 +9,16 @@ export type PreparedProfileActivation = {
   readonly targets: readonly string[];
 };
 
+export type ActiveProfileStatus =
+  | { readonly status: "active"; readonly profileId: string; readonly policyRevision: string; readonly allowedTargets: readonly string[] }
+  | { readonly status: "inactive"; readonly reason: "no active profile for thread" }
+  | { readonly status: "stale"; readonly profileId: string; readonly policyRevision: string; readonly allowedTargets: readonly string[]; readonly reason: "active profile no longer matches review" }
+  | { readonly status: "unavailable"; readonly reason: "policy repository is unavailable" };
+
+type LoadedActiveProfile =
+  | { readonly status: "active"; readonly binding: import("./types.js").ProfileBinding; readonly profile: Profile }
+  | Exclude<ActiveProfileStatus, { readonly status: "active" }>;
+
 const credentialOptionPattern = /(^|\s)(--(?:access[-_]?key|access[-_]?token|api[-_]?key|api[-_]?token|authorization|client[-_]?secret|connection[-_]?string|cookie|database[-_]?url|password|passwd|private[-_]?token|refresh[-_]?token|secret|token|webhook[-_]?secret))(?:=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
 const credentialAssignmentPattern = /(^|\s)([A-Za-z_][A-Za-z0-9_]*(?:ACCESS[-_]?(?:KEY|TOKEN)|ACCOUNT[-_]?KEY|API[-_]?KEY|API[-_]?TOKEN|AUTH(?:ORIZATION)?|CLIENT[-_]?SECRET|CONNECTION[-_]?STRING|COOKIE|CREDENTIAL|DATABASE[-_]?URL|PASSWORD|PASSWD|PRIVATE[-_]?TOKEN|REFRESH[-_]?TOKEN|SECRET|SHARED[-_]?ACCESS[-_]?KEY|TOKEN|WEBHOOK[-_]?SECRET)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi;
 const credentialUrlPattern = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]*@/gi;
@@ -236,40 +246,60 @@ function fingerprint(profile: import("./types.js").Profile): string {
   })).digest("hex");
 }
 
-export async function evaluateForThread(
+async function loadActiveProfile(
   repository: PolicyRepository,
-  request: NormalizedRequest,
-): Promise<EvaluationResult> {
+  threadId: string,
+): Promise<LoadedActiveProfile> {
+  let binding: import("./types.js").ProfileBinding | undefined;
   try {
-    const bindings = await repository.readState();
-    const binding = bindings[request.threadId];
-    if (!binding) {
-      const result = { decision: "abstain" as const, reason: "no active profile for thread" };
-      await recordEvaluation(repository, request, result);
-      return result;
-    }
-    const core = new PolicyCore();
+    binding = (await repository.readState())[threadId];
+  } catch {
+    return { status: "unavailable", reason: "policy repository is unavailable" };
+  }
+  if (!binding) {
+    return { status: "inactive", reason: "no active profile for thread" };
+  }
+
+  try {
     const reviewedProfile = await repository.loadVerifiedProfile(binding.profileId);
     const profile = { ...reviewedProfile, allowedTargets: new Set(binding.allowedTargets) };
-    if (profile.policyRevision === "pending-review" ||
-      profile.policyRevision !== binding.policyRevision || fingerprint(profile) !== binding.fingerprint) {
-      const result = { decision: "abstain" as const, reason: "active profile no longer matches review" };
-      await recordEvaluation(repository, request, result, binding.profileId, binding.policyRevision);
-      return result;
+    if (
+      profile.policyRevision === "pending-review" ||
+      profile.policyRevision !== binding.policyRevision ||
+      fingerprint(profile) !== binding.fingerprint
+    ) {
+      return {
+        status: "stale",
+        profileId: binding.profileId,
+        policyRevision: binding.policyRevision,
+        allowedTargets: binding.allowedTargets,
+        reason: "active profile no longer matches review",
+      };
     }
-    core.activate(profile, request.threadId);
-    const evaluated = await core.evaluate(request);
-    if (evaluated.decision === "allow" && !await core.consumeToken(evaluated.token?.id ?? "", request)) {
-      const result = { decision: "abstain" as const, reason: "authorization token is unavailable" };
-      await recordEvaluation(repository, request, result, binding.profileId, profile.policyRevision);
-      return result;
-    }
-    await recordEvaluation(repository, request, evaluated, binding.profileId, profile.policyRevision);
-    const { token: _, ...result } = evaluated;
-    return result;
+    return { status: "active", binding, profile };
   } catch {
-    return { decision: "abstain", reason: "policy repository is unavailable" };
+    return {
+      status: "stale",
+      profileId: binding.profileId,
+      policyRevision: binding.policyRevision,
+      allowedTargets: binding.allowedTargets,
+      reason: "active profile no longer matches review",
+    };
   }
+}
+
+export async function getActiveProfileStatus(
+  repository: PolicyRepository,
+  threadId: string,
+): Promise<ActiveProfileStatus> {
+  const activeProfile = await loadActiveProfile(repository, threadId);
+  if (activeProfile.status !== "active") return activeProfile;
+  return {
+    status: "active",
+    profileId: activeProfile.profile.id,
+    policyRevision: activeProfile.profile.policyRevision,
+    allowedTargets: activeProfile.binding.allowedTargets,
+  };
 }
 
 async function recordEvaluation(
@@ -302,6 +332,42 @@ async function recordEvaluation(
     await repository.appendAudit(entry);
   } catch {
     // Abstentions never extend host authority, so their audit failure is safe.
+  }
+}
+
+export async function evaluateForThread(
+  repository: PolicyRepository,
+  request: NormalizedRequest,
+): Promise<EvaluationResult> {
+  try {
+    const activeProfile = await loadActiveProfile(repository, request.threadId);
+    if (activeProfile.status === "inactive") {
+      const result = { decision: "abstain" as const, reason: "no active profile for thread" };
+      await recordEvaluation(repository, request, result);
+      return result;
+    }
+    if (activeProfile.status === "stale") {
+      const result = { decision: "abstain" as const, reason: "active profile no longer matches review" };
+      await recordEvaluation(repository, request, result, activeProfile.profileId, activeProfile.policyRevision);
+      return result;
+    }
+    if (activeProfile.status === "unavailable") {
+      return { decision: "abstain", reason: "policy repository is unavailable" };
+    }
+    const core = new PolicyCore();
+    const { profile } = activeProfile;
+    core.activate(profile, request.threadId);
+    const evaluated = await core.evaluate(request);
+    if (evaluated.decision === "allow" && !await core.consumeToken(evaluated.token?.id ?? "", request)) {
+      const result = { decision: "abstain" as const, reason: "authorization token is unavailable" };
+      await recordEvaluation(repository, request, result, activeProfile.binding.profileId, profile.policyRevision);
+      return result;
+    }
+    await recordEvaluation(repository, request, evaluated, activeProfile.binding.profileId, profile.policyRevision);
+    const { token: _, ...result } = evaluated;
+    return result;
+  } catch {
+    return { decision: "abstain", reason: "policy repository is unavailable" };
   }
 }
 

@@ -260,6 +260,19 @@ export class PolicyRepository {
     }
   }
 
+  async listVerifiedProfiles(): Promise<string[]> {
+    const candidates = await this.listProfiles();
+    const verified = await Promise.all(candidates.map(async (profileId) => {
+      try {
+        await this.loadVerifiedProfile(profileId);
+        return profileId;
+      } catch {
+        return undefined;
+      }
+    }));
+    return verified.filter((profileId): profileId is string => profileId !== undefined);
+  }
+
   async initialize(): Promise<void> {
     await Promise.all([
       mkdir(join(this.root, "profiles"), { recursive: true }),

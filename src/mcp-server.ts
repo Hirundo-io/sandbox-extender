@@ -8,6 +8,7 @@ import {
   activatePreparedProfile,
   disableProfile,
   evaluateForThread,
+  getActiveProfileStatus,
   prepareProfileActivation,
 } from "./policy-service.js";
 import { proposeProfile } from "./profile-authoring.js";
@@ -60,10 +61,19 @@ server.registerTool(
 server.registerTool(
   "list_profiles",
   {
-    description: "List reviewed profiles available in a policy repository.",
+    description: "List reviewed profiles whose stored contents still match their reviewed revision.",
     inputSchema: {},
   },
-  async () => text(JSON.stringify(await repository.listProfiles())),
+  async () => text(JSON.stringify(await repository.listVerifiedProfiles())),
+);
+
+server.registerTool(
+  "get_active_profile",
+  {
+    description: "Report whether one agent thread has a verified active policy profile, without changing it.",
+    inputSchema: { threadId: nonEmptyStringSchema },
+  },
+  async ({ threadId }) => text(JSON.stringify(await getActiveProfileStatus(repository, threadId))),
 );
 
 server.registerTool(

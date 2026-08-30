@@ -156,6 +156,42 @@ describe("PolicyRepository", () => {
     await expect(repo.loadProfile("invalid")).rejects.toThrow("not a valid policy profile");
   });
 
+  test("lists only Profiles that still match their reviewed revisions", async () => {
+    const repo = await repository();
+    await repo.writeProposal({
+      profile: {
+        allowedTargets: ["github:repository:acme/example"],
+        groupings: [{
+          id: "allow-read",
+          policies: { allow: "permit(principal, action, resource);" },
+        }],
+        id: "reviewed",
+        policyRevision: "pending-review",
+      },
+      tests: [{
+        expected: "allow",
+        name: "allows the reviewed request",
+        request: {
+          action: "claude.Bash",
+          arguments: { command: "gh pr view --repo acme/example" },
+          resource: "github:repository:acme/example",
+          threadId: "thread-1",
+        },
+      }],
+    });
+    const revision = await commitPolicyRevision(repo.root);
+    await repo.promoteProposal("reviewed", revision);
+    await Bun.write(join(repo.root, "profiles", "malformed.json"), "{");
+    await Bun.write(join(repo.root, "profiles", "pending.json"), JSON.stringify({
+      allowedTargets: ["github:repository:acme/example"],
+      groupings: [],
+      id: "pending",
+      policyRevision: "pending-review",
+    }));
+
+    expect(await repo.listVerifiedProfiles()).toEqual(["reviewed"]);
+  });
+
   test("only promotes a matching profile after every authorization test passes", async () => {
     const repo = await repository();
     await repo.writeProposal({
