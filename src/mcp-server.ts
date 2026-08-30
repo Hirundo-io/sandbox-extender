@@ -3,7 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 
 import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
-import { PendingMutations } from "./pending-mutations.js";
+import { PendingMutationCapacityError, PendingMutations } from "./pending-mutations.js";
 import { PolicyRepository } from "./policy-repository.js";
 import {
   approvalNonceFor,
@@ -27,6 +27,22 @@ const pendingMutations = new PendingMutations();
 
 function text(value: string) {
   return { content: [{ type: "text" as const, text: value }] };
+}
+
+function pendingMutationCapacityError(error: PendingMutationCapacityError) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        }),
+      },
+    ],
+    isError: true,
+  };
 }
 
 function pendingMutationFor(nonce: string): PreparedProfileMutation | undefined {
@@ -57,7 +73,12 @@ async function runMutation(
     serverContext,
   );
   if (approval.approval !== undefined) {
-    rememberPendingMutation(approval.nonce, mutation);
+    try {
+      rememberPendingMutation(approval.nonce, mutation);
+    } catch (error) {
+      if (error instanceof PendingMutationCapacityError) return pendingMutationCapacityError(error);
+      throw error;
+    }
     return approval.approval;
   }
   pendingMutations.delete(approval.nonce);

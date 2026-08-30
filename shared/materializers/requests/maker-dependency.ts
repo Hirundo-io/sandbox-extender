@@ -24,6 +24,15 @@ type DependencyOperation = {
   readonly unknownOptionCount: number;
 };
 
+type DependencyManager = "bun" | "npm" | "pixi" | "uv";
+
+type DependencyManagerSettings = {
+  readonly booleanOptions: readonly string[];
+  readonly dependencyOptionNames: readonly string[];
+  readonly positionalPattern: (command: string) => RegExp;
+  readonly stringOptions: readonly string[];
+};
+
 const packageNamePattern = /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const registryPackagePattern =
   /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*(?:@[^\s\/:]+)?$/;
@@ -156,7 +165,18 @@ function operationFacts(
   };
 }
 
-function materializeNpm(
+function dependencyOptionPaths(
+  options: Readonly<Record<string, OptionValue>>,
+  optionNames: readonly string[],
+): readonly string[] {
+  return optionNames
+    .map((optionName) => options[optionName])
+    .filter((value): value is string => typeof value === "string");
+}
+
+function materializeDependency(
+  manager: DependencyManager,
+  settings: DependencyManagerSettings,
   workspace: string,
   workingDirectory: string,
   words: readonly string[],
@@ -165,109 +185,50 @@ function materializeNpm(
   if (!command) return undefined;
   const parsed = materializeOptions(
     words.slice(2),
-    ["ignore-scripts", "package-lock-only"],
-    ["cache", "global", "location", "prefix", "workspaces"],
+    settings.booleanOptions,
+    settings.stringOptions,
   );
   if (!parsed) return undefined;
-  const pattern = ["remove", "uninstall"].includes(command)
-    ? packageNamePattern
-    : registryPackagePattern;
-  const dependencyOptionPaths = [parsed.options.cache, parsed.options.prefix].filter(
-    (value): value is string => typeof value === "string",
-  );
+  const optionPaths = dependencyOptionPaths(parsed.options, settings.dependencyOptionNames);
   return operationFacts(
-    "npm",
+    manager,
     command,
     parsed,
-    validPositionals(command, parsed.positionals, pattern),
-    dependencyOptionPaths.every((path) =>
-      resolvesWithinWorkspace(workspace, workingDirectory, path),
-    ),
+    validPositionals(command, parsed.positionals, settings.positionalPattern(command)),
+    optionPaths.every((path) => resolvesWithinWorkspace(workspace, workingDirectory, path)),
     workspace,
   );
 }
 
-function materializeBun(
-  workspace: string,
-  workingDirectory: string,
-  words: readonly string[],
-): DependencyOperation | undefined {
-  const command = words[1];
-  if (!command) return undefined;
-  const parsed = materializeOptions(
-    words.slice(2),
-    ["ignore-scripts", "lockfile-only"],
-    ["cache-dir", "cwd"],
-  );
-  if (!parsed) return undefined;
-  const pattern = command === "remove" ? packageNamePattern : registryPackagePattern;
-  const dependencyOptionPaths = [parsed.options.cacheDir, parsed.options.cwd].filter(
-    (value): value is string => typeof value === "string",
-  );
-  return operationFacts(
-    "bun",
-    command,
-    parsed,
-    validPositionals(command, parsed.positionals, pattern),
-    dependencyOptionPaths.every((path) =>
-      resolvesWithinWorkspace(workspace, workingDirectory, path),
-    ),
-    workspace,
-  );
-}
-
-function materializeUv(
-  workspace: string,
-  workingDirectory: string,
-  words: readonly string[],
-): DependencyOperation | undefined {
-  const command = words[1];
-  if (!command) return undefined;
-  const parsed = materializeOptions(
-    words.slice(2),
-    ["no-build", "no-config", "no-python-downloads", "no-sources", "no-sync"],
-    ["cache-dir", "project"],
-  );
-  if (!parsed) return undefined;
-  const pattern = command === "remove" ? packageNamePattern : pythonRequirementPattern;
-  const dependencyOptionPaths = [parsed.options.cacheDir, parsed.options.project].filter(
-    (value): value is string => typeof value === "string",
-  );
-  return operationFacts(
-    "uv",
-    command,
-    parsed,
-    validPositionals(command, parsed.positionals, pattern),
-    dependencyOptionPaths.every((path) =>
-      resolvesWithinWorkspace(workspace, workingDirectory, path),
-    ),
-    workspace,
-  );
-}
-
-function materializePixi(
-  workspace: string,
-  workingDirectory: string,
-  words: readonly string[],
-): DependencyOperation | undefined {
-  const command = words[1];
-  if (!command) return undefined;
-  const parsed = materializeOptions(
-    words.slice(2),
-    ["no-config", "no-install", "offline"],
-    ["manifest-path"],
-  );
-  if (!parsed) return undefined;
-  const manifest = parsed.options.manifestPath;
-  return operationFacts(
-    "pixi",
-    command,
-    parsed,
-    validPositionals(command, parsed.positionals, pixiRequirementPattern),
-    typeof manifest !== "string" || resolvesWithinWorkspace(workspace, workingDirectory, manifest),
-    workspace,
-  );
-}
+const dependencyManagerSettings: Readonly<Record<DependencyManager, DependencyManagerSettings>> = {
+  bun: {
+    booleanOptions: ["ignore-scripts", "lockfile-only"],
+    dependencyOptionNames: ["cacheDir", "cwd"],
+    positionalPattern: (command) =>
+      command === "remove" ? packageNamePattern : registryPackagePattern,
+    stringOptions: ["cache-dir", "cwd"],
+  },
+  npm: {
+    booleanOptions: ["ignore-scripts", "package-lock-only"],
+    dependencyOptionNames: ["cache", "prefix"],
+    positionalPattern: (command) =>
+      ["remove", "uninstall"].includes(command) ? packageNamePattern : registryPackagePattern,
+    stringOptions: ["cache", "global", "location", "prefix", "workspaces"],
+  },
+  pixi: {
+    booleanOptions: ["no-config", "no-install", "offline"],
+    dependencyOptionNames: ["manifestPath"],
+    positionalPattern: () => pixiRequirementPattern,
+    stringOptions: ["manifest-path"],
+  },
+  uv: {
+    booleanOptions: ["no-build", "no-config", "no-python-downloads", "no-sources", "no-sync"],
+    dependencyOptionNames: ["cacheDir", "project"],
+    positionalPattern: (command) =>
+      command === "remove" ? packageNamePattern : pythonRequirementPattern,
+    stringOptions: ["cache-dir", "project"],
+  },
+};
 
 export function materializeMakerDependency(candidate: unknown): DependencyOperation | undefined {
   const value = input(candidate);
@@ -281,11 +242,11 @@ export function materializeMakerDependency(candidate: unknown): DependencyOperat
     !words.every((word) => typeof word === "string")
   )
     return undefined;
-  if (words[0] === "npm") return materializeNpm(value.resource, value.workingDirectory, words);
-  if (words[0] === "bun") return materializeBun(value.resource, value.workingDirectory, words);
-  if (words[0] === "uv") return materializeUv(value.resource, value.workingDirectory, words);
-  if (words[0] === "pixi") return materializePixi(value.resource, value.workingDirectory, words);
-  return undefined;
+  const manager = words[0] as DependencyManager;
+  const settings = dependencyManagerSettings[manager];
+  return settings
+    ? materializeDependency(manager, settings, value.resource, value.workingDirectory, words)
+    : undefined;
 }
 
 export async function runMakerDependencyMaterializer(

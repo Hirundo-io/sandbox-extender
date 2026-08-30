@@ -342,8 +342,9 @@ async function recordEvaluation(
   profileId?: string,
   policyRevision?: string,
 ): Promise<void> {
-  const resolvedTarget = result.resolvedTarget && redactSecretsInString(result.resolvedTarget);
-  const resolvedTargets = result.resolvedTargets?.map(redactSecretsInString);
+  const resolvedTargetDisplay =
+    result.resolvedTarget && redactSecretsInString(result.resolvedTarget);
+  const resolvedTargetsDisplay = result.resolvedTargets?.map(redactSecretsInString);
   const entry = {
     action: request.action,
     arguments: redactAuditArguments(request.arguments),
@@ -352,9 +353,9 @@ async function recordEvaluation(
     profileId,
     policyRevision,
     reason: result.reason,
-    resource: resolvedTarget ?? redactSecretsInString(request.resource),
-    resolvedTarget,
-    resolvedTargets,
+    resourceDisplay: resolvedTargetDisplay ?? redactSecretsInString(request.resource),
+    resolvedTargetDisplay,
+    resolvedTargetsDisplay,
     matchedGroupingId: result.matchedGroupingId,
     matchedGroupingIds: result.matchedGroupingIds,
     threadId: request.threadId,

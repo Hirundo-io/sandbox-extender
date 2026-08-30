@@ -5,6 +5,18 @@ type PendingMutation = {
   readonly mutation: PreparedProfileMutation;
 };
 
+export class PendingMutationCapacityError extends Error {
+  readonly code = "pending_mutation_capacity_exceeded";
+  readonly retryable = true;
+
+  constructor() {
+    super(
+      "pending profile mutation capacity reached; retry after an approval is consumed or expires",
+    );
+    this.name = "PendingMutationCapacityError";
+  }
+}
+
 export class PendingMutations {
   readonly #capacity: number;
   readonly #entries = new Map<string, PendingMutation>();
@@ -36,7 +48,7 @@ export class PendingMutations {
   remember(nonce: string, mutation: PreparedProfileMutation): void {
     this.#pruneExpired();
     if (!this.#entries.has(nonce) && this.#entries.size >= this.#capacity) {
-      throw new Error("too many profile mutation approvals are pending");
+      throw new PendingMutationCapacityError();
     }
     this.#entries.set(nonce, {
       expiresAt: this.#now() + this.#ttlMilliseconds,

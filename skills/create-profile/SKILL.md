@@ -8,7 +8,7 @@ description: Create a narrow Sandbox Extender profile proposal from an observed 
 Create proposals from a concrete request the user wants to repeat. Do not generalize from a chat instruction or activate a proposal.
 
 1. Use `$HOME_FOLDER/.agents/sandbox-extender` as the policy repository. Call `initialize_policy_repository` with the current host thread ID. Continue only after the Agent Host displays the exact mutation and reports that the user accepted it.
-2. Use an observed request from `audit.yaml` when available. Otherwise, ask the user for the exact action, target resource, and arguments they want to cover.
+2. Use `audit.yaml` to identify an observed request when available, but treat its `resourceDisplay`, `resolvedTargetDisplay`, `resolvedTargetsDisplay`, and redacted argument values as display-only. Use the original Agent Host request for the exact action, target resource, and arguments. If that request is unavailable or any needed value was redacted, ask the user for the exact value; never copy a display-only or redacted value into a proposal.
 3. Call `propose_profile` with the exact `action`, `arguments`, `profileId`, `resource`, and current host thread ID. Check that the Agent Host presents the same operation, Profile, and Target before the user accepts it.
 4. Tell the user where the proposal and authorization tests were written. They must review both.
 5. Only after the user explicitly confirms that review, call `promote_profile` with the exact `profileId`, `policyRevision`, and current host thread ID. Promotion does not activate the profile.

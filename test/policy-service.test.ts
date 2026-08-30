@@ -609,6 +609,14 @@ describe("policy service", () => {
       expect(serializedEntries).not.toContain(secret);
     }
     expect(auditEntries).toHaveLength(2);
+    for (const entry of auditEntries) {
+      expect(entry.resource).toBeUndefined();
+      expect(entry.resolvedTarget).toBeUndefined();
+      expect(entry.resolvedTargets).toBeUndefined();
+      expect(entry.resourceDisplay).toBe(
+        "https://[redacted]@example.test/repository?access_token=[redacted]",
+      );
+    }
   });
 
   test("fails closed when recording an allowed evaluation fails", async () => {

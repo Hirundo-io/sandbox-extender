@@ -81,7 +81,7 @@ For example, this Profile allows only Codex shell requests from one workspace:
 }
 ```
 
-Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists.
+Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists. Audit targets use `resourceDisplay`, `resolvedTargetDisplay`, and `resolvedTargetsDisplay`: these values and credential-bearing arguments are redacted for display and must not be treated as exact profile-authoring inputs. Use the original Agent Host request, or supply the exact value explicitly, when creating a proposal.
 
 ## Profile mutation Approval
 
@@ -101,6 +101,10 @@ response. An approved continuation is single-use and expires after two minutes;
 this avoids a nested host request and prevents a retry from rerunning a mutation.
 It is valid only while the same local MCP server process remains running; after
 a restart, submit the mutation again and approve its new continuation.
+Each process retains at most 128 prepared mutations. If that capacity is
+reached, the MCP tool returns the retryable error code
+`pending_mutation_capacity_exceeded`; retry after a pending approval is consumed
+or its two-minute continuation expires.
 
 For a human-operated, non-agent workflow, the standalone CLI performs the
 mutation directly from its explicit arguments. It does not create an
