@@ -85,21 +85,21 @@ Start by asking the agent to use the `sandbox-extender:create-profile` skill. It
 
 ## Profile mutation Approval
 
-Profile mutations use the MCP 2026-07-28 `input_required` retry flow. Before
-changing the Policy Repository or a Thread Binding, the Agent Host displays the
-exact operation, Profile, Policy Revision, Activation Arguments, and Targets
-where they apply. It retries the unchanged tool call with an explicit
-`approve: true` response. The server verifies a signed, two-minute request
-state bound to the original operation and `threadId`. `decline`, `cancel`,
-malformed responses, mismatched retries, and transport failures do not mutate
-anything.
+Profile mutations use MCP elicitation. Before changing the Policy Repository or
+a Thread Binding, the Agent Host displays the exact operation, Profile, Policy
+Revision, Activation Arguments, and Targets where they apply. The mutation runs
+only after the host returns `accept` with the confirmation field set. `decline`,
+`cancel`, malformed responses, and transport failures do not mutate anything.
 This Approval is authorization for one operation, not identity authentication.
 
-Hosts that cannot complete the required interaction use the compatibility CLI.
-Its authorization names the host thread and operation and stores only a
-SHA-256 digest of the canonical arguments. It expires after two minutes and can
-be claimed once. Run it only after an MCP mutation reports that it cannot
-complete the approval flow, then retry the unchanged MCP call:
+MCP mutations use a continuation flow: the server returns the approval form
+and changes state only when Codex retries the request with an accepted
+response. This avoids a nested host request.
+
+For a human-operated, non-agent workflow, the standalone CLI performs the
+mutation directly from its explicit arguments. It does not create an
+authorization ticket and does not require an MCP retry. Agents must use MCP
+and must not invoke this command:
 
 ```sh
 bun run authorize:mutation -- <operation> \
@@ -118,10 +118,8 @@ bun run authorize:mutation -- activate_profile \
 Use `{}` or omit `--arguments-json` for
 `initialize_policy_repository` and `disable_profile`. The other argument
 objects match their MCP inputs with `threadId` removed. Run the command with
-`--help` to see each operation's shape. A mismatched, malformed, or expired
-authorization fails closed and is consumed. Do not use the fallback after a
-decline, cancel, malformed retry, or unrelated interaction failure. Request
-evaluation remains available without mutation Approval.
+`--help` to see each operation's shape. Request evaluation remains available
+without mutation Approval.
 
 The disabled `shared/profile-templates/scout.json`,
 `shared/profile-templates/maker.json`, and

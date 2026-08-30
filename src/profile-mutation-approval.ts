@@ -1,15 +1,8 @@
 import { randomBytes } from "node:crypto";
 
-import {
-  acceptedContent,
-  createRequestStateCodec,
-  inputRequired,
-  type InputRequiredResult,
-  type ServerContext,
-} from "@modelcontextprotocol/server";
+import { acceptedContent, createRequestStateCodec, inputRequired, type InputRequiredResult, type ServerContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import { consumeProfileMutationAuthorization } from "./mutation-authorization.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
 
 export type MutationApprovalDetails = {
@@ -23,10 +16,6 @@ type ApprovalState = {
   readonly details: MutationApprovalDetails;
   readonly intent: ProfileMutationIntent;
   readonly threadId: string;
-};
-
-type ApprovalDependencies = {
-  readonly consumeFallback?: typeof consumeProfileMutationAuthorization;
 };
 
 const approvalResponseSchema = z.object({ approve: z.literal(true) }).strict();
@@ -68,48 +57,18 @@ function approvalMessage(intent: ProfileMutationIntent, details: MutationApprova
   ].join("\n");
 }
 
-function matchesApprovalState(
-  state: ApprovalState,
-  threadId: string,
-  intent: ProfileMutationIntent,
-  details: MutationApprovalDetails,
-): boolean {
+function matchesApprovalState(state: ApprovalState, threadId: string, intent: ProfileMutationIntent, details: MutationApprovalDetails): boolean {
   return state.threadId === threadId &&
     canonicalJson(state.intent) === canonicalJson(intent) &&
     canonicalJson(state.details) === canonicalJson(details);
 }
 
-function isMissingFallback(error: unknown): boolean {
-  return error instanceof Error && error.message === "a user mutation authorization is required";
-}
-
-async function consumeFallbackIfAvailable(
-  root: string,
-  threadId: string,
-  intent: ProfileMutationIntent,
-  consumeFallback: typeof consumeProfileMutationAuthorization,
-): Promise<boolean> {
-  try {
-    await consumeFallback(root, threadId, intent);
-    return true;
-  } catch (error) {
-    if (isMissingFallback(error)) return false;
-    throw error;
-  }
-}
-
-/**
- * Requests host approval through MCP's 2026-07-28 multi-round-trip flow.
- * A matching short-lived CLI authorization is consumed only after a host has
- * already been unable to complete that flow and the caller retries the tool.
- */
+/** Returns an MCP continuation request; only its matching approved retry can mutate. */
 export async function requestProfileMutationApproval(
-  root: string,
   threadId: string,
   intent: ProfileMutationIntent,
   details: MutationApprovalDetails,
   ctx: ServerContext,
-  dependencies: ApprovalDependencies = {},
 ): Promise<InputRequiredResult | undefined> {
   const state = ctx.mcpReq.requestState<ApprovalState>();
   if (state !== undefined) {
@@ -121,24 +80,13 @@ export async function requestProfileMutationApproval(
     }
     return undefined;
   }
-
-  const consumeFallback = dependencies.consumeFallback ?? consumeProfileMutationAuthorization;
-  if (await consumeFallbackIfAvailable(root, threadId, intent, consumeFallback)) return undefined;
-
   return inputRequired({
     inputRequests: {
       approval: inputRequired.elicit({
         message: approvalMessage(intent, details),
         requestedSchema: {
           type: "object",
-          properties: {
-            approve: {
-              type: "boolean",
-              title: "Approve Profile mutation",
-              description: "Allow only the operation and values shown above.",
-              default: false,
-            },
-          },
+          properties: { approve: { type: "boolean", title: "Approve Profile mutation", description: "Allow only the operation and values shown above.", default: false } },
           required: ["approve"],
         },
       }),

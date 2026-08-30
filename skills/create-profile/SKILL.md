@@ -40,6 +40,6 @@ self-contained source, canonical permission manifest, and reviewed Deno
 version. Test one allowed and one denied case for every non-empty permission.
 Confirm that plugin validation rejects the old digest or an undeclared access.
 
-If a mutation reports that the host cannot complete its required approval retry, run `bun run authorize:mutation -- <operation> --thread-id <current-host-thread-id> --arguments-json '<exact-operation-arguments>'` through the host's explicit shell-approval path, then retry the unchanged MCP call before the authorization expires. Use `{}` for initialization. Do not use the fallback after decline, cancel, malformed retry data, or another interaction failure.
+If the MCP approval cannot be completed, report the failure. Do not run the standalone CLI: agents mutate profiles only through MCP.
 
 The proposal must remain target-bound and action-bound. Do not broaden it to similar commands, other repositories, or other tool calls.
