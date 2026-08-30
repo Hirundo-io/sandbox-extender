@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
 import { PolicyRepository } from "./policy-repository.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
 import { approveProfileMutation } from "./profile-mutation-approval.js";
@@ -60,10 +61,19 @@ server.registerTool(
 server.registerTool(
   "list_profiles",
   {
-    description: "List reviewed profiles available in a policy repository.",
+    description: "List reviewed profiles whose stored contents still match their reviewed revision.",
     inputSchema: {},
   },
-  async () => text(JSON.stringify(await repository.listProfiles())),
+  async () => listProfilesHandler(repository),
+);
+
+server.registerTool(
+  "get_active_profile",
+  {
+    description: "Report whether one agent thread has a verified active policy profile, without changing it.",
+    inputSchema: { threadId: nonEmptyStringSchema },
+  },
+  async ({ threadId }) => getActiveProfileHandler(repository, threadId),
 );
 
 server.registerTool(

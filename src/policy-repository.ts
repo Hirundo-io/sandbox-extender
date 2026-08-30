@@ -65,6 +65,21 @@ const authorizationTestsSchema = z.array(z.object({
 type DiskProfile = z.infer<typeof diskProfileSchema>;
 type DiskProposal = z.infer<typeof diskProposalSchema>;
 
+/** A locally present profile is not eligible because it no longer matches review. */
+export class ProfileStaleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProfileStaleError";
+  }
+}
+
+class ProfileLoadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProfileLoadError";
+  }
+}
+
 function verifyCommitRevision(root: string, revision: string): void {
   const result = Bun.spawnSync({
     cmd: ["git", "-C", root, "cat-file", "-t", revision],
@@ -117,7 +132,11 @@ function reconstructReviewedProfile(
   profileId: string,
   liveProfile: DiskProfile,
 ): DiskProfile {
-  policyRevisionSchema.parse(liveProfile.policyRevision);
+  try {
+    policyRevisionSchema.parse(liveProfile.policyRevision);
+  } catch {
+    throw new ProfileStaleError(`profile ${profileId} has an invalid policy revision`);
+  }
   const proposalFile = `proposals/${profileId}.json`;
   const candidate: unknown = JSON.parse(readCommittedFile(
     root,
@@ -139,7 +158,7 @@ function verifyReviewedProfile(
 ): void {
   const reviewedProfile = reconstructReviewedProfile(root, profileId, liveProfile);
   if (!isDeepStrictEqual(liveProfile, reviewedProfile)) {
-    throw new Error(`profile ${profileId} does not match policy revision ${liveProfile.policyRevision}`);
+    throw new ProfileStaleError(`profile ${profileId} does not match policy revision ${liveProfile.policyRevision}`);
   }
 }
 
@@ -151,7 +170,7 @@ async function readVerifiedMaterializerSource(
   const reviewedSource = readCommittedFile(root, policyRevision, relativePath);
   const currentSource = await readFile(join(root, relativePath), "utf8");
   if (currentSource !== reviewedSource) {
-    throw new Error(`materializer ${relativePath} does not match policy revision ${policyRevision}`);
+    throw new ProfileStaleError(`materializer ${relativePath} does not match policy revision ${policyRevision}`);
   }
   return reviewedSource;
 }
@@ -166,7 +185,11 @@ async function verifiedMaterializer<T extends ActivationMaterializer | RequestMa
     policyRevision,
     relative(root, materializer.file),
   );
-  verifyMaterializerIntegrity(materializer, reviewedSource);
+  try {
+    verifyMaterializerIntegrity(materializer, reviewedSource);
+  } catch {
+    throw new ProfileStaleError(`materializer ${relative(root, materializer.file)} fails integrity verification`);
+  }
   return { ...materializer, reviewedSource };
 }
 
@@ -206,6 +229,37 @@ function profileFromDisk(root: string, profile: DiskProfile): Profile {
   };
 }
 
+async function loadDiskProfile(root: string, profileId: string): Promise<DiskProfile> {
+  const file = join(root, "profiles", `${profileId}.json`);
+  const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
+  let profile: DiskProfile;
+  try {
+    profile = parseProfile(candidate, file);
+  } catch {
+    throw new ProfileLoadError(`${file} is not a valid policy profile`);
+  }
+  if (profile.id !== profileId) {
+    throw new ProfileLoadError(`${file} does not match its requested profile ID`);
+  }
+  return profile;
+}
+
+async function loadLiveProfile(root: string, profileId: string): Promise<DiskProfile> {
+  let profile: DiskProfile;
+  try {
+    profile = await loadDiskProfile(root, profileId);
+  } catch (error) {
+    if (isMissingFile(error) || error instanceof ProfileLoadError || error instanceof SyntaxError) {
+      throw new ProfileStaleError(`profile ${profileId} is unavailable or malformed`);
+    }
+    throw error;
+  }
+  if (profile.policyRevision === "pending-review") {
+    throw new ProfileStaleError("profile must be reviewed before activation");
+  }
+  return profile;
+}
+
 export class PolicyRepository {
   #repositoryMutation = Promise.resolve();
 
@@ -213,27 +267,12 @@ export class PolicyRepository {
 
   async loadProfile(profileId: string): Promise<Profile> {
     profileIdSchema.parse(profileId);
-    const file = join(this.root, "profiles", `${profileId}.json`);
-    const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
-    const profile = parseProfile(candidate, file);
-    if (profile.id !== profileId) {
-      throw new Error(`${file} does not match its requested profile ID`);
-    }
-
-    return profileFromDisk(this.root, profile);
+    return profileFromDisk(this.root, await loadDiskProfile(this.root, profileId));
   }
 
   async loadVerifiedProfile(profileId: string): Promise<Profile> {
     profileIdSchema.parse(profileId);
-    const file = join(this.root, "profiles", `${profileId}.json`);
-    const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
-    const diskProfile = parseProfile(candidate, file);
-    if (diskProfile.id !== profileId) {
-      throw new Error(`${file} does not match its requested profile ID`);
-    }
-    if (diskProfile.policyRevision === "pending-review") {
-      throw new Error("profile must be reviewed before activation");
-    }
+    const diskProfile = await loadLiveProfile(this.root, profileId);
     verifyReviewedProfile(this.root, profileId, diskProfile);
     const profile = profileFromDisk(this.root, diskProfile);
     const activationMaterializer = profile.activationMaterializer &&
@@ -258,6 +297,20 @@ export class PolicyRepository {
       if (isMissingFile(error)) return [];
       throw error;
     }
+  }
+
+  async listVerifiedProfiles(): Promise<string[]> {
+    const candidates = await this.listProfiles();
+    const verified = await Promise.all(candidates.map(async (profileId) => {
+      try {
+        await this.loadVerifiedProfile(profileId);
+        return profileId;
+      } catch (error) {
+        if (!(error instanceof ProfileStaleError)) throw error;
+        return undefined;
+      }
+    }));
+    return verified.filter((profileId): profileId is string => profileId !== undefined);
   }
 
   async initialize(): Promise<void> {

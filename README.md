@@ -2,6 +2,54 @@
 
 Sandbox Extender adds user-owned, Cedar-backed approval extensions to Codex CLI and Claude Code. It only allows requests covered by an explicitly activated Profile; every missing, invalid, or out-of-scope policy state abstains and leaves the host's ordinary approval flow in control.
 
+## Getting started
+
+Install the plugin from a local checkout:
+
+```sh
+codex plugin marketplace add /absolute/path/to/sandbox-extender
+codex plugin add sandbox-extender@sandbox-extender
+```
+
+Then ask your agent to create a target-bound profile. For example:
+
+```text
+Use sandbox-extender:create-profile to propose a Babysitter profile for the current pull request.
+```
+
+The agent creates a proposal and authorization tests under
+`$HOME_FOLDER/.agents/sandbox-extender`. Read both before you promote anything:
+
+```text
+proposals/<profile-id>.json
+tests/<profile-id>.json
+```
+
+When they match the one action and target you intend to allow, explicitly ask
+the agent to promote the named profile. Promotion records the reviewed policy
+revision but does not enable it. Activate it separately and only for the target
+you want it to inspect:
+
+```text
+Use sandbox-extender:activate-profile to activate Babysitter for the current pull request.
+```
+
+The host shows the profile, revision, activation arguments, and frozen targets
+before every policy-repository or binding mutation. Accept only the values you
+expect. A profile does not grant blanket permission. Each later request still
+has to match its Cedar policy and frozen target.
+
+Use `sandbox-extender:list-profiles` to see profiles that still pass reviewed
+validation. Use `sandbox-extender:check-active-profile` to check the current
+thread's binding, and `sandbox-extender:disable-profile` to remove that
+binding when you are done.
+
+The bundled templates are a starting point, not active policy:
+
+- `Babysitter` scopes pull-request and CI inspection to one pull request.
+- `Scout` supports read-only repository inspection for explicit targets.
+- `Maker` scopes lockfile-oriented dependency work to one workspace.
+
 ## Policy repository
 
 Sandbox Extender always stores its policy repository at `$HOME_FOLDER/.agents/sandbox-extender`. If `HOME_FOLDER` is not set, it uses the current user's home directory. A Profile is JSON and uses an exact `allowedTargets` list plus ordered Cedar groupings.
@@ -175,13 +223,6 @@ claude plugin validate . --strict
 
 GitHub Actions runs the locked install, audit, Knip, type check, and test
 coverage on every pull request and change to `main`.
-
-Codex discovers this repository through `.claude-plugin/marketplace.json`; install it locally with:
-
-```sh
-codex plugin marketplace add /absolute/path/to/sandbox-extender
-codex plugin add sandbox-extender@sandbox-extender
-```
 
 For Claude Code development, load the plugin directly:
 

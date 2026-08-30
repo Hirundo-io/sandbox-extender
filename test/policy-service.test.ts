@@ -4,8 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-import { PolicyRepository } from "../src/policy-repository.js";
-import { activateProfile, disableProfile, evaluateForThread } from "../src/policy-service.js";
+import {
+  type ActiveProfileStatus,
+  activateProfile,
+  disableProfile,
+  evaluateForThread,
+  getActiveProfileStatus,
+  PolicyRepository,
+} from "../src/index.js";
 import { PolicyCore } from "../src/policy-core.js";
 import { materializerIntegrity } from "../src/materializer-policy.js";
 import type { Profile } from "../src/types.js";
@@ -99,6 +105,95 @@ function stubRepository(profile: Profile, bindingOverrides: Record<string, unkno
 }
 
 describe("policy service", () => {
+  test("fails closed when the binding state cannot be read", async () => {
+    const unavailableRepository = {
+      readState: async () => {
+        throw new Error("state is unavailable");
+      },
+    } as unknown as PolicyRepository;
+
+    expect(await getActiveProfileStatus(unavailableRepository, request.threadId)).toEqual({
+      reason: "policy repository is unavailable",
+      status: "unavailable",
+    });
+    expect(await evaluateForThread(unavailableRepository, request)).toEqual({
+      decision: "abstain",
+      reason: "policy repository is unavailable",
+    });
+  });
+
+  test("reports verification failures as unavailable instead of stale", async () => {
+    const profile: Profile = {
+      allowedTargets: new Set([request.resource]),
+      groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
+      id: "review",
+      policyRevision: "a".repeat(40),
+    };
+    const unavailableRepository = stubRepository(profile);
+    unavailableRepository.loadVerifiedProfile = async () => {
+      throw new Error("Git repository is unavailable");
+    };
+
+    expect(await getActiveProfileStatus(unavailableRepository, request.threadId)).toEqual({
+      reason: "policy repository is unavailable",
+      status: "unavailable",
+    });
+    expect(await evaluateForThread(unavailableRepository, request)).toEqual({
+      decision: "abstain",
+      reason: "policy repository is unavailable",
+    });
+  });
+
+  test("redacts credentials from active profile targets", async () => {
+    const profile: Profile = {
+      allowedTargets: new Set(["https://user:secret@example.test/repository"]),
+      groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
+      id: "review",
+      policyRevision: "a".repeat(40),
+    };
+
+    const status: ActiveProfileStatus = await getActiveProfileStatus(
+      stubRepository(profile),
+      request.threadId,
+    );
+    expect(status).toEqual({
+      allowedTargets: ["https://[redacted]@example.test/repository"],
+      policyRevision: "a".repeat(40),
+      profileId: "review",
+      status: "active",
+    });
+  });
+
+  test("reports an active Profile only when its binding still matches review", async () => {
+    const { repository, root } = await createRepository();
+    try {
+      const revision = await writeReviewedProfile(repository, "review");
+      await activateProfile(repository, request.threadId, "review");
+      expect(await getActiveProfileStatus(repository, request.threadId)).toEqual({
+        allowedTargets: [request.resource],
+        policyRevision: revision,
+        profileId: "review",
+        status: "active",
+      });
+
+      await writeFile(join(root, "profiles", "review.json"), JSON.stringify({
+        allowedTargets: ["github:repository:acme/other"],
+        groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
+        id: "review",
+        policyRevision: revision,
+      }));
+      expect(await getActiveProfileStatus(repository, request.threadId)).toEqual({
+        allowedTargets: [request.resource],
+        policyRevision: revision,
+        profileId: "review",
+        reason: "active profile no longer matches review",
+        status: "stale",
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   test("freezes activation arguments into the thread binding", async () => {
     const { repository, root } = await createRepository();
     try {
@@ -165,7 +260,7 @@ describe("policy service", () => {
     }
   });
 
-  test("records inactive requests and fails closed for missing profile files", async () => {
+  test("records inactive requests and reports stale bindings for missing profile files", async () => {
     const { repository, root } = await createRepository();
     try {
       expect(await evaluateForThread(repository, request)).toEqual({
@@ -182,7 +277,7 @@ describe("policy service", () => {
       } });
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
-        reason: "policy repository is unavailable",
+        reason: "active profile no longer matches review",
       });
     } finally {
       await rm(root, { force: true, recursive: true });
@@ -412,6 +507,22 @@ describe("policy service", () => {
     }
   });
 
+  test("fails closed when recording an allowed evaluation fails", async () => {
+    const profile: Profile = {
+      allowedTargets: new Set([request.resource]),
+      groupings: [{ evaluate: () => "allow", id: "allow" }], id: "reviewed", policyRevision: "a".repeat(40),
+    };
+    const repository = stubRepository(profile);
+    repository.appendAudit = async () => {
+      throw new Error("audit is unavailable");
+    };
+
+    expect(await evaluateForThread(repository, request)).toEqual({
+      decision: "abstain",
+      reason: "policy repository is unavailable",
+    });
+  });
+
   test("rejects pending and multi-target single-scope activation", async () => {
     const pending: Profile = { allowedTargets: new Set(["one"]), groupings: [], id: "pending", policyRevision: "pending-review" };
     await expect(activateProfile(stubRepository(pending), request.threadId, pending.id)).rejects.toThrow("reviewed");
@@ -446,7 +557,7 @@ describe("policy service", () => {
       }));
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
-        reason: "policy repository is unavailable",
+        reason: "active profile no longer matches review",
       });
 
       await writeProfile(root, "reviewed", "a".repeat(40));

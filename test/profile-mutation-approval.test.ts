@@ -87,6 +87,21 @@ describe("Profile mutation Approval", () => {
     expect(fallbackCalls).toEqual([["/policy", "thread-1", activationIntent]]);
   });
 
+  test("propagates a Codex transpiler failure without using the CLI authorization", async () => {
+    const requests: ElicitRequestFormParams[] = [];
+    let consumed = false;
+
+    await expect(approveProfileMutation("/policy", "thread-1", activationIntent, details, {
+      consumeFallback: async () => {
+        consumed = true;
+      },
+      elicit: elicitor(new Error("CurrentWorkingDirectoryUnlinked Error creating transpiler"), requests),
+    })).rejects.toThrow("CurrentWorkingDirectoryUnlinked Error creating transpiler");
+
+    expect(requests).toHaveLength(1);
+    expect(consumed).toBeFalse();
+  });
+
   test("fails without consuming a CLI authorization when elicitation itself fails", async () => {
     const requests: ElicitRequestFormParams[] = [];
     let fallbackCalled = false;
