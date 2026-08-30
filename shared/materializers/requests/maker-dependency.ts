@@ -172,7 +172,7 @@ function materializeNpm(
   const pattern = ["remove", "uninstall"].includes(command)
     ? packageNamePattern
     : registryPackagePattern;
-  const paths = [parsed.options.cache, parsed.options.prefix].filter(
+  const dependencyOptionPaths = [parsed.options.cache, parsed.options.prefix].filter(
     (value): value is string => typeof value === "string",
   );
   return operationFacts(
@@ -180,7 +180,9 @@ function materializeNpm(
     command,
     parsed,
     validPositionals(command, parsed.positionals, pattern),
-    paths.every((path) => resolvesWithinWorkspace(workspace, workingDirectory, path)),
+    dependencyOptionPaths.every((path) =>
+      resolvesWithinWorkspace(workspace, workingDirectory, path),
+    ),
     workspace,
   );
 }
@@ -199,7 +201,7 @@ function materializeBun(
   );
   if (!parsed) return undefined;
   const pattern = command === "remove" ? packageNamePattern : registryPackagePattern;
-  const paths = [parsed.options.cacheDir, parsed.options.cwd].filter(
+  const dependencyOptionPaths = [parsed.options.cacheDir, parsed.options.cwd].filter(
     (value): value is string => typeof value === "string",
   );
   return operationFacts(
@@ -207,7 +209,9 @@ function materializeBun(
     command,
     parsed,
     validPositionals(command, parsed.positionals, pattern),
-    paths.every((path) => resolvesWithinWorkspace(workspace, workingDirectory, path)),
+    dependencyOptionPaths.every((path) =>
+      resolvesWithinWorkspace(workspace, workingDirectory, path),
+    ),
     workspace,
   );
 }
@@ -226,7 +230,7 @@ function materializeUv(
   );
   if (!parsed) return undefined;
   const pattern = command === "remove" ? packageNamePattern : pythonRequirementPattern;
-  const paths = [parsed.options.cacheDir, parsed.options.project].filter(
+  const dependencyOptionPaths = [parsed.options.cacheDir, parsed.options.project].filter(
     (value): value is string => typeof value === "string",
   );
   return operationFacts(
@@ -234,7 +238,9 @@ function materializeUv(
     command,
     parsed,
     validPositionals(command, parsed.positionals, pattern),
-    paths.every((path) => resolvesWithinWorkspace(workspace, workingDirectory, path)),
+    dependencyOptionPaths.every((path) =>
+      resolvesWithinWorkspace(workspace, workingDirectory, path),
+    ),
     workspace,
   );
 }

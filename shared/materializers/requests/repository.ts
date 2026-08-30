@@ -97,6 +97,7 @@ export function runGit(
 ): CommandOutput {
   return new Command("git", {
     args: [...arguments_],
+    // Repository-local config is still read after `git -C`; ambient Git overrides are excluded.
     clearEnv: true,
     stderr: "null",
     stdout: "piped",

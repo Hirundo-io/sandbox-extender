@@ -209,13 +209,13 @@ function redactJsonString(
   return `${leadingWhitespace}${JSON.stringify(redactValue(parsedValue, depth + 1))}${trailingWhitespace}`;
 }
 
-function redactHeaders(value: unknown, depth: number): unknown {
+function redactHeaders(value: unknown, depth: number, redactValue: AuditValueRedactor): unknown {
   if (Array.isArray(value)) {
     if (depth >= maxAuditRedactionDepth) return redactedDeeplyNestedValue;
     return value.map((item, index) =>
       index > 0 && isSensitiveHeaderName(value[index - 1])
         ? "[redacted]"
-        : redactAuditArguments(item, depth + 1),
+        : redactValue(item, depth + 1),
     );
   }
   if (typeof value === "object" && value !== null) {
@@ -223,11 +223,11 @@ function redactHeaders(value: unknown, depth: number): unknown {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        isSensitiveHeaderName(key) ? "[redacted]" : redactAuditArguments(item, depth + 1),
+        isSensitiveHeaderName(key) ? "[redacted]" : redactValue(item, depth + 1),
       ]),
     );
   }
-  return redactAuditArguments(value, depth);
+  return redactValue(value, depth);
 }
 
 function redactAuditArguments(value: unknown, depth = 0): unknown {
@@ -249,7 +249,7 @@ function redactAuditArguments(value: unknown, depth = 0): unknown {
         isCredentialKey(key)
           ? "[redacted]"
           : key.toLowerCase() === "headers"
-            ? redactHeaders(item, depth + 1)
+            ? redactHeaders(item, depth + 1, redactAuditArguments)
             : redactAuditArguments(item, depth + 1),
       ]),
     );
@@ -342,6 +342,8 @@ async function recordEvaluation(
   profileId?: string,
   policyRevision?: string,
 ): Promise<void> {
+  const resolvedTarget = result.resolvedTarget && redactSecretsInString(result.resolvedTarget);
+  const resolvedTargets = result.resolvedTargets?.map(redactSecretsInString);
   const entry = {
     action: request.action,
     arguments: redactAuditArguments(request.arguments),
@@ -350,9 +352,9 @@ async function recordEvaluation(
     profileId,
     policyRevision,
     reason: result.reason,
-    resource: result.resolvedTarget ?? request.resource,
-    resolvedTarget: result.resolvedTarget,
-    resolvedTargets: result.resolvedTargets,
+    resource: resolvedTarget ?? redactSecretsInString(request.resource),
+    resolvedTarget,
+    resolvedTargets,
     matchedGroupingId: result.matchedGroupingId,
     matchedGroupingIds: result.matchedGroupingIds,
     threadId: request.threadId,

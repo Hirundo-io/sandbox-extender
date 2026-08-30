@@ -97,6 +97,8 @@ class ProfileLoadError extends Error {
 }
 
 function gitEnvironment(): Record<string, string> {
+  // Policy revisions must resolve from this repository's own object database. Ambient Git
+  // repository/object/config overrides are intentionally excluded so hooks cannot redirect review.
   return {
     HOME: process.env.HOME ?? "",
     LANG: process.env.LANG ?? "",

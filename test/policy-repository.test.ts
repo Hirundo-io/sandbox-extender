@@ -272,7 +272,21 @@ describe("PolicyRepository", () => {
     });
 
     const revision = await commitPolicyRevision(repo.root);
-    await repo.promoteProposal("review", revision);
+    const previousObjectDirectory = process.env.GIT_OBJECT_DIRECTORY;
+    const previousAlternateObjectDirectories = process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+    process.env.GIT_OBJECT_DIRECTORY = join(repo.root, "ambient-object-override");
+    process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = join(repo.root, "ambient-alternate-objects");
+    try {
+      await repo.promoteProposal("review", revision);
+    } finally {
+      if (previousObjectDirectory === undefined) delete process.env.GIT_OBJECT_DIRECTORY;
+      else process.env.GIT_OBJECT_DIRECTORY = previousObjectDirectory;
+      if (previousAlternateObjectDirectories === undefined) {
+        delete process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+      } else {
+        process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = previousAlternateObjectDirectories;
+      }
+    }
     expect((await repo.loadProfile("review")).policyRevision).toBe(revision);
   });
 

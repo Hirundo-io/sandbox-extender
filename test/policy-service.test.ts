@@ -575,6 +575,42 @@ describe("policy service", () => {
     }
   });
 
+  test("redacts credential-bearing resources from abstention audits", async () => {
+    const sensitiveResource =
+      "https://user:password@example.test/repository?access_token=query-secret";
+    const sensitiveRequest = { ...request, resource: sensitiveResource };
+    const profile: Profile = {
+      allowedTargets: new Set([sensitiveResource]),
+      groupings: [{ evaluate: () => "allow", id: "allow" }],
+      id: "reviewed",
+      policyRevision: "a".repeat(40),
+    };
+    const auditEntries: Readonly<Record<string, unknown>>[] = [];
+    const staleRepository = stubRepository(profile, { fingerprint: "mismatch" });
+    staleRepository.appendAudit = async (entry) => {
+      auditEntries.push(entry);
+    };
+    await evaluateForThread(staleRepository, sensitiveRequest);
+
+    const tokenRepository = stubRepository(profile);
+    tokenRepository.appendAudit = async (entry) => {
+      auditEntries.push(entry);
+    };
+    const originalConsumeToken = PolicyCore.prototype.consumeToken;
+    PolicyCore.prototype.consumeToken = async () => false;
+    try {
+      await evaluateForThread(tokenRepository, sensitiveRequest);
+    } finally {
+      PolicyCore.prototype.consumeToken = originalConsumeToken;
+    }
+
+    const serializedEntries = JSON.stringify(auditEntries);
+    for (const secret of ["user:password", "password", "query-secret"]) {
+      expect(serializedEntries).not.toContain(secret);
+    }
+    expect(auditEntries).toHaveLength(2);
+  });
+
   test("fails closed when recording an allowed evaluation fails", async () => {
     const profile: Profile = {
       allowedTargets: new Set([request.resource]),

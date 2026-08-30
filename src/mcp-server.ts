@@ -3,6 +3,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 
 import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
+import { PendingMutations } from "./pending-mutations.js";
 import { PolicyRepository } from "./policy-repository.js";
 import {
   approvalNonceFor,
@@ -22,27 +23,18 @@ import {
 
 const policyRoot = getPolicyRoot();
 const repository = new PolicyRepository(policyRoot);
-const pendingMutations = new Map<
-  string,
-  { expiresAt: number; mutation: PreparedProfileMutation }
->();
+const pendingMutations = new PendingMutations();
 
 function text(value: string) {
   return { content: [{ type: "text" as const, text: value }] };
 }
 
 function pendingMutationFor(nonce: string): PreparedProfileMutation | undefined {
-  const pending = pendingMutations.get(nonce);
-  if (pending === undefined) return undefined;
-  if (pending.expiresAt <= Date.now()) {
-    pendingMutations.delete(nonce);
-    return undefined;
-  }
-  return pending.mutation;
+  return pendingMutations.get(nonce);
 }
 
 function rememberPendingMutation(nonce: string, mutation: PreparedProfileMutation): void {
-  pendingMutations.set(nonce, { expiresAt: Date.now() + 120_000, mutation });
+  pendingMutations.remember(nonce, mutation);
 }
 
 async function runMutation(
@@ -52,9 +44,9 @@ async function runMutation(
 ) {
   const retryNonce = approvalNonceFor(serverContext);
   const mutation =
-    retryNonce === undefined
-      ? await prepareProfileMutation(repository, threadId, intent)
-      : pendingMutationFor(retryNonce);
+    retryNonce !== undefined
+      ? pendingMutationFor(retryNonce)
+      : await prepareProfileMutation(repository, threadId, intent);
   if (mutation === undefined)
     throw new Error("profile mutation approval has expired; submit the mutation again");
 

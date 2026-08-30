@@ -83,13 +83,13 @@ export async function prepareProfileMutation(
       const binding = (await repository.readState())[threadId];
       return {
         approvalDetails:
-          binding === undefined
-            ? {}
-            : {
+          binding !== undefined
+            ? {
                 policyRevision: binding.policyRevision,
                 profileId: binding.profileId,
                 targets: binding.allowedTargets,
-              },
+              }
+            : {},
         execute: async () => {
           await disablePreparedProfile(repository, threadId, binding);
           return `Disabled the profile for ${threadId}.`;
