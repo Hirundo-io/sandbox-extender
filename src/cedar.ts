@@ -1,12 +1,7 @@
 import { isAuthorized } from "@cedar-policy/cedar-wasm/nodejs";
 import type { CedarValueJson } from "@cedar-policy/cedar-wasm/nodejs";
 
-import type {
-  CedarGrouping,
-  Decision,
-  EvaluationContext,
-  NormalizedRequest,
-} from "./types.js";
+import type { CedarGrouping, Decision, EvaluationContext, NormalizedRequest } from "./types.js";
 
 /**
  * Evaluates one ordered policy grouping. Invalid policies and unsupported input
@@ -47,9 +42,7 @@ export function evaluateCedarGrouping(
   }
 }
 
-function cedarPolicies(
-  policies: CedarGrouping["policies"],
-): Record<string, string> {
+function cedarPolicies(policies: CedarGrouping["policies"]): Record<string, string> {
   return Object.fromEntries(
     Object.entries(policies).map(([id, source]) => [
       id,

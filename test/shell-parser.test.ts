@@ -24,25 +24,45 @@ describe("shell compiler", () => {
   });
 
   test("expands finite literal for loops and exposes iteration facts", async () => {
-    expect(await compileShell('for item in one "two words"; do printf "%s\\n" "$item"; done')).toEqual([
+    expect(
+      await compileShell('for item in one "two words"; do printf "%s\\n" "$item"; done'),
+    ).toEqual([
       {
-        controlFlow: "for", iteration: 0, repetition: "finite", role: "body",
-        source: 'printf "%s\\n" "$item"', words: ["printf", "%s\\n", "one"],
+        controlFlow: "for",
+        iteration: 0,
+        repetition: "finite",
+        role: "body",
+        source: 'printf "%s\\n" "$item"',
+        words: ["printf", "%s\\n", "one"],
       },
       {
-        controlFlow: "for", iteration: 1, repetition: "finite", role: "body",
-        source: 'printf "%s\\n" "$item"', words: ["printf", "%s\\n", "two words"],
+        controlFlow: "for",
+        iteration: 1,
+        repetition: "finite",
+        role: "body",
+        source: 'printf "%s\\n" "$item"',
+        words: ["printf", "%s\\n", "two words"],
       },
     ]);
   });
 
   test("supports safe unquoted loop variables and rejects field splitting", async () => {
-    expect((await compileShell("for item in one two; do echo $item; done"))?.map((segment) => segment.words))
-      .toEqual([["echo", "one"], ["echo", "two"]]);
+    expect(
+      (await compileShell("for item in one two; do echo $item; done"))?.map(
+        (segment) => segment.words,
+      ),
+    ).toEqual([
+      ["echo", "one"],
+      ["echo", "two"],
+    ]);
     expect(await compileShell('for item in "~"; do echo $item; done')).toEqual([
       {
-        controlFlow: "for", iteration: 0, repetition: "finite", role: "body",
-        source: "echo $item", words: ["echo", "~"],
+        controlFlow: "for",
+        iteration: 0,
+        repetition: "finite",
+        role: "body",
+        source: "echo $item",
+        words: ["echo", "~"],
       },
     ]);
     expect(await compileShell('for item in "two words"; do echo $item; done')).toBeUndefined();
@@ -66,30 +86,44 @@ describe("shell compiler", () => {
 
   test("preserves quoted tilde and glob text as literal", async () => {
     expect(await compileShell('echo "~/literal" "*.ts" "file?.ts" "[ab].ts"')).toEqual([
-      { source: 'echo "~/literal" "*.ts" "file?.ts" "[ab].ts"', words: [
-        "echo", "~/literal", "*.ts", "file?.ts", "[ab].ts",
-      ] },
+      {
+        source: 'echo "~/literal" "*.ts" "file?.ts" "[ab].ts"',
+        words: ["echo", "~/literal", "*.ts", "file?.ts", "[ab].ts"],
+      },
     ]);
     expect(await compileShell('for extension in ts; do echo "*.$extension"; done')).toEqual([
       {
-        controlFlow: "for", iteration: 0, repetition: "finite", role: "body",
-        source: 'echo "*.$extension"', words: ["echo", "*.ts"],
+        controlFlow: "for",
+        iteration: 0,
+        repetition: "finite",
+        role: "body",
+        source: 'echo "*.$extension"',
+        words: ["echo", "*.ts"],
       },
     ]);
   });
 
-  test.each(["while", "until"] as const)("authorizes %s conditions and bodies with control-flow facts", async (kind) => {
-    expect(await compileShell(`${kind} test -f ready; do echo waiting; done`)).toEqual([
-      {
-        controlFlow: kind, repetition: "potentially-unbounded", role: "condition",
-        source: "test -f ready", words: ["test", "-f", "ready"],
-      },
-      {
-        controlFlow: kind, repetition: "potentially-unbounded", role: "body",
-        source: "echo waiting", words: ["echo", "waiting"],
-      },
-    ]);
-  });
+  test.each(["while", "until"] as const)(
+    "authorizes %s conditions and bodies with control-flow facts",
+    async (kind) => {
+      expect(await compileShell(`${kind} test -f ready; do echo waiting; done`)).toEqual([
+        {
+          controlFlow: kind,
+          repetition: "potentially-unbounded",
+          role: "condition",
+          source: "test -f ready",
+          words: ["test", "-f", "ready"],
+        },
+        {
+          controlFlow: kind,
+          repetition: "potentially-unbounded",
+          role: "body",
+          source: "echo waiting",
+          words: ["echo", "waiting"],
+        },
+      ]);
+    },
+  );
 
   test("blocks conditional cd bypasses and mutations inside loops", async () => {
     expect(await compileShell("false && cd safe; npm install")).toBeUndefined();
@@ -130,8 +164,11 @@ describe("shell compiler", () => {
   });
 
   test("enforces loop and expanded-segment limits", async () => {
-    expect(await compileShell("for item in one two; do echo $item; done", { maxIterations: 1 })).toBeUndefined();
-    expect(await compileShell("for item in one two; do echo $item; echo done; done", { maxSegments: 3 }))
-      .toBeUndefined();
+    expect(
+      await compileShell("for item in one two; do echo $item; done", { maxIterations: 1 }),
+    ).toBeUndefined();
+    expect(
+      await compileShell("for item in one two; do echo $item; echo done; done", { maxSegments: 3 }),
+    ).toBeUndefined();
   });
 });

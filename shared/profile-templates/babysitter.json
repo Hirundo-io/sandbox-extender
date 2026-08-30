@@ -4,17 +4,33 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/github-pull-request.ts",
-    "integrity": "9e52dbaa28d1da1c13b7a5d36df73253bd44050cee34634660d4244b0c79bc3f",
+    "integrity": "4587f30488e8d12835518c58ec6ea5d3877f44c7e9a5527d738b3c019a6ee160",
     "language": "typescript",
-    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": ["gh"], "ffi": [] },
+    "permissions": {
+      "read": [],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": ["gh"],
+      "ffi": []
+    },
     "runtimeVersion": "2.8.1"
   },
   "targetScope": "single",
   "requestMaterializer": {
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "6bfc1149692826d6ff4f97742114736d3dc6b23ab3b16d457bcaa1977413f867",
+    "integrity": "6c6eef1d1cbdaf5af86728bc33324b9e1c47ee5e94f252b3252ff9226c4eeeac",
     "language": "typescript",
-    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "permissions": {
+      "read": [],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": [],
+      "ffi": []
+    },
     "runtimeVersion": "2.8.1"
   },
   "sessionContext": [

@@ -81,9 +81,8 @@ function canonicalExistingAncestor(path: string): string | undefined {
     try {
       return realpathSync(candidate);
     } catch (error) {
-      const code = typeof error === "object" && error !== null && "code" in error
-        ? error.code
-        : undefined;
+      const code =
+        typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
       if (code !== "ENOENT" && code !== "ENOTDIR") return undefined;
     }
   }
@@ -100,13 +99,16 @@ function resolvesWithinWorkspace(
 
   const canonicalWorkspace = canonicalExistingAncestor(workspace);
   const canonicalCandidate = canonicalExistingAncestor(candidate);
-  return canonicalWorkspace && canonicalCandidate && isWithin(canonicalWorkspace, canonicalCandidate)
+  return canonicalWorkspace &&
+    canonicalCandidate &&
+    isWithin(canonicalWorkspace, canonicalCandidate)
     ? candidate
     : undefined;
 }
 
 function isFilesystemPath(value: string): boolean {
-  return value === "." ||
+  return (
+    value === "." ||
     value === ".." ||
     value.startsWith("/") ||
     value.startsWith("./") ||
@@ -115,7 +117,8 @@ function isFilesystemPath(value: string): boolean {
     value.includes("/./") ||
     value.includes("/../") ||
     value.endsWith("/.") ||
-    value.endsWith("/..");
+    value.endsWith("/..")
+  );
 }
 
 function pathCandidates(argument: string): readonly string[] {
@@ -157,9 +160,9 @@ function directoryOption(words: readonly string[], index: number): DirectoryOpti
 
 function isDirectoryOptionArgument(argument: string): boolean {
   if (directoryOptions.has(argument)) return true;
-  return [...directoryOptions].some((option) => option === "-C"
-    ? argument.startsWith("-C")
-    : argument.startsWith(`${option}=`));
+  return [...directoryOptions].some((option) =>
+    option === "-C" ? argument.startsWith("-C") : argument.startsWith(`${option}=`),
+  );
 }
 
 function validatesWorkspacePaths(
@@ -180,7 +183,10 @@ function validatesWorkspacePaths(
     }
     if (index > 0 && isDirectoryOptionArgument(words[index])) return false;
     for (const candidate of pathCandidates(words[index])) {
-      if (isFilesystemPath(candidate) && !resolvesWithinWorkspace(workspace, commandDirectory, candidate)) {
+      if (
+        isFilesystemPath(candidate) &&
+        !resolvesWithinWorkspace(workspace, commandDirectory, candidate)
+      ) {
         return false;
       }
     }
@@ -256,14 +262,25 @@ function materializeProfileRequest(
   request: NormalizedRequest,
   workingDirectory = request.resource,
   command?: ShellCommandContext,
-): { readonly context?: Readonly<Record<string, unknown>>; readonly request: NormalizedRequest } | undefined {
+):
+  | { readonly context?: Readonly<Record<string, unknown>>; readonly request: NormalizedRequest }
+  | undefined {
   if (!profile.requestMaterializer) return { request };
   const permissions = profile.requestMaterializer.permissions;
   const executable = command?.words[0];
-  const materializerCanInspectResource = permissions.read.length > 0 || permissions.write.length > 0 ||
-    permissions.ffi.length > 0 || executable !== undefined && permissions.run.includes(executable);
-  if (materializerCanInspectResource && !profile.allowedTargets.has(request.resource)) return undefined;
-  const materialized = materializeRequest(profile.requestMaterializer, request, workingDirectory, command);
+  const materializerCanInspectResource =
+    permissions.read.length > 0 ||
+    permissions.write.length > 0 ||
+    permissions.ffi.length > 0 ||
+    (executable !== undefined && permissions.run.includes(executable));
+  if (materializerCanInspectResource && !profile.allowedTargets.has(request.resource))
+    return undefined;
+  const materialized = materializeRequest(
+    profile.requestMaterializer,
+    request,
+    workingDirectory,
+    command,
+  );
   return materialized
     ? { context: materialized.context, request: { ...request, resource: materialized.resource } }
     : undefined;
@@ -321,16 +338,11 @@ function isShellAction(action: string): boolean {
   return action.endsWith(".Bash") || action.endsWith(".unified_exec");
 }
 
-function isCedarGrouping(
-  grouping: Profile["groupings"][number],
-): grouping is CedarGrouping {
+function isCedarGrouping(grouping: Profile["groupings"][number]): grouping is CedarGrouping {
   return "policies" in grouping;
 }
 
-function sameRequest(
-  left: NormalizedRequest,
-  right: NormalizedRequest,
-): boolean {
+function sameRequest(left: NormalizedRequest, right: NormalizedRequest): boolean {
   return (
     left.action === right.action &&
     left.resource === right.resource &&
@@ -340,8 +352,11 @@ function sameRequest(
 }
 
 function sameTargets(left: readonly string[], right: readonly string[] | undefined): boolean {
-  return right !== undefined && left.length === right.length &&
-    left.every((target, index) => target === right[index]);
+  return (
+    right !== undefined &&
+    left.length === right.length &&
+    left.every((target, index) => target === right[index])
+  );
 }
 
 /**
@@ -405,9 +420,10 @@ export class PolicyCore {
         workingDirectory = nextDirectory;
         continue;
       }
-      const builtinDecision = words && isAbsolute(rootDirectory)
-        ? safeBuiltinDecision(rootDirectory, workingDirectory, words)
-        : "not-safe-builtin";
+      const builtinDecision =
+        words && isAbsolute(rootDirectory)
+          ? safeBuiltinDecision(rootDirectory, workingDirectory, words)
+          : "not-safe-builtin";
       if (builtinDecision === "auto-allow") continue;
       if (
         words &&
@@ -433,7 +449,12 @@ export class PolicyCore {
             words,
           }
         : undefined;
-      const materializedRequest = materializeProfileRequest(profile, commandRequest, workingDirectory, commandContext);
+      const materializedRequest = materializeProfileRequest(
+        profile,
+        commandRequest,
+        workingDirectory,
+        commandContext,
+      );
       if (!materializedRequest) {
         return { decision: "abstain", reason: "profile could not materialize the request" };
       }
@@ -444,7 +465,12 @@ export class PolicyCore {
           reason: "resolved target is outside the allowed target set",
         };
       }
-      const result = evaluateCommand(profile, resolvedRequest, commandContext, materializedRequest.context);
+      const result = evaluateCommand(
+        profile,
+        resolvedRequest,
+        commandContext,
+        materializedRequest.context,
+      );
       if (result.decision !== "allow") return result;
       if (result.matchedGroupingId !== undefined) matchedGroupingIds.push(result.matchedGroupingId);
       resolvedTargets.push(resolvedRequest.resource);
@@ -467,19 +493,20 @@ export class PolicyCore {
     const token = this.#tokens.get(tokenId);
     this.#tokens.delete(tokenId);
     const activeProfile = this.#activeProfiles.get(request.threadId);
-    const reevaluated = token && activeProfile && sameRequest(token.request, request)
-      ? await this.evaluate(request)
-      : undefined;
+    const reevaluated =
+      token && activeProfile && sameRequest(token.request, request)
+        ? await this.evaluate(request)
+        : undefined;
     if (reevaluated?.token) this.#tokens.delete(reevaluated.token.id);
 
     return Boolean(
       token &&
-        activeProfile &&
-        reevaluated?.decision === "allow" &&
-        token.expiresAt.getTime() > Date.now() &&
-        token.policyRevision === activeProfile.profile.policyRevision &&
-        sameTargets(token.resolvedTargets, reevaluated.resolvedTargets) &&
-        sameRequest(token.request, request),
+      activeProfile &&
+      reevaluated?.decision === "allow" &&
+      token.expiresAt.getTime() > Date.now() &&
+      token.policyRevision === activeProfile.profile.policyRevision &&
+      sameTargets(token.resolvedTargets, reevaluated.resolvedTargets) &&
+      sameRequest(token.request, request),
     );
   }
 

@@ -61,7 +61,8 @@ function verifyDenoVersion(executable: string, expectedVersion: string): void {
 
 export function assertSupportedPlatform(
   platform = process.platform,
-  muslLoaderPresent = existsSync("/lib/ld-musl-x86_64.so.1") || existsSync("/lib/ld-musl-aarch64.so.1"),
+  muslLoaderPresent = existsSync("/lib/ld-musl-x86_64.so.1") ||
+    existsSync("/lib/ld-musl-aarch64.so.1"),
 ): void {
   if (platform === "linux" && muslLoaderPresent) {
     throw new Error("Linux musl is unsupported; Sandbox Extender requires glibc");
@@ -104,8 +105,12 @@ function executeMaterializer(
       timeout: resolvedOptions.timeoutMs,
       maxBuffer: resolvedOptions.outputLimitBytes,
     });
-    if (process.exitCode !== 0 || process.stdout.byteLength > resolvedOptions.outputLimitBytes ||
-      process.stderr.byteLength > resolvedOptions.outputLimitBytes) throw new Error("materializer process failed");
+    if (
+      process.exitCode !== 0 ||
+      process.stdout.byteLength > resolvedOptions.outputLimitBytes ||
+      process.stderr.byteLength > resolvedOptions.outputLimitBytes
+    )
+      throw new Error("materializer process failed");
     return JSON.parse(new TextDecoder().decode(process.stdout));
   } finally {
     rmSync(temporaryDirectory, { force: true, recursive: true });
@@ -113,20 +118,34 @@ function executeMaterializer(
 }
 
 function activationResult(candidate: unknown): ActivationResult | undefined {
-  if (typeof candidate !== "object" || candidate === null || !("targets" in candidate)) return undefined;
+  if (typeof candidate !== "object" || candidate === null || !("targets" in candidate))
+    return undefined;
   const targets = candidate.targets;
-  if (!Array.isArray(targets) || targets.length === 0 ||
+  if (
+    !Array.isArray(targets) ||
+    targets.length === 0 ||
     !targets.every((target) => typeof target === "string" && target.length > 0) ||
-    new Set(targets).size !== targets.length) return undefined;
+    new Set(targets).size !== targets.length
+  )
+    return undefined;
   return { targets };
 }
 
 function requestResult(candidate: unknown): RequestMaterialization | undefined {
   if (typeof candidate !== "object" || candidate === null) return undefined;
   const result = candidate as Record<string, unknown>;
-  if (typeof result.resource !== "string" || result.resource.length === 0 ||
-    typeof result.context !== "object" || result.context === null || Array.isArray(result.context)) return undefined;
-  return { context: result.context as Readonly<Record<string, unknown>>, resource: result.resource };
+  if (
+    typeof result.resource !== "string" ||
+    result.resource.length === 0 ||
+    typeof result.context !== "object" ||
+    result.context === null ||
+    Array.isArray(result.context)
+  )
+    return undefined;
+  return {
+    context: result.context as Readonly<Record<string, unknown>>,
+    resource: result.resource,
+  };
 }
 
 export function materializeActivation(
@@ -137,7 +156,9 @@ export function materializeActivation(
 ): ActivationResult | undefined {
   assertSupportedPlatform();
   try {
-    return activationResult(executeMaterializer(materializer, arguments_, workingDirectory, undefined, options));
+    return activationResult(
+      executeMaterializer(materializer, arguments_, workingDirectory, undefined, options),
+    );
   } catch {
     return undefined;
   }
@@ -152,12 +173,20 @@ export function materializeRequest(
 ): RequestMaterialization | undefined {
   assertSupportedPlatform();
   try {
-    return requestResult(executeMaterializer(materializer, {
-      command,
-      requestArguments: request.arguments,
-      resource: request.resource,
-      workingDirectory,
-    }, workingDirectory, request.resource, options));
+    return requestResult(
+      executeMaterializer(
+        materializer,
+        {
+          command,
+          requestArguments: request.arguments,
+          resource: request.resource,
+          workingDirectory,
+        },
+        workingDirectory,
+        request.resource,
+        options,
+      ),
+    );
   } catch {
     return undefined;
   }

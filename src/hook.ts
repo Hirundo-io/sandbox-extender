@@ -25,7 +25,16 @@ export function normalizeHookRequest(
   const parsedEvent = hookEventSchema.safeParse(event);
   if (!parsedEvent.success) return undefined;
 
-  const { cwd, session_id, sessionId, tool_input, toolInput, tool_name, toolName, working_directory } = parsedEvent.data;
+  const {
+    cwd,
+    session_id,
+    sessionId,
+    tool_input,
+    toolInput,
+    tool_name,
+    toolName,
+    working_directory,
+  } = parsedEvent.data;
   const threadId = session_id ?? sessionId;
   const toolNameValue = tool_name ?? toolName;
   const argumentsValue = tool_input ?? toolInput;
@@ -64,9 +73,8 @@ export function hookOutput(
   host: "claude" | "codex",
   reason: string,
 ): Record<string, unknown> {
-  const hookSpecificOutput = host === "codex"
-    ? codexHookOutput(decision)
-    : claudeHookOutput(decision);
+  const hookSpecificOutput =
+    host === "codex" ? codexHookOutput(decision) : claudeHookOutput(decision);
 
   return {
     hookSpecificOutput,

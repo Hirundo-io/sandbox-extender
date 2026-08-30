@@ -12,9 +12,10 @@ type PullRequestOperation = {
 
 function input(candidate: unknown): RequestMaterializerInput {
   if (typeof candidate !== "object" || candidate === null) return {};
-  const command = "command" in candidate && typeof candidate.command === "object" && candidate.command !== null
-    ? candidate.command as { readonly words?: unknown }
-    : undefined;
+  const command =
+    "command" in candidate && typeof candidate.command === "object" && candidate.command !== null
+      ? (candidate.command as { readonly words?: unknown })
+      : undefined;
   return { command };
 }
 
@@ -27,14 +28,22 @@ function canonicalTarget(repository: string, number: string): string | undefined
 
 function pullRequestOperation(words: readonly string[]): PullRequestOperation | undefined {
   const [gh, pr, subcommand, number, repoFlag, repository, ...rest] = words;
-  if (gh !== "gh" || pr !== "pr" || !subcommand || !number || repoFlag !== "--repo" || !repository) {
+  if (
+    gh !== "gh" ||
+    pr !== "pr" ||
+    !subcommand ||
+    !number ||
+    repoFlag !== "--repo" ||
+    !repository
+  ) {
     return undefined;
   }
   const resource = canonicalTarget(repository, number);
   if (!resource) return undefined;
   const bodyIndex = rest.indexOf("--body");
   return {
-    bodyPresent: bodyIndex >= 0 && typeof rest[bodyIndex + 1] === "string" && rest[bodyIndex + 1]!.length > 0,
+    bodyPresent:
+      bodyIndex >= 0 && typeof rest[bodyIndex + 1] === "string" && rest[bodyIndex + 1]!.length > 0,
     operation: `github.pull-request.${subcommand}`,
     resource,
     trailingArguments: rest,
@@ -44,9 +53,20 @@ function pullRequestOperation(words: readonly string[]): PullRequestOperation | 
 
 function reviewReplyOperation(words: readonly string[]): PullRequestOperation | undefined {
   const [gh, api, methodFlag, method, endpoint, bodyFlag, bodyField] = words;
-  if (gh !== "gh" || api !== "api" || methodFlag !== "--method" || method !== "POST" ||
-    !endpoint || bodyFlag !== "-f" || words.length !== 7) return undefined;
-  const match = /^repos\/([^/]+)\/([^/]+)\/pulls\/([1-9][0-9]*)\/comments\/([1-9][0-9]*)\/replies$/.exec(endpoint);
+  if (
+    gh !== "gh" ||
+    api !== "api" ||
+    methodFlag !== "--method" ||
+    method !== "POST" ||
+    !endpoint ||
+    bodyFlag !== "-f" ||
+    words.length !== 7
+  )
+    return undefined;
+  const match =
+    /^repos\/([^/]+)\/([^/]+)\/pulls\/([1-9][0-9]*)\/comments\/([1-9][0-9]*)\/replies$/.exec(
+      endpoint,
+    );
   if (!match) return undefined;
   const resource = canonicalTarget(`${match[1]}/${match[2]}`, match[3]!);
   return resource
@@ -77,4 +97,5 @@ export async function runGitHubPullRequestMaterializer(
   return true;
 }
 
-if (import.meta.main) Deno.exit(await runGitHubPullRequestMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);
+// prettier-ignore
+void (import.meta.main && Deno.exit((await runGitHubPullRequestMaterializer(new Response(Deno.stdin.readable).json())) ? 0 : 1));

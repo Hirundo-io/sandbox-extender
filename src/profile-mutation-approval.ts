@@ -1,6 +1,12 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
-import { acceptedContent, createRequestStateCodec, inputRequired, type InputRequiredResult, type ServerContext } from "@modelcontextprotocol/server";
+import {
+  acceptedContent,
+  createRequestStateCodec,
+  inputRequired,
+  type InputRequiredResult,
+  type ServerContext,
+} from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
@@ -15,6 +21,7 @@ export type MutationApprovalDetails = {
 
 type ApprovalState = {
   readonly details: MutationApprovalDetails;
+  readonly identity: string;
   readonly intent: SanitizedProfileMutationIntent;
   readonly nonce: string;
   readonly threadId: string;
@@ -31,6 +38,7 @@ export type ProfileMutationApproval = {
 };
 
 const approvalResponseSchema = z.object({ approve: z.literal(true) }).strict();
+const approvalIdentityKey = randomBytes(32);
 const requestStateCodec = createRequestStateCodec<ApprovalState>({
   bind: (ctx) => ctx.mcpReq.method,
   key: randomBytes(32),
@@ -65,7 +73,11 @@ function canonicalJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalJsonValue);
   if (typeof value === "object" && isPlainRecord(value)) {
     const record = value;
-    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalJsonValue(record[key])]));
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, canonicalJsonValue(record[key])]),
+    );
   }
   throw new Error("mutation arguments must contain only JSON values");
 }
@@ -74,12 +86,27 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalJsonValue(value));
 }
 
+export function profileMutationApprovalIdentity(
+  intent: ProfileMutationIntent,
+  details: MutationApprovalDetails,
+): string {
+  return createHmac("sha256", approvalIdentityKey)
+    .update(canonicalJson({ details, intent }))
+    .digest("hex");
+}
+
 function line(label: string, value: string | undefined): string {
   return `${label}: ${value ?? "(not applicable)"}`;
 }
 
-function approvalMessage(threadId: string, intent: SanitizedProfileMutationIntent, details: MutationApprovalDetails): string {
-  const targets = details.targets?.length ? details.targets.map((target) => JSON.stringify(target)).join(", ") : undefined;
+function approvalMessage(
+  threadId: string,
+  intent: SanitizedProfileMutationIntent,
+  details: MutationApprovalDetails,
+): string {
+  const targets = details.targets?.length
+    ? details.targets.map((target) => JSON.stringify(target)).join(", ")
+    : undefined;
   return [
     "Approve this Sandbox Extender Profile mutation?",
     line("Target Thread", threadId),
@@ -87,7 +114,10 @@ function approvalMessage(threadId: string, intent: SanitizedProfileMutationInten
     line("Operation Arguments", canonicalJson(intent.arguments)),
     line("Profile", details.profileId),
     line("Policy Revision", details.policyRevision),
-    line("Activation Arguments", details.activationArguments && canonicalJson(details.activationArguments)),
+    line(
+      "Activation Arguments",
+      details.activationArguments && canonicalJson(details.activationArguments),
+    ),
     line("Targets", targets),
   ].join("\n");
 }
@@ -107,10 +137,8 @@ export function approvalNonceFor(serverContext: ServerContext): string | undefin
   return state?.nonce;
 }
 
-function matchesApprovalState(state: ApprovalState, threadId: string, intent: SanitizedProfileMutationIntent, details: MutationApprovalDetails): boolean {
-  return state.threadId === threadId &&
-    canonicalJson(state.intent) === canonicalJson(intent) &&
-    canonicalJson(state.details) === canonicalJson(details);
+function matchesApprovalState(state: ApprovalState, threadId: string, identity: string): boolean {
+  return state.threadId === threadId && state.identity === identity;
 }
 
 /** Returns an MCP continuation request; only its matching approved retry can mutate. */
@@ -122,13 +150,17 @@ export async function requestProfileMutationApproval(
 ): Promise<ProfileMutationApproval> {
   canonicalJson(intent);
   canonicalJson(details);
+  const identity = profileMutationApprovalIdentity(intent, details);
   const sanitized = sanitizedApprovalValues(intent, details);
   const state = serverContext.mcpReq.requestState<ApprovalState>();
   if (state !== undefined) {
-    if (!matchesApprovalState(state, threadId, sanitized.intent, sanitized.details)) {
+    if (!matchesApprovalState(state, threadId, identity)) {
       throw new Error("profile mutation approval retry does not match the original request");
     }
-    if (acceptedContent(serverContext.mcpReq.inputResponses, "approval", approvalResponseSchema) === undefined) {
+    if (
+      acceptedContent(serverContext.mcpReq.inputResponses, "approval", approvalResponseSchema) ===
+      undefined
+    ) {
       throw new Error("profile mutation approval was not confirmed");
     }
     claimNonce(state.nonce);
@@ -141,12 +173,22 @@ export async function requestProfileMutationApproval(
         message: approvalMessage(threadId, sanitized.intent, sanitized.details),
         requestedSchema: {
           type: "object",
-          properties: { approve: { type: "boolean", title: "Approve Profile mutation", description: "Allow only the operation and values shown above.", default: false } },
+          properties: {
+            approve: {
+              type: "boolean",
+              title: "Approve Profile mutation",
+              description: "Allow only the operation and values shown above.",
+              default: false,
+            },
+          },
           required: ["approve"],
         },
       }),
     },
-    requestState: await requestStateCodec.mint({ details: sanitized.details, intent: sanitized.intent, nonce, threadId }, serverContext),
+    requestState: await requestStateCodec.mint(
+      { details: sanitized.details, identity, intent: sanitized.intent, nonce, threadId },
+      serverContext,
+    ),
   });
   return { approval, nonce };
 }

@@ -10,20 +10,39 @@ export type PreparedProfileActivation = {
 };
 
 export type ActiveProfileStatus =
-  | { readonly status: "active"; readonly profileId: string; readonly policyRevision: string; readonly allowedTargets: readonly string[] }
+  | {
+      readonly status: "active";
+      readonly profileId: string;
+      readonly policyRevision: string;
+      readonly allowedTargets: readonly string[];
+    }
   | { readonly status: "inactive"; readonly reason: "no active profile for thread" }
-  | { readonly status: "stale"; readonly profileId: string; readonly policyRevision: string; readonly allowedTargets: readonly string[]; readonly reason: "active profile no longer matches review" }
+  | {
+      readonly status: "stale";
+      readonly profileId: string;
+      readonly policyRevision: string;
+      readonly allowedTargets: readonly string[];
+      readonly reason: "active profile no longer matches review";
+    }
   | { readonly status: "unavailable"; readonly reason: "policy repository is unavailable" };
 
 type LoadedActiveProfile =
-  | { readonly status: "active"; readonly binding: import("./types.js").ProfileBinding; readonly profile: Profile }
+  | {
+      readonly status: "active";
+      readonly binding: import("./types.js").ProfileBinding;
+      readonly profile: Profile;
+    }
   | Exclude<ActiveProfileStatus, { readonly status: "active" }>;
 
-const credentialOptionPattern = /(^|\s)(--(?:access[-_]?key|access[-_]?token|api[-_]?key|api[-_]?token|authorization|client[-_]?secret|connection[-_]?string|cookie|database[-_]?url|password|passwd|private[-_]?token|refresh[-_]?token|secret|token|webhook[-_]?secret))(?:=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
-const credentialAssignmentPattern = /(^|\s)([A-Za-z_][A-Za-z0-9_]*(?:ACCESS[-_]?(?:KEY|TOKEN)|ACCOUNT[-_]?KEY|API[-_]?KEY|API[-_]?TOKEN|AUTH(?:ORIZATION)?|CLIENT[-_]?SECRET|CONNECTION[-_]?STRING|COOKIE|CREDENTIAL|DATABASE[-_]?URL|PASSWORD|PASSWD|PRIVATE[-_]?TOKEN|REFRESH[-_]?TOKEN|SECRET|SHARED[-_]?ACCESS[-_]?KEY|TOKEN|WEBHOOK[-_]?SECRET)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi;
+const credentialOptionPattern =
+  /(^|\s)(--(?:access[-_]?key|access[-_]?token|api[-_]?key|api[-_]?token|authorization|client[-_]?secret|connection[-_]?string|cookie|database[-_]?url|password|passwd|private[-_]?token|refresh[-_]?token|secret|token|webhook[-_]?secret))(?:=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
+const credentialAssignmentPattern =
+  /(^|\s)([A-Za-z_][A-Za-z0-9_]*(?:ACCESS[-_]?(?:KEY|TOKEN)|ACCOUNT[-_]?KEY|API[-_]?KEY|API[-_]?TOKEN|AUTH(?:ORIZATION)?|CLIENT[-_]?SECRET|CONNECTION[-_]?STRING|COOKIE|CREDENTIAL|DATABASE[-_]?URL|PASSWORD|PASSWD|PRIVATE[-_]?TOKEN|REFRESH[-_]?TOKEN|SECRET|SHARED[-_]?ACCESS[-_]?KEY|TOKEN|WEBHOOK[-_]?SECRET)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi;
 const credentialUrlPattern = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]*@/gi;
-const credentialQueryParameterPattern = /([?&](?:access[-_]?key|access[-_]?token|account[-_]?key|api[-_]?key|api[-_]?token|client[-_]?secret|password|secret|shared[-_]?access[-_]?key|token|webhook[-_]?secret)=)[^&#\s]+/gi;
-const connectionStringSecretPattern = /(\b(?:AccountKey|AccessKey|ApiKey|ClientSecret|Password|Pwd|Secret|SharedAccessKey|Token)\s*=\s*)("[^"]*"|'[^']*'|[^;\s]+)/gi;
+const credentialQueryParameterPattern =
+  /([?&](?:access[-_]?key|access[-_]?token|account[-_]?key|api[-_]?key|api[-_]?token|client[-_]?secret|password|secret|shared[-_]?access[-_]?key|token|webhook[-_]?secret)=)[^&#\s]+/gi;
+const connectionStringSecretPattern =
+  /(\b(?:AccountKey|AccessKey|ApiKey|ClientSecret|Password|Pwd|Secret|SharedAccessKey|Token)\s*=\s*)("[^"]*"|'[^']*'|[^;\s]+)/gi;
 const githubTokenPattern = /\b(?:gh[pousr]_[A-Za-z0-9_-]{8,}|github_pat_[A-Za-z0-9_]{8,})\b/g;
 const gitlabTokenPattern = /\bglpat-[A-Za-z0-9_-]{20,}\b/g;
 const pypiTokenPattern = /\bpypi-[A-Za-z0-9_-]{20,}\b/g;
@@ -32,9 +51,11 @@ const stripeSecretPattern = /\b(?:[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|whsec_[A-
 const awsAccessKeyIdPattern = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g;
 const openAiTokenPattern = /\bsk-(?:proj|svcacct)-[A-Za-z0-9_-]{20,}\b/g;
 const jwtPattern = /\beyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}\b/g;
-const privateKeyPattern = /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)* PRIVATE KEY-----/g;
+const privateKeyPattern =
+  /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)* PRIVATE KEY-----/g;
 const headerOptionPattern = /(^|\s)(-H|--header)(=|\s+)("[^"]*"|'[^']*'|\S+)/gi;
-const standaloneHeaderPattern = /(^|[\n,])(\s*)(Authorization|Cookie|Gitlab-Token|Private-Token|Proxy-Authorization|Set-Cookie|Stripe-Signature|X-Access-Token|X-Amz-Security-Token|X-Api-Key|X-Auth-Token|X-Gitlab-Token|X-Hub-Signature(?:-256)?|X-Slack-Signature|X-Webhook-(?:Secret|Token))\s*:\s*[^\r\n,]*/gi;
+const standaloneHeaderPattern =
+  /(^|[\n,])(\s*)(Authorization|Cookie|Gitlab-Token|Private-Token|Proxy-Authorization|Set-Cookie|Stripe-Signature|X-Access-Token|X-Amz-Security-Token|X-Api-Key|X-Auth-Token|X-Gitlab-Token|X-Hub-Signature(?:-256)?|X-Slack-Signature|X-Webhook-(?:Secret|Token))\s*:\s*[^\r\n,]*/gi;
 const sensitiveHeaderNames = new Set([
   "authorization",
   "cookie",
@@ -113,8 +134,9 @@ function isCredentialKey(key: string): boolean {
     .replace(/([a-z])([A-Z])/g, "$1-$2")
     .replace(/[_\s]+/g, "-")
     .toLowerCase();
-  return credentialKeys.has(canonicalKey) || credentialKeySuffixes.some((suffix) =>
-    canonicalKey.endsWith(`-${suffix}`),
+  return (
+    credentialKeys.has(canonicalKey) ||
+    credentialKeySuffixes.some((suffix) => canonicalKey.endsWith(`-${suffix}`))
   );
 }
 
@@ -129,7 +151,7 @@ function redactHeaderOption(
   separator: string,
   value: string,
 ): string {
-  const quote = value.startsWith("\"") || value.startsWith("'") ? value[0] : "";
+  const quote = value.startsWith('"') || value.startsWith("'") ? value[0] : "";
   const header = quote ? value.slice(1, -1) : value;
   const colon = header.indexOf(":");
   if (colon === -1 || !isSensitiveHeaderName(header.slice(0, colon))) {
@@ -165,7 +187,8 @@ function redactJsonString(
   redactValue: AuditValueRedactor,
 ): string | undefined {
   const trimmedValue = value.trim();
-  const isJsonContainer = (trimmedValue.startsWith("{") && trimmedValue.endsWith("}")) ||
+  const isJsonContainer =
+    (trimmedValue.startsWith("{") && trimmedValue.endsWith("}")) ||
     (trimmedValue.startsWith("[") && trimmedValue.endsWith("]"));
   if (!isJsonContainer) return undefined;
   if (value.length > maxAuditJsonStringLength) return redactedOversizedJson;
@@ -181,9 +204,8 @@ function redactJsonString(
   const leadingWhitespaceLength = value.length - value.trimStart().length;
   const trailingWhitespaceLength = value.length - value.trimEnd().length;
   const leadingWhitespace = value.slice(0, leadingWhitespaceLength);
-  const trailingWhitespace = trailingWhitespaceLength === 0
-    ? ""
-    : value.slice(value.length - trailingWhitespaceLength);
+  const trailingWhitespace =
+    trailingWhitespaceLength === 0 ? "" : value.slice(value.length - trailingWhitespaceLength);
   return `${leadingWhitespace}${JSON.stringify(redactValue(parsedValue, depth + 1))}${trailingWhitespace}`;
 }
 
@@ -224,9 +246,11 @@ function redactAuditArguments(value: unknown, depth = 0): unknown {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        isCredentialKey(key) ? "[redacted]" : key.toLowerCase() === "headers"
-          ? redactHeaders(item, depth + 1)
-          : redactAuditArguments(item, depth + 1),
+        isCredentialKey(key)
+          ? "[redacted]"
+          : key.toLowerCase() === "headers"
+            ? redactHeaders(item, depth + 1)
+            : redactAuditArguments(item, depth + 1),
       ]),
     );
   }
@@ -238,16 +262,20 @@ export function redactSensitiveValue(value: unknown): unknown {
 }
 
 function fingerprint(profile: import("./types.js").Profile): string {
-  return createHash("sha256").update(JSON.stringify({
-    allowedTargets: [...profile.allowedTargets].sort(),
-    groupings: profile.groupings,
-    id: profile.id,
-    policyRevision: profile.policyRevision,
-    sessionContext: profile.sessionContext ?? [],
-    targetScope: profile.targetScope,
-    activationMaterializer: profile.activationMaterializer,
-    requestMaterializer: profile.requestMaterializer,
-  })).digest("hex");
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        allowedTargets: [...profile.allowedTargets].sort(),
+        groupings: profile.groupings,
+        id: profile.id,
+        policyRevision: profile.policyRevision,
+        sessionContext: profile.sessionContext ?? [],
+        targetScope: profile.targetScope,
+        activationMaterializer: profile.activationMaterializer,
+        requestMaterializer: profile.requestMaterializer,
+      }),
+    )
+    .digest("hex");
 }
 
 function staleProfileStatus(
@@ -352,8 +380,17 @@ export async function evaluateForThread(
       return result;
     }
     if (activeProfile.status === "stale") {
-      const result = { decision: "abstain" as const, reason: "active profile no longer matches review" };
-      await recordEvaluation(repository, request, result, activeProfile.profileId, activeProfile.policyRevision);
+      const result = {
+        decision: "abstain" as const,
+        reason: "active profile no longer matches review",
+      };
+      await recordEvaluation(
+        repository,
+        request,
+        result,
+        activeProfile.profileId,
+        activeProfile.policyRevision,
+      );
       return result;
     }
     if (activeProfile.status === "unavailable") {
@@ -363,12 +400,27 @@ export async function evaluateForThread(
     const { profile } = activeProfile;
     core.activate(profile, request.threadId);
     const evaluated = await core.evaluate(request);
-    if (evaluated.decision === "allow" && !await core.consumeToken(evaluated.token?.id ?? "", request)) {
+    if (
+      evaluated.decision === "allow" &&
+      !(await core.consumeToken(evaluated.token?.id ?? "", request))
+    ) {
       const result = { decision: "abstain" as const, reason: "authorization token is unavailable" };
-      await recordEvaluation(repository, request, result, activeProfile.binding.profileId, profile.policyRevision);
+      await recordEvaluation(
+        repository,
+        request,
+        result,
+        activeProfile.binding.profileId,
+        profile.policyRevision,
+      );
       return result;
     }
-    await recordEvaluation(repository, request, evaluated, activeProfile.binding.profileId, profile.policyRevision);
+    await recordEvaluation(
+      repository,
+      request,
+      evaluated,
+      activeProfile.binding.profileId,
+      profile.policyRevision,
+    );
     const { token: _, ...result } = evaluated;
     return result;
   } catch {
@@ -403,12 +455,15 @@ export async function activatePreparedProfile(
   threadId: string,
   activation: PreparedProfileActivation,
 ): Promise<readonly string[]> {
-  await repository.updateState((bindings) => ({ ...bindings, [threadId]: {
-    allowedTargets: activation.targets,
-    fingerprint: fingerprint(activation.profile),
-    policyRevision: activation.profile.policyRevision,
-    profileId: activation.profile.id,
-  } }));
+  await repository.updateState((bindings) => ({
+    ...bindings,
+    [threadId]: {
+      allowedTargets: activation.targets,
+      fingerprint: fingerprint(activation.profile),
+      policyRevision: activation.profile.policyRevision,
+      profileId: activation.profile.id,
+    },
+  }));
   return activation.targets;
 }
 
@@ -429,13 +484,14 @@ function bindingsMatch(
   current: import("./types.js").ProfileBinding | undefined,
   expected: import("./types.js").ProfileBinding | undefined,
 ): boolean {
-  return current === expected || (
-    current !== undefined &&
-    expected !== undefined &&
-    current.profileId === expected.profileId &&
-    current.policyRevision === expected.policyRevision &&
-    current.allowedTargets.length === expected.allowedTargets.length &&
-    current.allowedTargets.every((target, index) => target === expected.allowedTargets[index])
+  return (
+    current === expected ||
+    (current !== undefined &&
+      expected !== undefined &&
+      current.profileId === expected.profileId &&
+      current.policyRevision === expected.policyRevision &&
+      current.allowedTargets.length === expected.allowedTargets.length &&
+      current.allowedTargets.every((target, index) => target === expected.allowedTargets[index]))
   );
 }
 

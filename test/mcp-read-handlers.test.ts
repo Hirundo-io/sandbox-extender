@@ -17,16 +17,20 @@ function profile(): Profile {
 }
 
 function fingerprint(value: Profile): string {
-  return createHash("sha256").update(JSON.stringify({
-    allowedTargets: [...value.allowedTargets].sort(),
-    groupings: value.groupings,
-    id: value.id,
-    policyRevision: value.policyRevision,
-    sessionContext: value.sessionContext ?? [],
-    targetScope: value.targetScope,
-    activationMaterializer: value.activationMaterializer,
-    requestMaterializer: value.requestMaterializer,
-  })).digest("hex");
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        allowedTargets: [...value.allowedTargets].sort(),
+        groupings: value.groupings,
+        id: value.id,
+        policyRevision: value.policyRevision,
+        sessionContext: value.sessionContext ?? [],
+        targetScope: value.targetScope,
+        activationMaterializer: value.activationMaterializer,
+        requestMaterializer: value.requestMaterializer,
+      }),
+    )
+    .digest("hex");
 }
 
 function repositoryFor(
@@ -72,27 +76,48 @@ describe("MCP read handlers", () => {
       content: [{ text: '["review"]', type: "text" }],
     });
     await expect(getActiveProfileHandler(activeRepository, threadId)).resolves.toEqual({
-      content: [{ text: `{"status":"active","profileId":"review","policyRevision":"${reviewed.policyRevision}","allowedTargets":["github:pull-request:acme/example#42"]}`, type: "text" }],
+      content: [
+        {
+          text: `{"status":"active","profileId":"review","policyRevision":"${reviewed.policyRevision}","allowedTargets":["github:pull-request:acme/example#42"]}`,
+          type: "text",
+        },
+      ],
     });
     await expect(getActiveProfileHandler(inactiveRepository, threadId)).resolves.toEqual({
-      content: [{ text: '{"status":"inactive","reason":"no active profile for thread"}', type: "text" }],
+      content: [
+        { text: '{"status":"inactive","reason":"no active profile for thread"}', type: "text" },
+      ],
     });
     await expect(getActiveProfileHandler(staleRepository, threadId)).resolves.toEqual({
-      content: [{ text: `{"status":"stale","profileId":"review","policyRevision":"${reviewed.policyRevision}","allowedTargets":["github:pull-request:acme/example#42"],"reason":"active profile no longer matches review"}`, type: "text" }],
+      content: [
+        {
+          text: `{"status":"stale","profileId":"review","policyRevision":"${reviewed.policyRevision}","allowedTargets":["github:pull-request:acme/example#42"],"reason":"active profile no longer matches review"}`,
+          type: "text",
+        },
+      ],
     });
     await expect(getActiveProfileHandler(unavailableRepository, threadId)).resolves.toEqual({
-      content: [{ text: '{"status":"unavailable","reason":"policy repository is unavailable"}', type: "text" }],
+      content: [
+        {
+          text: '{"status":"unavailable","reason":"policy repository is unavailable"}',
+          type: "text",
+        },
+      ],
     });
   });
 
   test("propagates listing verification failures without writing repository state", async () => {
     let writes = 0;
     const repository = {
-      appendAudit: async () => { writes += 1; },
+      appendAudit: async () => {
+        writes += 1;
+      },
       listVerifiedProfiles: async () => {
         throw new Error("Git repository is unavailable");
       },
-      updateState: async () => { writes += 1; },
+      updateState: async () => {
+        writes += 1;
+      },
     } as unknown as PolicyRepository;
 
     await expect(listProfilesHandler(repository)).rejects.toThrow("Git repository is unavailable");

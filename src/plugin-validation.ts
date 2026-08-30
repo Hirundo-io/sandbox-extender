@@ -7,113 +7,167 @@ import { verifyMaterializerIntegrity } from "./materializer-policy.js";
 import { activationMaterializerSchema, requestMaterializerSchema } from "./schemas.js";
 import type { ActivationMaterializer, RequestMaterializer } from "./types.js";
 
-const commandHookSchema = z.object({
-  command: z.string().min(1),
-  type: z.literal("command"),
-}).strict();
-const hooksFileSchema = z.object({
-  hooks: z.record(
-    z.string().min(1),
-    z.array(z.object({
-      hooks: z.array(commandHookSchema).min(1),
-    }).strict()).min(1),
-  ),
-}).strict();
-const codexPluginSchema = z.object({
-  hooks: z.string().min(1),
-  mcpServers: z.record(z.string().min(1), z.object({
-    args: z.array(z.string().min(1)).min(1),
+const commandHookSchema = z
+  .object({
     command: z.string().min(1),
-    cwd: z.string().min(1),
-  }).strict()),
-  name: z.string().min(1),
-  skills: z.string().min(1),
-  version: z.string().min(1),
-}).loose();
-const claudePluginSchema = z.object({
-  name: z.string().min(1),
-  version: z.string().min(1),
-}).loose();
+    type: z.literal("command"),
+  })
+  .strict();
+const hooksFileSchema = z
+  .object({
+    hooks: z.record(
+      z.string().min(1),
+      z
+        .array(
+          z
+            .object({
+              hooks: z.array(commandHookSchema).min(1),
+            })
+            .strict(),
+        )
+        .min(1),
+    ),
+  })
+  .strict();
+const codexPluginSchema = z
+  .object({
+    hooks: z.string().min(1),
+    mcpServers: z.record(
+      z.string().min(1),
+      z
+        .object({
+          args: z.array(z.string().min(1)).min(1),
+          command: z.string().min(1),
+          cwd: z.string().min(1),
+        })
+        .strict(),
+    ),
+    name: z.string().min(1),
+    skills: z.string().min(1),
+    version: z.string().min(1),
+  })
+  .loose();
+const claudePluginSchema = z
+  .object({
+    name: z.string().min(1),
+    version: z.string().min(1),
+  })
+  .loose();
 const marketplaceGitSelectorShape = {
   ref: z.string().min(1).optional(),
   sha: z.string().min(1).optional(),
 };
-const marketplaceUrlSourceSchema = z.object({
-  source: z.literal("url"),
-  url: z.string().min(1),
-  ...marketplaceGitSelectorShape,
-}).loose();
-const marketplaceGitSubdirectorySourceSchema = z.object({
-  path: z.string().min(1),
-  source: z.literal("git-subdir"),
-  url: z.string().min(1),
-  ...marketplaceGitSelectorShape,
-}).loose();
-const marketplaceNpmSourceSchema = z.object({
-  package: z.string().min(1),
-  registry: z.string().min(1).optional(),
-  source: z.literal("npm"),
-  version: z.string().min(1).optional(),
-}).loose();
+const marketplaceUrlSourceSchema = z
+  .object({
+    source: z.literal("url"),
+    url: z.string().min(1),
+    ...marketplaceGitSelectorShape,
+  })
+  .loose();
+const marketplaceGitSubdirectorySourceSchema = z
+  .object({
+    path: z.string().min(1),
+    source: z.literal("git-subdir"),
+    url: z.string().min(1),
+    ...marketplaceGitSelectorShape,
+  })
+  .loose();
+const marketplaceNpmSourceSchema = z
+  .object({
+    package: z.string().min(1),
+    registry: z.string().min(1).optional(),
+    source: z.literal("npm"),
+    version: z.string().min(1).optional(),
+  })
+  .loose();
 const claudeMarketplaceSourceSchema = z.union([
   z.string().min(1),
   z.discriminatedUnion("source", [
-    z.object({
-      repo: z.string().min(1),
-      source: z.literal("github"),
-      ...marketplaceGitSelectorShape,
-    }).loose(),
+    z
+      .object({
+        repo: z.string().min(1),
+        source: z.literal("github"),
+        ...marketplaceGitSelectorShape,
+      })
+      .loose(),
     marketplaceUrlSourceSchema,
     marketplaceGitSubdirectorySourceSchema,
     marketplaceNpmSourceSchema,
-    z.object({
-      sha256: z.string().min(1).optional(),
-      source: z.literal("archive"),
-      url: z.string().min(1),
-    }).loose(),
-    z.object({
-      command: z.string().min(1),
-      source: z.literal("command"),
-    }).loose(),
+    z
+      .object({
+        sha256: z.string().min(1).optional(),
+        source: z.literal("archive"),
+        url: z.string().min(1),
+      })
+      .loose(),
+    z
+      .object({
+        command: z.string().min(1),
+        source: z.literal("command"),
+      })
+      .loose(),
   ]),
 ]);
 const codexMarketplaceSourceSchema = z.union([
   z.string().min(1),
   z.discriminatedUnion("source", [
-    z.object({
-      path: z.string().min(1),
-      source: z.literal("local"),
-    }).loose(),
+    z
+      .object({
+        path: z.string().min(1),
+        source: z.literal("local"),
+      })
+      .loose(),
     marketplaceUrlSourceSchema,
     marketplaceGitSubdirectorySourceSchema,
     marketplaceNpmSourceSchema,
   ]),
 ]);
-const claudeMarketplaceSchema = z.object({
-  name: z.string().min(1),
-  plugins: z.array(z.object({
+const claudeMarketplaceSchema = z
+  .object({
     name: z.string().min(1),
-    source: claudeMarketplaceSourceSchema,
-  }).loose()).min(1),
-}).loose();
-const codexMarketplaceSchema = z.object({
-  name: z.string().min(1),
-  plugins: z.array(z.object({
+    plugins: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            source: claudeMarketplaceSourceSchema,
+          })
+          .loose(),
+      )
+      .min(1),
+  })
+  .loose();
+const codexMarketplaceSchema = z
+  .object({
     name: z.string().min(1),
-    source: codexMarketplaceSourceSchema,
-  }).loose()).min(1),
-}).loose();
-const profileTemplateSchema = z.object({
-  activationMaterializer: activationMaterializerSchema.optional(),
-  requestMaterializer: requestMaterializerSchema.optional(),
-}).loose();
+    plugins: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            source: codexMarketplaceSourceSchema,
+          })
+          .loose(),
+      )
+      .min(1),
+  })
+  .loose();
+const profileTemplateSchema = z
+  .object({
+    activationMaterializer: activationMaterializerSchema.optional(),
+    requestMaterializer: requestMaterializerSchema.optional(),
+  })
+  .loose();
 
 function resolveInsideRoot(root: string, entry: string): string {
   const resolvedRoot = resolve(root);
   const resolvedEntry = resolve(resolvedRoot, entry);
   const relativeEntry = relative(resolvedRoot, resolvedEntry);
-  if (isAbsolute(relativeEntry) || relativeEntry === ".." ||
-    relativeEntry.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+  if (
+    isAbsolute(relativeEntry) ||
+    relativeEntry === ".." ||
+    relativeEntry.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+  ) {
     throw new Error(`plugin path escapes its root: ${entry}`);
   }
   return resolvedEntry;
@@ -127,8 +181,8 @@ async function validateFile(file: string): Promise<void> {
   await access(file);
 }
 
-type MarketplaceSource = z.infer<typeof claudeMarketplaceSourceSchema> |
-  z.infer<typeof codexMarketplaceSourceSchema>;
+type MarketplaceSource =
+  z.infer<typeof claudeMarketplaceSourceSchema> | z.infer<typeof codexMarketplaceSourceSchema>;
 type MarketplacePlugin = { readonly name: string; readonly source: MarketplaceSource };
 
 function findPublishedMapping<T extends MarketplacePlugin>(
@@ -168,19 +222,21 @@ async function validateProfileTemplates(root: string): Promise<void> {
   const sharedDirectory = resolveInsideRoot(root, "shared");
   const profileTemplateDirectory = resolveInsideRoot(sharedDirectory, "profile-templates");
   const entries = await readdir(profileTemplateDirectory, { withFileTypes: true });
-  await Promise.all(entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map(async (entry) => {
-      const profileTemplate = profileTemplateSchema.parse(
-        await readJson(join(profileTemplateDirectory, entry.name)),
-      );
-      if (profileTemplate.activationMaterializer) {
-        await validateMaterializer(sharedDirectory, profileTemplate.activationMaterializer);
-      }
-      if (profileTemplate.requestMaterializer) {
-        await validateMaterializer(sharedDirectory, profileTemplate.requestMaterializer);
-      }
-    }));
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const profileTemplate = profileTemplateSchema.parse(
+          await readJson(join(profileTemplateDirectory, entry.name)),
+        );
+        if (profileTemplate.activationMaterializer) {
+          await validateMaterializer(sharedDirectory, profileTemplate.activationMaterializer);
+        }
+        if (profileTemplate.requestMaterializer) {
+          await validateMaterializer(sharedDirectory, profileTemplate.requestMaterializer);
+        }
+      }),
+  );
 }
 
 export async function validatePlugin(root: string): Promise<void> {

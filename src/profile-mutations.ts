@@ -29,23 +29,39 @@ export async function prepareProfileMutation(
       };
     case "propose_profile":
       return {
-        approvalDetails: { profileId: intent.arguments.profileId, targets: [intent.arguments.resource] },
+        approvalDetails: {
+          profileId: intent.arguments.profileId,
+          targets: [intent.arguments.resource],
+        },
         execute: async () => {
-          const proposal = await proposeProfile(intent.arguments.profileId, { ...intent.arguments, threadId });
+          const proposal = await proposeProfile(intent.arguments.profileId, {
+            ...intent.arguments,
+            threadId,
+          });
           await repository.writeProposal(proposal);
           return `Wrote proposal ${intent.arguments.profileId}. Review proposals/${intent.arguments.profileId}.json and tests/${intent.arguments.profileId}.json before promoting it to profiles/.`;
         },
       };
     case "promote_profile":
       return {
-        approvalDetails: { policyRevision: intent.arguments.policyRevision, profileId: intent.arguments.profileId },
+        approvalDetails: {
+          policyRevision: intent.arguments.policyRevision,
+          profileId: intent.arguments.profileId,
+        },
         execute: async () => {
-          await repository.promoteProposal(intent.arguments.profileId, intent.arguments.policyRevision);
+          await repository.promoteProposal(
+            intent.arguments.profileId,
+            intent.arguments.policyRevision,
+          );
           return `Promoted ${intent.arguments.profileId}. It remains inactive until explicitly activated.`;
         },
       };
     case "activate_profile": {
-      const activation = await prepareProfileActivation(repository, intent.arguments.profileId, intent.arguments.arguments);
+      const activation = await prepareProfileActivation(
+        repository,
+        intent.arguments.profileId,
+        intent.arguments.arguments,
+      );
       return {
         approvalDetails: {
           activationArguments: intent.arguments.arguments,
@@ -66,13 +82,14 @@ export async function prepareProfileMutation(
     case "disable_profile": {
       const binding = (await repository.readState())[threadId];
       return {
-        approvalDetails: binding === undefined
-          ? {}
-          : {
-              policyRevision: binding.policyRevision,
-              profileId: binding.profileId,
-              targets: binding.allowedTargets,
-        },
+        approvalDetails:
+          binding === undefined
+            ? {}
+            : {
+                policyRevision: binding.policyRevision,
+                profileId: binding.profileId,
+                targets: binding.allowedTargets,
+              },
         execute: async () => {
           await disablePreparedProfile(repository, threadId, binding);
           return `Disabled the profile for ${threadId}.`;

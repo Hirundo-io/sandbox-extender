@@ -68,7 +68,11 @@ async function main(argv: readonly string[]): Promise<void> {
     arguments: mutationArguments,
     operation: input.operation,
   });
-  const mutation = await prepareProfileMutation(new PolicyRepository(getPolicyRoot()), input.threadId, intent);
+  const mutation = await prepareProfileMutation(
+    new PolicyRepository(getPolicyRoot()),
+    input.threadId,
+    intent,
+  );
   console.log(await mutation.execute());
 }
 

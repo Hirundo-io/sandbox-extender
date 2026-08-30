@@ -28,8 +28,7 @@ export default defineConfig([
         ...globals.bun,
         ...globals.node,
       },
-      parserOptions: {
-      },
+      parserOptions: {},
       sourceType: "module",
     },
     plugins: {

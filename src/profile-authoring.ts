@@ -6,12 +6,19 @@ function cedarLiteral(value: unknown): string {
   if (typeof value === "number" && !Number.isFinite(value)) {
     throw new Error("request arguments must contain finite JSON numbers");
   }
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
     return JSON.stringify(value);
   }
   if (Array.isArray(value)) return `[${value.map(cedarLiteral).join(", ")}]`;
   if (typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>).map(([key, item]) => `${JSON.stringify(key)}: ${cedarLiteral(item)}`).join(", ")}}`;
+    return `{${Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${JSON.stringify(key)}: ${cedarLiteral(item)}`)
+      .join(", ")}}`;
   }
   throw new Error("request arguments must be JSON values");
 }
@@ -37,7 +44,10 @@ function differentArguments(request: NormalizedRequest): Readonly<Record<string,
 }
 
 /** Creates a deliberately narrow, reviewable starting point from one observed request. */
-export async function proposeProfile(profileId: string, request: NormalizedRequest): Promise<ProfileProposal> {
+export async function proposeProfile(
+  profileId: string,
+  request: NormalizedRequest,
+): Promise<ProfileProposal> {
   profileIdSchema.parse(profileId);
   await validateProposableRequest(request);
 

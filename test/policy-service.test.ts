@@ -16,8 +16,17 @@ import { disablePreparedProfile } from "../src/policy-service.js";
 import { PolicyCore } from "../src/policy-core.js";
 import { materializerIntegrity } from "../src/materializer-policy.js";
 import type { Profile } from "../src/types.js";
+import { runFixtureGit } from "./git-fixture.js";
 
-const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
+const emptyPermissions = {
+  env: [],
+  ffi: [],
+  net: [],
+  read: [],
+  run: [],
+  sys: [],
+  write: [],
+} as const;
 
 function materializerReference(file: string, source: string) {
   return {
@@ -43,33 +52,33 @@ async function createRepository(): Promise<{ repository: PolicyRepository; root:
 
 async function writeProfile(root: string, id: string, policyRevision: string): Promise<void> {
   await mkdir(join(root, "profiles"), { recursive: true });
-  await Bun.write(join(root, "profiles", `${id}.json`), JSON.stringify({
-    allowedTargets: [request.resource],
-    groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
-    id,
-    policyRevision,
-  }));
+  await Bun.write(
+    join(root, "profiles", `${id}.json`),
+    JSON.stringify({
+      allowedTargets: [request.resource],
+      groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
+      id,
+      policyRevision,
+    }),
+  );
 }
 
 function commitReview(root: string): string {
   for (const command of [
-    ["git", "init", "--quiet"],
-    ["git", "config", "user.email", "sandbox-extender@example.test"],
-    ["git", "config", "user.name", "Sandbox Extender"],
-    ["git", "add", "-A"],
-    ["git", "commit", "--quiet", "-m", "Review profile"],
+    ["init", "--quiet"],
+    ["config", "user.email", "sandbox-extender@example.test"],
+    ["config", "user.name", "Sandbox Extender"],
+    ["add", "-A"],
+    ["commit", "--quiet", "-m", "Review profile"],
   ]) {
-    const result = Bun.spawnSync({ cmd: command, cwd: root });
+    const result = runFixtureGit(root, command);
     if (result.exitCode !== 0) throw new Error(`could not run ${command.join(" ")}`);
   }
-  const result = Bun.spawnSync({ cmd: ["git", "rev-parse", "HEAD"], cwd: root, stdout: "pipe" });
+  const result = runFixtureGit(root, ["rev-parse", "HEAD"]);
   return new TextDecoder().decode(result.stdout).trim();
 }
 
-async function writeReviewedProfile(
-  repository: PolicyRepository,
-  id: string,
-): Promise<string> {
+async function writeReviewedProfile(repository: PolicyRepository, id: string): Promise<string> {
   await repository.writeProposal({
     profile: {
       allowedTargets: [request.resource],
@@ -84,12 +93,24 @@ async function writeReviewedProfile(
   return revision;
 }
 
-function stubRepository(profile: Profile, bindingOverrides: Record<string, unknown> = {}): PolicyRepository {
-  const fingerprint = createHash("sha256").update(JSON.stringify({
-    allowedTargets: [...profile.allowedTargets].sort(), groupings: profile.groupings, id: profile.id,
-    policyRevision: profile.policyRevision, sessionContext: profile.sessionContext ?? [], targetScope: profile.targetScope,
-    activationMaterializer: profile.activationMaterializer, requestMaterializer: profile.requestMaterializer,
-  })).digest("hex");
+function stubRepository(
+  profile: Profile,
+  bindingOverrides: Record<string, unknown> = {},
+): PolicyRepository {
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify({
+        allowedTargets: [...profile.allowedTargets].sort(),
+        groupings: profile.groupings,
+        id: profile.id,
+        policyRevision: profile.policyRevision,
+        sessionContext: profile.sessionContext ?? [],
+        targetScope: profile.targetScope,
+        activationMaterializer: profile.activationMaterializer,
+        requestMaterializer: profile.requestMaterializer,
+      }),
+    )
+    .digest("hex");
   const binding = {
     allowedTargets: [...profile.allowedTargets],
     fingerprint,
@@ -177,12 +198,15 @@ describe("policy service", () => {
         status: "active",
       });
 
-      await writeFile(join(root, "profiles", "review.json"), JSON.stringify({
-        allowedTargets: ["github:repository:acme/other"],
-        groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
-        id: "review",
-        policyRevision: revision,
-      }));
+      await writeFile(
+        join(root, "profiles", "review.json"),
+        JSON.stringify({
+          allowedTargets: ["github:repository:acme/other"],
+          groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
+          id: "review",
+          policyRevision: revision,
+        }),
+      );
       expect(await getActiveProfileStatus(repository, request.threadId)).toEqual({
         allowedTargets: [request.resource],
         policyRevision: revision,
@@ -201,13 +225,21 @@ describe("policy service", () => {
       await mkdir(join(root, "materializers", "activation"), { recursive: true });
       await mkdir(join(root, "materializers", "requests"), { recursive: true });
       const activationSource = await readFile(
-        join(process.cwd(), "shared", "materializers", "activation", "github-pull-request.ts"), "utf8",
+        join(process.cwd(), "shared", "materializers", "activation", "github-pull-request.ts"),
+        "utf8",
       );
       const requestSource = await readFile(
-        join(process.cwd(), "shared", "materializers", "requests", "github-pull-request.ts"), "utf8",
+        join(process.cwd(), "shared", "materializers", "requests", "github-pull-request.ts"),
+        "utf8",
       );
-      await writeFile(join(root, "materializers", "activation", "github-pull-request.ts"), activationSource);
-      await writeFile(join(root, "materializers", "requests", "github-pull-request.ts"), requestSource);
+      await writeFile(
+        join(root, "materializers", "activation", "github-pull-request.ts"),
+        activationSource,
+      );
+      await writeFile(
+        join(root, "materializers", "requests", "github-pull-request.ts"),
+        requestSource,
+      );
       const pullRequestRequest = {
         action: "codex.unified_exec",
         arguments: { command: "gh pr view 42 --repo acme/example" },
@@ -217,45 +249,59 @@ describe("policy service", () => {
       await repository.writeProposal({
         profile: {
           activationMaterializer: materializerReference(
-            "materializers/activation/github-pull-request.ts", activationSource,
+            "materializers/activation/github-pull-request.ts",
+            activationSource,
           ),
           allowedTargets: [],
-          groupings: [{
-            id: "view",
-            policies: {
-              allow: 'permit(principal, action, resource) when { context.materialized.operation == "github.pull-request.view" };',
+          groupings: [
+            {
+              id: "view",
+              policies: {
+                allow:
+                  'permit(principal, action, resource) when { context.materialized.operation == "github.pull-request.view" };',
+              },
             },
-          }],
+          ],
           id: "babysitter",
           policyRevision: "pending-review",
           requestMaterializer: materializerReference(
-            "materializers/requests/github-pull-request.ts", requestSource,
+            "materializers/requests/github-pull-request.ts",
+            requestSource,
           ),
           targetScope: "single",
         },
-        tests: [{
-          activationArguments: { pullRequest: 42, repository: "acme/example" },
-          expected: "allow",
-          name: "views the activated pull request",
-          request: pullRequestRequest,
-        }],
+        tests: [
+          {
+            activationArguments: { pullRequest: 42, repository: "acme/example" },
+            expected: "allow",
+            name: "views the activated pull request",
+            request: pullRequestRequest,
+          },
+        ],
       });
       const revision = commitReview(root);
       await repository.promoteProposal("babysitter", revision);
 
-      expect(await activateProfile(repository, pullRequestRequest.threadId, "babysitter", {
-        pullRequest: 42,
-        repository: "acme/example",
-      })).toEqual(["github:pull-request:acme/example#42"]);
-      expect((await repository.readState())[pullRequestRequest.threadId]?.allowedTargets)
-        .toEqual(["github:pull-request:acme/example#42"]);
+      expect(
+        await activateProfile(repository, pullRequestRequest.threadId, "babysitter", {
+          pullRequest: 42,
+          repository: "acme/example",
+        }),
+      ).toEqual(["github:pull-request:acme/example#42"]);
+      expect((await repository.readState())[pullRequestRequest.threadId]?.allowedTargets).toEqual([
+        "github:pull-request:acme/example#42",
+      ]);
       const allowed = await evaluateForThread(repository, pullRequestRequest);
       expect(allowed.decision).toBe("allow");
       expect(allowed.token).toBeUndefined();
-      expect((await evaluateForThread(repository, {
-        ...pullRequestRequest,
-        arguments: { command: "gh pr view 43 --repo acme/example" },
-      })).decision).toBe("abstain");
+      expect(
+        (
+          await evaluateForThread(repository, {
+            ...pullRequestRequest,
+            arguments: { command: "gh pr view 43 --repo acme/example" },
+          })
+        ).decision,
+      ).toBe("abstain");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -270,12 +316,14 @@ describe("policy service", () => {
       });
       expect(await readFile(join(root, "audit.yaml"), "utf8")).toContain("extension-request");
 
-      await repository.writeState({ [request.threadId]: {
-        allowedTargets: [request.resource],
-        fingerprint: "0".repeat(64),
-        policyRevision: "revision-1",
-        profileId: "missing",
-      } });
+      await repository.writeState({
+        [request.threadId]: {
+          allowedTargets: [request.resource],
+          fingerprint: "0".repeat(64),
+          policyRevision: "revision-1",
+          profileId: "missing",
+        },
+      });
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
         reason: "active profile no longer matches review",
@@ -289,7 +337,8 @@ describe("policy service", () => {
     const { repository, root } = await createRepository();
     const secret = "ghp_this-must-not-reach-the-audit-log";
     const password = "swordfish";
-    const privateKey = "-----BEGIN PRIVATE KEY-----\nprivate-key-material\n-----END PRIVATE KEY-----";
+    const privateKey =
+      "-----BEGIN PRIVATE KEY-----\nprivate-key-material\n-----END PRIVATE KEY-----";
     try {
       await evaluateForThread(repository, {
         ...request,
@@ -371,7 +420,9 @@ describe("policy service", () => {
     const { repository, root } = await createRepository();
     try {
       await evaluateForThread(repository, { ...request, arguments: { unsupported: undefined } });
-      expect(await readFile(join(root, "audit.yaml"), "utf8")).toContain("[unsupported audit value]");
+      expect(await readFile(join(root, "audit.yaml"), "utf8")).toContain(
+        "[unsupported audit value]",
+      );
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -445,11 +496,13 @@ describe("policy service", () => {
             databaseUrl: "postgres://user:connection-password@example.test/database",
             openaiApiKey: openAiToken,
           },
-          connection: "Endpoint=https://example.test;AccountKey=connection-account-key;Password=connection-password",
+          connection:
+            "Endpoint=https://example.test;AccountKey=connection-account-key;Password=connection-password",
           credentialsUrl: "https://example.test/callback?access_token=query-token",
           headers: { "X-Slack-Signature": slackToken },
           providers: `${pypiToken} ${stripeSecret} ${awsAccessKey} ${jwt}`,
-          ordinary: "gh pr view 42 https://user@example.test/path?mode=read 1.2.3 pk_test_publishable",
+          ordinary:
+            "gh pr view 42 https://user@example.test/path?mode=read 1.2.3 pk_test_publishable",
         },
       });
 
@@ -467,8 +520,13 @@ describe("policy service", () => {
   test("preserves ordinary command headers", async () => {
     const { repository, root } = await createRepository();
     try {
-      await evaluateForThread(repository, { ...request, arguments: { command: "curl -H 'Accept: application/json' example.test" } });
-      expect(await readFile(join(root, "audit.yaml"), "utf8")).toContain("Accept: application/json");
+      await evaluateForThread(repository, {
+        ...request,
+        arguments: { command: "curl -H 'Accept: application/json' example.test" },
+      });
+      expect(await readFile(join(root, "audit.yaml"), "utf8")).toContain(
+        "Accept: application/json",
+      );
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -476,18 +534,25 @@ describe("policy service", () => {
 
   test("abstains when an active binding no longer matches its reviewed profile", async () => {
     const profile: Profile = {
-      allowedTargets: new Set([request.resource]), groupings: [], id: "reviewed",
+      allowedTargets: new Set([request.resource]),
+      groupings: [],
+      id: "reviewed",
       policyRevision: "a".repeat(40),
     };
-    expect(await evaluateForThread(stubRepository(profile, { fingerprint: "mismatch" }), request)).toEqual({
-      decision: "abstain", reason: "active profile no longer matches review",
+    expect(
+      await evaluateForThread(stubRepository(profile, { fingerprint: "mismatch" }), request),
+    ).toEqual({
+      decision: "abstain",
+      reason: "active profile no longer matches review",
     });
   });
 
   test("fails closed when an allow token cannot be consumed", async () => {
     const profile: Profile = {
       allowedTargets: new Set([request.resource]),
-      groupings: [{ evaluate: () => "allow", id: "allow" }], id: "reviewed", policyRevision: "a".repeat(40),
+      groupings: [{ evaluate: () => "allow", id: "allow" }],
+      id: "reviewed",
+      policyRevision: "a".repeat(40),
     };
     const repository = stubRepository(profile);
     let auditEntry: Readonly<Record<string, unknown>> | undefined;
@@ -499,10 +564,12 @@ describe("policy service", () => {
     try {
       const result = await evaluateForThread(repository, request);
       expect(result.decision).toBe("abstain");
-      expect(auditEntry).toEqual(expect.objectContaining({
-        decision: "abstain",
-        reason: "authorization token is unavailable",
-      }));
+      expect(auditEntry).toEqual(
+        expect.objectContaining({
+          decision: "abstain",
+          reason: "authorization token is unavailable",
+        }),
+      );
     } finally {
       PolicyCore.prototype.consumeToken = originalConsumeToken;
     }
@@ -511,7 +578,9 @@ describe("policy service", () => {
   test("fails closed when recording an allowed evaluation fails", async () => {
     const profile: Profile = {
       allowedTargets: new Set([request.resource]),
-      groupings: [{ evaluate: () => "allow", id: "allow" }], id: "reviewed", policyRevision: "a".repeat(40),
+      groupings: [{ evaluate: () => "allow", id: "allow" }],
+      id: "reviewed",
+      policyRevision: "a".repeat(40),
     };
     const repository = stubRepository(profile);
     repository.appendAudit = async () => {
@@ -525,26 +594,48 @@ describe("policy service", () => {
   });
 
   test("rejects pending and multi-target single-scope activation", async () => {
-    const pending: Profile = { allowedTargets: new Set(["one"]), groupings: [], id: "pending", policyRevision: "pending-review" };
-    await expect(activateProfile(stubRepository(pending), request.threadId, pending.id)).rejects.toThrow("reviewed");
-    const multiple: Profile = { allowedTargets: new Set(["one", "two"]), groupings: [], id: "multiple",
-      policyRevision: "a".repeat(40), targetScope: "single" };
-    await expect(activateProfile(stubRepository(multiple), request.threadId, multiple.id)).rejects.toThrow("exactly one target");
+    const pending: Profile = {
+      allowedTargets: new Set(["one"]),
+      groupings: [],
+      id: "pending",
+      policyRevision: "pending-review",
+    };
+    await expect(
+      activateProfile(stubRepository(pending), request.threadId, pending.id),
+    ).rejects.toThrow("reviewed");
+    const multiple: Profile = {
+      allowedTargets: new Set(["one", "two"]),
+      groupings: [],
+      id: "multiple",
+      policyRevision: "a".repeat(40),
+      targetScope: "single",
+    };
+    await expect(
+      activateProfile(stubRepository(multiple), request.threadId, multiple.id),
+    ).rejects.toThrow("exactly one target");
   });
 
   test("requires review before activation and removes the thread binding on disable", async () => {
     const { repository, root } = await createRepository();
     try {
       await writeProfile(root, "pending", "pending-review");
-      await expect(activateProfile(repository, request.threadId, "pending")).rejects.toThrow("reviewed");
+      await expect(activateProfile(repository, request.threadId, "pending")).rejects.toThrow(
+        "reviewed",
+      );
 
       const revision = await writeReviewedProfile(repository, "reviewed");
       const profileFile = join(root, "profiles", "reviewed.json");
-      const reviewedProfile = JSON.parse(await readFile(profileFile, "utf8")) as Record<string, unknown>;
-      await writeFile(profileFile, JSON.stringify({
-        ...reviewedProfile,
-        sessionContext: ["unreviewed instruction"],
-      }));
+      const reviewedProfile = JSON.parse(await readFile(profileFile, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      await writeFile(
+        profileFile,
+        JSON.stringify({
+          ...reviewedProfile,
+          sessionContext: ["unreviewed instruction"],
+        }),
+      );
       await expect(activateProfile(repository, "thread-2", "reviewed")).rejects.toThrow(
         "does not match policy revision",
       );
@@ -552,10 +643,20 @@ describe("policy service", () => {
       await writeFile(profileFile, JSON.stringify(reviewedProfile));
       await activateProfile(repository, request.threadId, "reviewed");
       expect((await evaluateForThread(repository, request)).decision).toBe("allow");
-      await writeFile(profileFile, JSON.stringify({
-        ...reviewedProfile,
-        groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource); permit(principal, action, resource);" } }],
-      }));
+      await writeFile(
+        profileFile,
+        JSON.stringify({
+          ...reviewedProfile,
+          groupings: [
+            {
+              id: "allow",
+              policies: {
+                allow: "permit(principal, action, resource); permit(principal, action, resource);",
+              },
+            },
+          ],
+        }),
+      );
       expect(await evaluateForThread(repository, request)).toEqual({
         decision: "abstain",
         reason: "active profile no longer matches review",
@@ -585,20 +686,27 @@ describe("policy service", () => {
     const replacementBinding = { ...approvedBinding, profileId: "replacement-profile" };
     try {
       await repository.writeState({ [request.threadId]: replacementBinding });
-      await expect(disablePreparedProfile(repository, request.threadId, approvedBinding)).rejects.toThrow("changed while awaiting approval");
+      await expect(
+        disablePreparedProfile(repository, request.threadId, approvedBinding),
+      ).rejects.toThrow("changed while awaiting approval");
       expect(await repository.readState()).toEqual({ [request.threadId]: replacementBinding });
 
       await repository.writeState({ [request.threadId]: approvedBinding });
-      await expect(disablePreparedProfile(repository, request.threadId, approvedBinding)).resolves.toBeUndefined();
+      await expect(
+        disablePreparedProfile(repository, request.threadId, approvedBinding),
+      ).resolves.toBeUndefined();
       expect(await repository.readState()).toEqual({});
 
       await repository.writeState({});
-      await expect(disablePreparedProfile(repository, request.threadId, undefined)).resolves.toBeUndefined();
+      await expect(
+        disablePreparedProfile(repository, request.threadId, undefined),
+      ).resolves.toBeUndefined();
       await repository.writeState({ [request.threadId]: replacementBinding });
-      await expect(disablePreparedProfile(repository, request.threadId, undefined)).rejects.toThrow("changed while awaiting approval");
+      await expect(disablePreparedProfile(repository, request.threadId, undefined)).rejects.toThrow(
+        "changed while awaiting approval",
+      );
     } finally {
       await rm(root, { force: true, recursive: true });
     }
   });
-
 });
