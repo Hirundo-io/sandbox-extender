@@ -54,4 +54,12 @@ describe("profile mutation approval", () => {
       approval: { action: "accept", content: { approve: true } },
     }))).rejects.toThrow("does not match");
   });
+
+  test("rejects approval values outside the JSON boundary", async () => {
+    const invalidIntent = {
+      arguments: { value: Number.NaN },
+      operation: "activate_profile",
+    } as unknown as ProfileMutationIntent;
+    await expect(requestProfileMutationApproval("thread-1", invalidIntent, {}, context())).rejects.toThrow("only JSON values");
+  });
 });
