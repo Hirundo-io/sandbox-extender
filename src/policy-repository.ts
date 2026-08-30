@@ -73,6 +73,13 @@ export class ProfileStaleError extends Error {
   }
 }
 
+class ProfileLoadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProfileLoadError";
+  }
+}
+
 function verifyCommitRevision(root: string, revision: string): void {
   const result = Bun.spawnSync({
     cmd: ["git", "-C", root, "cat-file", "-t", revision],
@@ -222,26 +229,30 @@ function profileFromDisk(root: string, profile: DiskProfile): Profile {
   };
 }
 
-async function loadLiveProfile(root: string, profileId: string): Promise<DiskProfile> {
+async function loadDiskProfile(root: string, profileId: string): Promise<DiskProfile> {
   const file = join(root, "profiles", `${profileId}.json`);
-  let candidate: unknown;
-  try {
-    candidate = JSON.parse(await readFile(file, "utf8"));
-  } catch (error) {
-    if (isMissingFile(error) || error instanceof SyntaxError) {
-      throw new ProfileStaleError(`profile ${profileId} is unavailable or malformed`);
-    }
-    throw error;
-  }
-
+  const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
   let profile: DiskProfile;
   try {
     profile = parseProfile(candidate, file);
   } catch {
-    throw new ProfileStaleError(`${file} is not a valid policy profile`);
+    throw new ProfileLoadError(`${file} is not a valid policy profile`);
   }
   if (profile.id !== profileId) {
-    throw new ProfileStaleError(`${file} does not match its requested profile ID`);
+    throw new ProfileLoadError(`${file} does not match its requested profile ID`);
+  }
+  return profile;
+}
+
+async function loadLiveProfile(root: string, profileId: string): Promise<DiskProfile> {
+  let profile: DiskProfile;
+  try {
+    profile = await loadDiskProfile(root, profileId);
+  } catch (error) {
+    if (isMissingFile(error) || error instanceof ProfileLoadError || error instanceof SyntaxError) {
+      throw new ProfileStaleError(`profile ${profileId} is unavailable or malformed`);
+    }
+    throw error;
   }
   if (profile.policyRevision === "pending-review") {
     throw new ProfileStaleError("profile must be reviewed before activation");
@@ -256,14 +267,7 @@ export class PolicyRepository {
 
   async loadProfile(profileId: string): Promise<Profile> {
     profileIdSchema.parse(profileId);
-    const file = join(this.root, "profiles", `${profileId}.json`);
-    const candidate: unknown = JSON.parse(await readFile(file, "utf8"));
-    const profile = parseProfile(candidate, file);
-    if (profile.id !== profileId) {
-      throw new Error(`${file} does not match its requested profile ID`);
-    }
-
-    return profileFromDisk(this.root, profile);
+    return profileFromDisk(this.root, await loadDiskProfile(this.root, profileId));
   }
 
   async loadVerifiedProfile(profileId: string): Promise<Profile> {

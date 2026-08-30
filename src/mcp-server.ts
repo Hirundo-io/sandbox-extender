@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
 import { PolicyRepository } from "./policy-repository.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
 import { approveProfileMutation } from "./profile-mutation-approval.js";
@@ -8,7 +9,6 @@ import {
   activatePreparedProfile,
   disableProfile,
   evaluateForThread,
-  getActiveProfileStatus,
   prepareProfileActivation,
 } from "./policy-service.js";
 import { proposeProfile } from "./profile-authoring.js";
@@ -64,7 +64,7 @@ server.registerTool(
     description: "List reviewed profiles whose stored contents still match their reviewed revision.",
     inputSchema: {},
   },
-  async () => text(JSON.stringify(await repository.listVerifiedProfiles())),
+  async () => listProfilesHandler(repository),
 );
 
 server.registerTool(
@@ -73,7 +73,7 @@ server.registerTool(
     description: "Report whether one agent thread has a verified active policy profile, without changing it.",
     inputSchema: { threadId: nonEmptyStringSchema },
   },
-  async ({ threadId }) => text(JSON.stringify(await getActiveProfileStatus(repository, threadId))),
+  async ({ threadId }) => getActiveProfileHandler(repository, threadId),
 );
 
 server.registerTool(
