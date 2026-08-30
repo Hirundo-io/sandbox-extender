@@ -34,6 +34,23 @@ const claudePluginSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
 }).loose();
+const claudeMarketplaceSchema = z.object({
+  name: z.string().min(1),
+  plugins: z.array(z.object({
+    name: z.string().min(1),
+    source: z.string().min(1),
+  }).loose()).length(1),
+}).loose();
+const codexMarketplaceSchema = z.object({
+  name: z.string().min(1),
+  plugins: z.array(z.object({
+    name: z.string().min(1),
+    source: z.object({
+      path: z.string().min(1),
+      source: z.literal("local"),
+    }).strict(),
+  }).loose()).length(1),
+}).loose();
 const profileTemplateSchema = z.object({
   activationMaterializer: activationMaterializerSchema.optional(),
   requestMaterializer: requestMaterializerSchema.optional(),
@@ -56,6 +73,21 @@ async function readJson(file: string): Promise<unknown> {
 
 async function validateFile(file: string): Promise<void> {
   await access(file);
+}
+
+function validatePublishedMapping(
+  root: string,
+  marketplaceName: string,
+  mappedPluginName: string,
+  mappedSource: string,
+  pluginName: string,
+): void {
+  if (marketplaceName !== pluginName || mappedPluginName !== pluginName) {
+    throw new Error(`marketplace mapping does not match plugin name: ${pluginName}`);
+  }
+  if (resolveInsideRoot(root, mappedSource) !== resolve(root)) {
+    throw new Error(`marketplace mapping does not publish the plugin root: ${mappedSource}`);
+  }
 }
 
 async function validateMaterializer(
@@ -89,7 +121,33 @@ export async function validatePlugin(root: string): Promise<void> {
   const codexPluginFile = resolveInsideRoot(root, ".codex-plugin/plugin.json");
   const codexPlugin = codexPluginSchema.parse(await readJson(codexPluginFile));
   const claudePluginFile = resolveInsideRoot(root, ".claude-plugin/plugin.json");
-  claudePluginSchema.parse(await readJson(claudePluginFile));
+  const claudePlugin = claudePluginSchema.parse(await readJson(claudePluginFile));
+  if (claudePlugin.name !== codexPlugin.name) {
+    throw new Error("Codex and Claude plugin names do not match");
+  }
+
+  const codexMarketplace = codexMarketplaceSchema.parse(
+    await readJson(resolveInsideRoot(root, "marketplace.json")),
+  );
+  const codexMapping = codexMarketplace.plugins[0]!;
+  validatePublishedMapping(
+    root,
+    codexMarketplace.name,
+    codexMapping.name,
+    codexMapping.source.path,
+    codexPlugin.name,
+  );
+  const claudeMarketplace = claudeMarketplaceSchema.parse(
+    await readJson(resolveInsideRoot(root, ".claude-plugin/marketplace.json")),
+  );
+  const claudeMapping = claudeMarketplace.plugins[0]!;
+  validatePublishedMapping(
+    root,
+    claudeMarketplace.name,
+    claudeMapping.name,
+    claudeMapping.source,
+    claudePlugin.name,
+  );
 
   const hooksFile = resolveInsideRoot(root, codexPlugin.hooks);
   hooksFileSchema.parse(await readJson(hooksFile));

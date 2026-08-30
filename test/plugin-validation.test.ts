@@ -18,6 +18,18 @@ function requestMaterializerReference(file = "materializers/requests/repository.
   } as const;
 }
 
+async function writeClaudePlugin(root: string, name: string): Promise<void> {
+  await writeFile(join(root, ".claude-plugin", "plugin.json"),
+    JSON.stringify({ name, version: "1" }));
+}
+
+async function writeCodexMarketplace(root: string, name: string, path = "."): Promise<void> {
+  await writeFile(join(root, "marketplace.json"), JSON.stringify({
+    name,
+    plugins: [{ name: "test", source: { path, source: "local" } }],
+  }));
+}
+
 async function writePlugin(root: string): Promise<void> {
   await mkdir(join(root, ".claude-plugin"));
   await mkdir(join(root, ".codex-plugin"));
@@ -27,8 +39,12 @@ async function writePlugin(root: string): Promise<void> {
   await mkdir(join(root, "shared", "profile-templates"), { recursive: true });
   await mkdir(join(root, "shared", "materializers", "requests"), { recursive: true });
   await writeFile(join(root, "src", "mcp-server.ts"), "");
-  await writeFile(join(root, ".claude-plugin", "plugin.json"),
-    JSON.stringify({ name: "test", version: "1" }));
+  await writeCodexMarketplace(root, "test");
+  await writeFile(join(root, ".claude-plugin", "marketplace.json"), JSON.stringify({
+    name: "test",
+    plugins: [{ name: "test", source: "." }],
+  }));
+  await writeClaudePlugin(root, "test");
   await writeFile(join(root, ".codex-plugin", "plugin.json"), JSON.stringify({
     hooks: "./hooks/hooks.codex.json",
     mcpServers: { test: { args: ["./src/mcp-server.ts"], command: "bun", cwd: "." } },
@@ -60,8 +76,14 @@ describe("plugin validation", () => {
       await writeFile(join(root, "src", "mcp-server.ts"), "");
       await writeFile(join(root, ".claude-plugin", "plugin.json"), "{}");
       await expect(validatePlugin(root)).rejects.toThrow();
-      await writeFile(join(root, ".claude-plugin", "plugin.json"),
-        JSON.stringify({ name: "test", version: "1" }));
+      await writeClaudePlugin(root, "other");
+      await expect(validatePlugin(root)).rejects.toThrow("plugin names do not match");
+      await writeClaudePlugin(root, "test");
+      await writeCodexMarketplace(root, "other");
+      await expect(validatePlugin(root)).rejects.toThrow("does not match plugin name");
+      await writeCodexMarketplace(root, "test", "nested");
+      await expect(validatePlugin(root)).rejects.toThrow("does not publish the plugin root");
+      await writeCodexMarketplace(root, "test");
       await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
         requestMaterializer: requestMaterializerReference("../../arbitrary-code.ts"),
       }));
