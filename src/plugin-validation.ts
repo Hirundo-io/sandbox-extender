@@ -34,22 +34,74 @@ const claudePluginSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
 }).loose();
+const marketplaceGitSelectorShape = {
+  ref: z.string().min(1).optional(),
+  sha: z.string().min(1).optional(),
+};
+const marketplaceUrlSourceSchema = z.object({
+  source: z.literal("url"),
+  url: z.string().min(1),
+  ...marketplaceGitSelectorShape,
+}).loose();
+const marketplaceGitSubdirectorySourceSchema = z.object({
+  path: z.string().min(1),
+  source: z.literal("git-subdir"),
+  url: z.string().min(1),
+  ...marketplaceGitSelectorShape,
+}).loose();
+const marketplaceNpmSourceSchema = z.object({
+  package: z.string().min(1),
+  registry: z.string().min(1).optional(),
+  source: z.literal("npm"),
+  version: z.string().min(1).optional(),
+}).loose();
+const claudeMarketplaceSourceSchema = z.union([
+  z.string().min(1),
+  z.discriminatedUnion("source", [
+    z.object({
+      repo: z.string().min(1),
+      source: z.literal("github"),
+      ...marketplaceGitSelectorShape,
+    }).loose(),
+    marketplaceUrlSourceSchema,
+    marketplaceGitSubdirectorySourceSchema,
+    marketplaceNpmSourceSchema,
+    z.object({
+      sha256: z.string().min(1).optional(),
+      source: z.literal("archive"),
+      url: z.string().min(1),
+    }).loose(),
+    z.object({
+      command: z.string().min(1),
+      source: z.literal("command"),
+    }).loose(),
+  ]),
+]);
+const codexMarketplaceSourceSchema = z.union([
+  z.string().min(1),
+  z.discriminatedUnion("source", [
+    z.object({
+      path: z.string().min(1),
+      source: z.literal("local"),
+    }).loose(),
+    marketplaceUrlSourceSchema,
+    marketplaceGitSubdirectorySourceSchema,
+    marketplaceNpmSourceSchema,
+  ]),
+]);
 const claudeMarketplaceSchema = z.object({
   name: z.string().min(1),
   plugins: z.array(z.object({
     name: z.string().min(1),
-    source: z.string().min(1),
-  }).loose()).length(1),
+    source: claudeMarketplaceSourceSchema,
+  }).loose()).min(1),
 }).loose();
 const codexMarketplaceSchema = z.object({
   name: z.string().min(1),
   plugins: z.array(z.object({
     name: z.string().min(1),
-    source: z.object({
-      path: z.string().min(1),
-      source: z.literal("local"),
-    }).strict(),
-  }).loose()).length(1),
+    source: codexMarketplaceSourceSchema,
+  }).loose()).min(1),
 }).loose();
 const profileTemplateSchema = z.object({
   activationMaterializer: activationMaterializerSchema.optional(),
@@ -75,18 +127,32 @@ async function validateFile(file: string): Promise<void> {
   await access(file);
 }
 
-function validatePublishedMapping(
-  root: string,
-  marketplaceName: string,
-  mappedPluginName: string,
-  mappedSource: string,
+type MarketplaceSource = z.infer<typeof claudeMarketplaceSourceSchema> |
+  z.infer<typeof codexMarketplaceSourceSchema>;
+type MarketplacePlugin = { readonly name: string; readonly source: MarketplaceSource };
+
+function findPublishedMapping<T extends MarketplacePlugin>(
+  plugins: readonly T[],
   pluginName: string,
-): void {
-  if (marketplaceName !== pluginName || mappedPluginName !== pluginName) {
+): T {
+  const mappings = plugins.filter((plugin) => plugin.name === pluginName);
+  if (mappings.length !== 1) {
     throw new Error(`marketplace mapping does not match plugin name: ${pluginName}`);
   }
-  if (resolveInsideRoot(root, mappedSource) !== resolve(root)) {
-    throw new Error(`marketplace mapping does not publish the plugin root: ${mappedSource}`);
+  return mappings[0]!;
+}
+
+function localMarketplacePath(source: MarketplaceSource): string | undefined {
+  if (typeof source === "string") return source;
+  return source.source === "local" ? source.path : undefined;
+}
+
+function validatePublishedMapping(root: string, mapping: MarketplacePlugin): void {
+  const mappedSource = localMarketplacePath(mapping.source);
+  if (!mappedSource || resolveInsideRoot(root, mappedSource) !== resolve(root)) {
+    throw new Error(
+      `marketplace mapping does not publish the plugin root: ${mappedSource ?? "remote source"}`,
+    );
   }
 }
 
@@ -129,25 +195,13 @@ export async function validatePlugin(root: string): Promise<void> {
   const codexMarketplace = codexMarketplaceSchema.parse(
     await readJson(resolveInsideRoot(root, "marketplace.json")),
   );
-  const codexMapping = codexMarketplace.plugins[0]!;
-  validatePublishedMapping(
-    root,
-    codexMarketplace.name,
-    codexMapping.name,
-    codexMapping.source.path,
-    codexPlugin.name,
-  );
+  const codexMapping = findPublishedMapping(codexMarketplace.plugins, codexPlugin.name);
+  validatePublishedMapping(root, codexMapping);
   const claudeMarketplace = claudeMarketplaceSchema.parse(
     await readJson(resolveInsideRoot(root, ".claude-plugin/marketplace.json")),
   );
-  const claudeMapping = claudeMarketplace.plugins[0]!;
-  validatePublishedMapping(
-    root,
-    claudeMarketplace.name,
-    claudeMapping.name,
-    claudeMapping.source,
-    claudePlugin.name,
-  );
+  const claudeMapping = findPublishedMapping(claudeMarketplace.plugins, claudePlugin.name);
+  validatePublishedMapping(root, claudeMapping);
 
   const hooksFile = resolveInsideRoot(root, codexPlugin.hooks);
   hooksFileSchema.parse(await readJson(hooksFile));

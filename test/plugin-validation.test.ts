@@ -23,10 +23,27 @@ async function writeClaudePlugin(root: string, name: string): Promise<void> {
     JSON.stringify({ name, version: "1" }));
 }
 
-async function writeCodexMarketplace(root: string, name: string, path = "."): Promise<void> {
+async function writeCodexMarketplace(
+  root: string,
+  marketplaceName: string,
+  source: unknown = { path: ".", source: "local" },
+  additionalPlugins: readonly unknown[] = [],
+): Promise<void> {
   await writeFile(join(root, "marketplace.json"), JSON.stringify({
-    name,
-    plugins: [{ name: "test", source: { path, source: "local" } }],
+    name: marketplaceName,
+    plugins: [...additionalPlugins, { name: "test", source }],
+  }));
+}
+
+async function writeClaudeMarketplace(
+  root: string,
+  marketplaceName: string,
+  source: unknown = ".",
+  additionalPlugins: readonly unknown[] = [],
+): Promise<void> {
+  await writeFile(join(root, ".claude-plugin", "marketplace.json"), JSON.stringify({
+    name: marketplaceName,
+    plugins: [...additionalPlugins, { name: "test", source }],
   }));
 }
 
@@ -40,10 +57,7 @@ async function writePlugin(root: string): Promise<void> {
   await mkdir(join(root, "shared", "materializers", "requests"), { recursive: true });
   await writeFile(join(root, "src", "mcp-server.ts"), "");
   await writeCodexMarketplace(root, "test");
-  await writeFile(join(root, ".claude-plugin", "marketplace.json"), JSON.stringify({
-    name: "test",
-    plugins: [{ name: "test", source: "." }],
-  }));
+  await writeClaudeMarketplace(root, "test");
   await writeClaudePlugin(root, "test");
   await writeFile(join(root, ".codex-plugin", "plugin.json"), JSON.stringify({
     hooks: "./hooks/hooks.codex.json",
@@ -66,6 +80,37 @@ describe("plugin validation", () => {
     await expect(validatePlugin(process.cwd())).resolves.toBeUndefined();
   });
 
+  test("accepts documented remote sources for other marketplace plugins", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sandbox-extender-plugin-"));
+    try {
+      await writePlugin(root);
+      const codexSources = [
+        { ref: "main", source: "url", url: "https://example.test/plugin.git" },
+        { path: "plugins/remote", sha: "commit", source: "git-subdir", url: "owner/repository" },
+        { package: "@example/plugin", source: "npm", version: "1.0.0" },
+      ];
+      for (const source of codexSources) {
+        await writeCodexMarketplace(root, "codex-catalog", ".", [{ name: "remote", source }]);
+        await expect(validatePlugin(root)).resolves.toBeUndefined();
+      }
+
+      const claudeSources = [
+        { ref: "main", repo: "example/plugin", source: "github" },
+        { sha: "commit", source: "url", url: "https://example.test/plugin.git" },
+        { path: "plugins/remote", source: "git-subdir", url: "owner/repository" },
+        { package: "@example/plugin", registry: "https://registry.example.test", source: "npm" },
+        { sha256: "digest", source: "archive", url: "https://example.test/plugin.zip" },
+        { command: "find-plugin", source: "command" },
+      ];
+      for (const source of claudeSources) {
+        await writeClaudeMarketplace(root, "claude-catalog", ".", [{ name: "remote", source }]);
+        await expect(validatePlugin(root)).resolves.toBeUndefined();
+      }
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   test("rejects invalid plugin files and missing entrypoints", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-plugin-"));
     try {
@@ -79,11 +124,23 @@ describe("plugin validation", () => {
       await writeClaudePlugin(root, "other");
       await expect(validatePlugin(root)).rejects.toThrow("plugin names do not match");
       await writeClaudePlugin(root, "test");
-      await writeCodexMarketplace(root, "other");
+      await writeCodexMarketplace(root, "catalog", ".", [
+        { name: "remote", source: { source: "url", url: "https://example.test/plugin.git" } },
+      ]);
+      await writeClaudeMarketplace(root, "claude-catalog", ".", [
+        { name: "remote", source: { repo: "example/remote", source: "github" } },
+      ]);
+      await expect(validatePlugin(root)).resolves.toBeUndefined();
+      await writeCodexMarketplace(root, "catalog", { source: "url", url: "https://example.test/plugin.git" });
+      await expect(validatePlugin(root)).rejects.toThrow("does not publish the plugin root");
+      await writeCodexMarketplace(root, "catalog", ".", [
+        { name: "test", source: { path: ".", source: "local" } },
+      ]);
       await expect(validatePlugin(root)).rejects.toThrow("does not match plugin name");
-      await writeCodexMarketplace(root, "test", "nested");
+      await writeCodexMarketplace(root, "catalog", "nested");
       await expect(validatePlugin(root)).rejects.toThrow("does not publish the plugin root");
       await writeCodexMarketplace(root, "test");
+      await writeClaudeMarketplace(root, "test");
       await writeFile(join(root, "shared", "profile-templates", "scout.json"), JSON.stringify({
         requestMaterializer: requestMaterializerReference("../../arbitrary-code.ts"),
       }));
