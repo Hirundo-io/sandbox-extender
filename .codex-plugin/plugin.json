@@ -1,0 +1,38 @@
+{
+  "name": "sandbox-extender",
+  "version": "0.1.2+codex.20260824133755",
+  "description": "Reusable, Cedar-backed approval extensions for coding agents.",
+  "author": {
+    "name": "Ben Lewis"
+  },
+  "license": "MIT",
+  "keywords": [
+    "authorization",
+    "cedar",
+    "permissions",
+    "sandbox"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.codex.json",
+  "mcpServers": {
+    "sandbox-extender": {
+      "command": "bun",
+      "args": [
+        "./src/mcp-server.ts"
+      ],
+      "cwd": "."
+    }
+  },
+  "interface": {
+    "displayName": "Sandbox Extender",
+    "shortDescription": "Cedar-backed approval extensions",
+    "longDescription": "Applies user-reviewed, target-bounded Cedar policy to supported approval requests.",
+    "developerName": "Ben Lewis",
+    "category": "Productivity",
+    "capabilities": [
+      "Skills",
+      "Hooks",
+      "MCP server"
+    ]
+  }
+}

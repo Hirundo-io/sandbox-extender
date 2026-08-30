@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "target": "ESNext",
+    "types": ["bun", "node", "deno"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src", "shared/materializers/**/*.ts", "test/**/*.test.ts"]
+}

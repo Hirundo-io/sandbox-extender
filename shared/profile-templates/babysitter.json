@@ -1,0 +1,50 @@
+{
+  "id": "babysitter",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "activationMaterializer": {
+    "file": "materializers/activation/github-pull-request.ts",
+    "integrity": "9e52dbaa28d1da1c13b7a5d36df73253bd44050cee34634660d4244b0c79bc3f",
+    "language": "typescript",
+    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": ["gh"], "ffi": [] },
+    "runtimeVersion": "2.8.1"
+  },
+  "targetScope": "single",
+  "requestMaterializer": {
+    "file": "materializers/requests/github-pull-request.ts",
+    "integrity": "6bfc1149692826d6ff4f97742114736d3dc6b23ab3b16d457bcaa1977413f867",
+    "language": "typescript",
+    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "runtimeVersion": "2.8.1"
+  },
+  "sessionContext": [
+    "Use only for the repository and pull request frozen when this profile was activated.",
+    "Read pull-request status before changing code or responding to review.",
+    "Write only user-requested inline-body comments to that pull request.",
+    "Reply to review threads only through the pull request's explicit REST reply endpoint."
+  ],
+  "groupings": [
+    {
+      "id": "pull-request-and-ci",
+      "policies": {
+        "allowBabysitting": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  (context.materialized.trailingArgumentCount == 0 &&",
+          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\"].contains(context.materialized.operation)) ||",
+          "  (context.materialized.operation == \"github.pull-request.checks\" &&",
+          "    context.materialized.trailingArgumentCount == 1 && context.materialized.trailingArguments.contains(\"--watch\")) ||",
+          "  (context.materialized.operation == \"github.pull-request.comment\" &&",
+          "    context.materialized.trailingArgumentCount == 2 && context.materialized.bodyPresent)",
+          "};"
+        ],
+        "allowReviewThreadReplies": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.materialized.operation == \"github.review-comment.reply\" && context.materialized.bodyPresent",
+          "};"
+        ]
+      }
+    }
+  ]
+}

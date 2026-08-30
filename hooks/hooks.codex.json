@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"${PLUGIN_ROOT}/src/hook-cli.ts\" codex"
+          }
+        ]
+      }
+    ]
+  }
+}
