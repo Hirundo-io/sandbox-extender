@@ -4,7 +4,14 @@ const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 
 async function installRuntimeDependencies(): Promise<void> {
   const installation = Bun.spawn({
-    cmd: [process.execPath, "install", "--frozen-lockfile", "--production", "--silent"],
+    cmd: [
+      process.execPath,
+      "install",
+      "--frozen-lockfile",
+      "--ignore-scripts",
+      "--production",
+      "--silent",
+    ],
     cwd: pluginRoot,
     stderr: "pipe",
     stdout: "ignore",
