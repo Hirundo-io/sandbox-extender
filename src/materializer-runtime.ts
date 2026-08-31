@@ -11,7 +11,7 @@ import type {
   ShellCommandContext,
 } from "./types.js";
 
-function denoPackageName(platform: NodeJS.Platform, architecture: string): string {
+export function denoPackageName(platform: NodeJS.Platform, architecture: string): string {
   const platformName = platform === "linux" ? "linux" : platform;
   const architectureName =
     architecture === "x64" || architecture === "arm64" ? architecture : undefined;
