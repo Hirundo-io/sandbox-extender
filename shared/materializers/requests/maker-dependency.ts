@@ -242,11 +242,17 @@ export function materializeMakerDependency(candidate: unknown): DependencyOperat
     !words.every((word) => typeof word === "string")
   )
     return undefined;
-  const manager = words[0] as DependencyManager;
-  const settings = dependencyManagerSettings[manager];
-  return settings
-    ? materializeDependency(manager, settings, value.resource, value.workingDirectory, words)
-    : undefined;
+  const manager = words[0];
+  if (!Object.hasOwn(dependencyManagerSettings, manager)) return undefined;
+  const dependencyManager = manager as DependencyManager;
+  const settings = dependencyManagerSettings[dependencyManager];
+  return materializeDependency(
+    dependencyManager,
+    settings,
+    value.resource,
+    value.workingDirectory,
+    words,
+  );
 }
 
 export async function runMakerDependencyMaterializer(
