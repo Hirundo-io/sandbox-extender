@@ -4,21 +4,35 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/target-set.ts",
-    "integrity": "1affaae1da3cbf355a5429cd7959cb7ad5e8b4d89633d49faf69a74b14488a74",
+    "integrity": "5efe81e659f4ddf62fcd0c6b8712806fff6eac4dabe6ae67dcb0bb305359e389",
     "language": "typescript",
-    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "permissions": {
+      "read": [],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": [],
+      "ffi": []
+    },
     "runtimeVersion": "2.8.1"
   },
   "requestMaterializer": {
     "file": "materializers/requests/repository.ts",
-    "integrity": "a897ab7396e0506b9134181c362067866182c7664a6f409fb43966408c712fd1",
+    "integrity": "ddc6da5f9d82469b567aa7d0976ef1a4b189e629b512087fe93d7930a5f67c59",
     "language": "typescript",
-    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": ["git"], "ffi": [] },
+    "permissions": {
+      "read": [],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": ["git"],
+      "ffi": []
+    },
     "runtimeVersion": "2.8.1"
   },
-  "sessionContext": [
-    "Use this profile only for inspection. Do not alter files or remote state."
-  ],
+  "sessionContext": ["Use this profile only for inspection. Do not alter files or remote state."],
   "groupings": [
     {
       "id": "read-only-inspection",

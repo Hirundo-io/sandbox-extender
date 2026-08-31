@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PolicyRepository, proposeProfile } from "../src/index.js";
+import { runFixtureGit } from "./git-fixture.js";
 
 const request = {
   action: "codex.unified_exec",
@@ -14,26 +15,30 @@ const request = {
 
 function commitPolicyRevision(root: string): string {
   for (const command of [
-    ["git", "init", "--quiet"],
-    ["git", "config", "user.email", "sandbox-extender@example.test"],
-    ["git", "config", "user.name", "Sandbox Extender"],
-    ["git", "add", "proposals", "tests"],
-    ["git", "commit", "--quiet", "-m", "Review policy proposal"],
+    ["init", "--quiet"],
+    ["config", "user.email", "sandbox-extender@example.test"],
+    ["config", "user.name", "Sandbox Extender"],
+    ["add", "proposals", "tests"],
+    ["commit", "--quiet", "-m", "Review policy proposal"],
   ]) {
-    if (Bun.spawnSync({ cmd: command, cwd: root }).exitCode !== 0) {
+    if (runFixtureGit(root, command).exitCode !== 0) {
       throw new Error(`could not run ${command.join(" ")}`);
     }
   }
-  const result = Bun.spawnSync({ cmd: ["git", "rev-parse", "HEAD"], cwd: root, stdout: "pipe" });
+  const result = runFixtureGit(root, ["rev-parse", "HEAD"]);
   return new TextDecoder().decode(result.stdout).trim();
 }
 
 describe("profile authoring", () => {
   test("rejects compound observed shell commands", async () => {
-    await expect(proposeProfile("review-profile", {
-      action: "codex.unified_exec", arguments: { command: "git status && git diff" },
-      resource: "/workspace", threadId: "thread-1",
-    })).rejects.toThrow("one authorization case");
+    await expect(
+      proposeProfile("review-profile", {
+        action: "codex.unified_exec",
+        arguments: { command: "git status && git diff" },
+        resource: "/workspace",
+        threadId: "thread-1",
+      }),
+    ).rejects.toThrow("one authorization case");
   });
   test("writes a narrow proposal and promotes it only with a review revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-authoring-"));
@@ -43,8 +48,12 @@ describe("profile authoring", () => {
       await repository.writeProposal(proposal);
 
       expect(await repository.listProfiles()).toEqual([]);
-      expect(await readFile(join(root, "proposals", "inspect-repository.json"), "utf8")).toContain('"pending-review"');
-      await expect(repository.promoteProposal("inspect-repository", "pending-review")).rejects.toThrow("policyRevision");
+      expect(await readFile(join(root, "proposals", "inspect-repository.json"), "utf8")).toContain(
+        '"pending-review"',
+      );
+      await expect(
+        repository.promoteProposal("inspect-repository", "pending-review"),
+      ).rejects.toThrow("policyRevision");
 
       const revision = commitPolicyRevision(root);
       await repository.promoteProposal("inspect-repository", revision);
@@ -58,24 +67,30 @@ describe("profile authoring", () => {
   test("does not widen the proposal beyond the observed action and target", async () => {
     const proposal = await proposeProfile("inspect-repository", request);
     expect(proposal.profile.allowedTargets).toEqual([request.resource]);
-    expect(proposal.profile.groupings[0]?.policies.allowObservedRequest).toContain('Action::"codex.unified_exec"');
+    expect(proposal.profile.groupings[0]?.policies.allowObservedRequest).toContain(
+      'Action::"codex.unified_exec"',
+    );
     expect(proposal.tests[1]?.expected).toBe("abstain");
     expect(proposal.tests[2]?.expected).toBe("abstain");
   });
 
   test("rejects observed arguments outside the JSON authorization boundary", async () => {
-    await expect(proposeProfile("inspect-repository", {
-      ...request,
-      arguments: { command: undefined } as unknown as Record<string, unknown>,
-    })).rejects.toThrow("JSON values");
+    await expect(
+      proposeProfile("inspect-repository", {
+        ...request,
+        arguments: { command: undefined } as unknown as Record<string, unknown>,
+      }),
+    ).rejects.toThrow("JSON values");
   });
 
   test("rejects non-finite numbers at every argument depth", async () => {
     for (const argumentsValue of [{ count: NaN }, { nested: [Infinity] }]) {
-      await expect(proposeProfile("inspect-repository", {
-        ...request,
-        arguments: argumentsValue,
-      })).rejects.toThrow("finite JSON numbers");
+      await expect(
+        proposeProfile("inspect-repository", {
+          ...request,
+          arguments: argumentsValue,
+        }),
+      ).rejects.toThrow("finite JSON numbers");
     }
   });
 });

@@ -6,10 +6,19 @@ import { join } from "node:path";
 import { PolicyRepository } from "../src/index.js";
 import { materializerIntegrity } from "../src/materializer-policy.js";
 import type { MaterializerPermissionManifest } from "../src/types.js";
+import { runFixtureGit } from "./git-fixture.js";
 
 const roots: string[] = [];
 const sharedMaterializerDirectory = join(process.cwd(), "shared", "materializers");
-const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
+const emptyPermissions = {
+  env: [],
+  ffi: [],
+  net: [],
+  read: [],
+  run: [],
+  sys: [],
+  write: [],
+} as const;
 
 async function materializerReference(
   kind: "activation" | "requests",
@@ -36,7 +45,11 @@ async function repository(): Promise<PolicyRepository> {
   return new PolicyRepository(root);
 }
 
-async function installMaterializer(root: string, kind: "activation" | "requests", name: string): Promise<void> {
+async function installMaterializer(
+  root: string,
+  kind: "activation" | "requests",
+  name: string,
+): Promise<void> {
   await mkdir(join(root, "materializers", kind), { recursive: true });
   await Bun.write(
     join(root, "materializers", kind, name),
@@ -46,16 +59,16 @@ async function installMaterializer(root: string, kind: "activation" | "requests"
 
 async function commitPolicyRevision(root: string): Promise<string> {
   for (const command of [
-    ["git", "init", "--quiet"],
-    ["git", "config", "user.email", "sandbox-extender@example.test"],
-    ["git", "config", "user.name", "Sandbox Extender"],
-    ["git", "add", "-A"],
-    ["git", "commit", "--quiet", "-m", "Review policy proposal"],
+    ["init", "--quiet"],
+    ["config", "user.email", "sandbox-extender@example.test"],
+    ["config", "user.name", "Sandbox Extender"],
+    ["add", "-A"],
+    ["commit", "--quiet", "-m", "Review policy proposal"],
   ]) {
-    const result = Bun.spawnSync({ cmd: command, cwd: root });
+    const result = runFixtureGit(root, command);
     if (result.exitCode !== 0) throw new Error(`could not run ${command.join(" ")}`);
   }
-  const result = Bun.spawnSync({ cmd: ["git", "rev-parse", "HEAD"], cwd: root, stdout: "pipe" });
+  const result = runFixtureGit(root, ["rev-parse", "HEAD"]);
   return new TextDecoder().decode(result.stdout).trim();
 }
 
@@ -131,12 +144,16 @@ describe("PolicyRepository", () => {
 
   test("refuses to persist an invalid thread binding", async () => {
     const repo = await repository();
-    await expect(repo.writeState({ "thread-1": {
-      allowedTargets: ["github:repository:acme/example"],
-      fingerprint: "short",
-      policyRevision: "revision-1",
-      profileId: "review",
-    } })).rejects.toThrow();
+    await expect(
+      repo.writeState({
+        "thread-1": {
+          allowedTargets: ["github:repository:acme/example"],
+          fingerprint: "short",
+          policyRevision: "revision-1",
+          profileId: "review",
+        },
+      }),
+    ).rejects.toThrow();
   });
 
   test("rejects policy files that do not match the persisted Zod schema", async () => {
@@ -161,39 +178,49 @@ describe("PolicyRepository", () => {
     await repo.writeProposal({
       profile: {
         allowedTargets: ["github:repository:acme/example"],
-        groupings: [{
-          id: "allow-read",
-          policies: { allow: "permit(principal, action, resource);" },
-        }],
+        groupings: [
+          {
+            id: "allow-read",
+            policies: { allow: "permit(principal, action, resource);" },
+          },
+        ],
         id: "reviewed",
         policyRevision: "pending-review",
       },
-      tests: [{
-        expected: "allow",
-        name: "allows the reviewed request",
-        request: {
-          action: "claude.Bash",
-          arguments: { command: "gh pr view --repo acme/example" },
-          resource: "github:repository:acme/example",
-          threadId: "thread-1",
+      tests: [
+        {
+          expected: "allow",
+          name: "allows the reviewed request",
+          request: {
+            action: "claude.Bash",
+            arguments: { command: "gh pr view --repo acme/example" },
+            resource: "github:repository:acme/example",
+            threadId: "thread-1",
+          },
         },
-      }],
+      ],
     });
     const revision = await commitPolicyRevision(repo.root);
     await repo.promoteProposal("reviewed", revision);
     await Bun.write(join(repo.root, "profiles", "malformed.json"), "{");
-    await Bun.write(join(repo.root, "profiles", "pending.json"), JSON.stringify({
-      allowedTargets: ["github:repository:acme/example"],
-      groupings: [],
-      id: "pending",
-      policyRevision: "pending-review",
-    }));
-    await Bun.write(join(repo.root, "profiles", "invalid-revision.json"), JSON.stringify({
-      allowedTargets: ["github:repository:acme/example"],
-      groupings: [],
-      id: "invalid-revision",
-      policyRevision: "not-a-commit",
-    }));
+    await Bun.write(
+      join(repo.root, "profiles", "pending.json"),
+      JSON.stringify({
+        allowedTargets: ["github:repository:acme/example"],
+        groupings: [],
+        id: "pending",
+        policyRevision: "pending-review",
+      }),
+    );
+    await Bun.write(
+      join(repo.root, "profiles", "invalid-revision.json"),
+      JSON.stringify({
+        allowedTargets: ["github:repository:acme/example"],
+        groupings: [],
+        id: "invalid-revision",
+        policyRevision: "not-a-commit",
+      }),
+    );
 
     expect(await repo.listVerifiedProfiles()).toEqual(["reviewed"]);
   });
@@ -201,12 +228,15 @@ describe("PolicyRepository", () => {
   test("reports policy repository failures while listing reviewed Profiles", async () => {
     const repo = await repository();
     await mkdir(join(repo.root, "profiles"));
-    await Bun.write(join(repo.root, "profiles", "reviewed.json"), JSON.stringify({
-      allowedTargets: ["github:repository:acme/example"],
-      groupings: [],
-      id: "reviewed",
-      policyRevision: "a".repeat(40),
-    }));
+    await Bun.write(
+      join(repo.root, "profiles", "reviewed.json"),
+      JSON.stringify({
+        allowedTargets: ["github:repository:acme/example"],
+        groupings: [],
+        id: "reviewed",
+        policyRevision: "a".repeat(40),
+      }),
+    );
 
     await expect(repo.listVerifiedProfiles()).rejects.toThrow(
       "policy revision aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa is not a Git commit",
@@ -218,27 +248,45 @@ describe("PolicyRepository", () => {
     await repo.writeProposal({
       profile: {
         allowedTargets: ["github:repository:acme/example"],
-        groupings: [{
-          id: "allow-read",
-          policies: { allow: "permit(principal, action, resource);" },
-        }],
+        groupings: [
+          {
+            id: "allow-read",
+            policies: { allow: "permit(principal, action, resource);" },
+          },
+        ],
         id: "review",
         policyRevision: "pending-review",
       },
-      tests: [{
-        expected: "allow",
-        name: "allows the reviewed request",
-        request: {
-          action: "claude.Bash",
-          arguments: { command: "gh pr view --repo acme/example" },
-          resource: "github:repository:acme/example",
-          threadId: "thread-1",
+      tests: [
+        {
+          expected: "allow",
+          name: "allows the reviewed request",
+          request: {
+            action: "claude.Bash",
+            arguments: { command: "gh pr view --repo acme/example" },
+            resource: "github:repository:acme/example",
+            threadId: "thread-1",
+          },
         },
-      }],
+      ],
     });
 
     const revision = await commitPolicyRevision(repo.root);
-    await repo.promoteProposal("review", revision);
+    const previousObjectDirectory = process.env.GIT_OBJECT_DIRECTORY;
+    const previousAlternateObjectDirectories = process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+    process.env.GIT_OBJECT_DIRECTORY = join(repo.root, "ambient-object-override");
+    process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = join(repo.root, "ambient-alternate-objects");
+    try {
+      await repo.promoteProposal("review", revision);
+    } finally {
+      if (previousObjectDirectory === undefined) delete process.env.GIT_OBJECT_DIRECTORY;
+      else process.env.GIT_OBJECT_DIRECTORY = previousObjectDirectory;
+      if (previousAlternateObjectDirectories === undefined) {
+        delete process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+      } else {
+        process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES = previousAlternateObjectDirectories;
+      }
+    }
     expect((await repo.loadProfile("review")).policyRevision).toBe(revision);
   });
 
@@ -247,32 +295,41 @@ describe("PolicyRepository", () => {
     await repo.writeProposal({
       profile: {
         allowedTargets: ["github:repository:acme/example"],
-        groupings: [{
-          id: "allow-read",
-          policies: { allow: "permit(principal, action, resource);" },
-        }],
+        groupings: [
+          {
+            id: "allow-read",
+            policies: { allow: "permit(principal, action, resource);" },
+          },
+        ],
         id: "review",
         policyRevision: "pending-review",
       },
-      tests: [{
-        expected: "allow",
-        name: "allows the reviewed request",
-        request: {
-          action: "claude.Bash",
-          arguments: { command: "gh pr view --repo acme/example" },
-          resource: "github:repository:acme/example",
-          threadId: "thread-1",
+      tests: [
+        {
+          expected: "allow",
+          name: "allows the reviewed request",
+          request: {
+            action: "claude.Bash",
+            arguments: { command: "gh pr view --repo acme/example" },
+            resource: "github:repository:acme/example",
+            threadId: "thread-1",
+          },
         },
-      }],
+      ],
     });
     const revision = await commitPolicyRevision(repo.root);
     await repo.promoteProposal("review", revision);
     const profileFile = join(repo.root, "profiles", "review.json");
-    const reviewedProfile = JSON.parse(await readFile(profileFile, "utf8")) as Record<string, unknown>;
+    const reviewedProfile = JSON.parse(await readFile(profileFile, "utf8")) as Record<
+      string,
+      unknown
+    >;
 
-    await expect(repo.loadVerifiedProfile("review")).resolves.toEqual(expect.objectContaining({
-      policyRevision: revision,
-    }));
+    await expect(repo.loadVerifiedProfile("review")).resolves.toEqual(
+      expect.objectContaining({
+        policyRevision: revision,
+      }),
+    );
     const alterations: readonly Record<string, unknown>[] = [
       { ...reviewedProfile, allowedTargets: ["github:repository:evil/example"] },
       { ...reviewedProfile, groupings: [] },
@@ -285,16 +342,22 @@ describe("PolicyRepository", () => {
       await expect(repo.loadVerifiedProfile("review")).rejects.toThrow();
     }
 
-    await Bun.write(join(repo.root, "proposals", "review.json"), JSON.stringify({
-      ...reviewedProfile,
-      allowedTargets: ["github:repository:evil/example"],
-      policyRevision: "pending-review",
-    }));
+    await Bun.write(
+      join(repo.root, "proposals", "review.json"),
+      JSON.stringify({
+        ...reviewedProfile,
+        allowedTargets: ["github:repository:evil/example"],
+        policyRevision: "pending-review",
+      }),
+    );
     const unrelatedRevision = await commitPolicyRevision(repo.root);
-    await Bun.write(profileFile, JSON.stringify({
-      ...reviewedProfile,
-      policyRevision: unrelatedRevision,
-    }));
+    await Bun.write(
+      profileFile,
+      JSON.stringify({
+        ...reviewedProfile,
+        policyRevision: unrelatedRevision,
+      }),
+    );
     await expect(repo.loadVerifiedProfile("review")).rejects.toThrow(
       "does not match policy revision",
     );
@@ -307,26 +370,31 @@ describe("PolicyRepository", () => {
     await repo.writeProposal({
       profile: {
         allowedTargets: ["github:repository:acme/example"],
-        groupings: [{
-          id: "allow-read",
-          policies: { allow: "permit(principal, action, resource);" },
-        }],
+        groupings: [
+          {
+            id: "allow-read",
+            policies: { allow: "permit(principal, action, resource);" },
+          },
+        ],
         id: "review",
         policyRevision: "pending-review",
-        requestMaterializer: await materializerReference(
-          "requests", "repository.ts", { ...emptyPermissions, run: ["git"] },
-        ),
+        requestMaterializer: await materializerReference("requests", "repository.ts", {
+          ...emptyPermissions,
+          run: ["git"],
+        }),
       },
-      tests: [{
-        expected: "allow",
-        name: "allows the reviewed repository command",
-        request: {
-          action: "claude.Bash",
-          arguments: { command: "gh pr view --repo acme/example" },
-          resource: repo.root,
-          threadId: "thread-1",
+      tests: [
+        {
+          expected: "allow",
+          name: "allows the reviewed repository command",
+          request: {
+            action: "claude.Bash",
+            arguments: { command: "gh pr view --repo acme/example" },
+            resource: repo.root,
+            threadId: "thread-1",
+          },
         },
-      }],
+      ],
     });
 
     const revision = await commitPolicyRevision(repo.root);
@@ -352,31 +420,40 @@ describe("PolicyRepository", () => {
         groupings: [{ id: "allow", policies: { allow: "permit(principal, action, resource);" } }],
         id: "review",
         policyRevision: "pending-review",
-        requestMaterializer: await materializerReference(
-          "requests", "repository.ts", { ...emptyPermissions, run: ["git"] },
-        ),
+        requestMaterializer: await materializerReference("requests", "repository.ts", {
+          ...emptyPermissions,
+          run: ["git"],
+        }),
       },
-      tests: [{
-        expected: "allow",
-        name: "allows the reviewed target",
-        request: {
-          action: "claude.Bash",
-          arguments: { command: "gh pr view --repo acme/example" },
-          resource: repo.root,
-          threadId: "thread-1",
+      tests: [
+        {
+          expected: "allow",
+          name: "allows the reviewed target",
+          request: {
+            action: "claude.Bash",
+            arguments: { command: "gh pr view --repo acme/example" },
+            resource: repo.root,
+            threadId: "thread-1",
+          },
         },
-      }],
+      ],
     });
     const revision = await commitPolicyRevision(repo.root);
     await repo.promoteProposal("review", revision);
     const profileFile = join(repo.root, "profiles", "review.json");
-    const reviewedProfile = JSON.parse(await readFile(profileFile, "utf8")) as Record<string, unknown>;
-    await Bun.write(profileFile, JSON.stringify({
-      ...reviewedProfile,
-      requestMaterializer: {
-        ...await materializerReference("requests", "github-pull-request.ts"),
-      },
-    }));
+    const reviewedProfile = JSON.parse(await readFile(profileFile, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    await Bun.write(
+      profileFile,
+      JSON.stringify({
+        ...reviewedProfile,
+        requestMaterializer: {
+          ...(await materializerReference("requests", "github-pull-request.ts")),
+        },
+      }),
+    );
 
     await expect(repo.loadVerifiedProfile("review")).rejects.toThrow(
       "does not match policy revision",
@@ -393,40 +470,51 @@ describe("PolicyRepository", () => {
     await repo.writeProposal({
       profile: {
         allowedTargets: [],
-        groupings: [{
-          id: "pull-request",
-          policies: {
-            allow: 'permit(principal, action, resource) when { context.materialized.operation == "github.pull-request.view" };',
+        groupings: [
+          {
+            id: "pull-request",
+            policies: {
+              allow:
+                'permit(principal, action, resource) when { context.materialized.operation == "github.pull-request.view" };',
+            },
           },
-        }],
+        ],
         id: "babysitter",
         policyRevision: "pending-review",
         activationMaterializer: await materializerReference("activation", "github-pull-request.ts"),
         requestMaterializer: await materializerReference("requests", "github-pull-request.ts"),
         targetScope: "single",
       },
-      tests: [{
-        activationArguments: { pullRequest: 42, repository: "acme/example" },
-        expected: "allow",
-        name: "allows only the frozen pull request",
-        request: {
-          action: "codex.unified_exec",
-          arguments: { command: "gh pr view 42 --repo acme/example" },
-          resource: root,
-          threadId: "thread-1",
+      tests: [
+        {
+          activationArguments: { pullRequest: 42, repository: "acme/example" },
+          expected: "allow",
+          name: "allows only the frozen pull request",
+          request: {
+            action: "codex.unified_exec",
+            arguments: { command: "gh pr view 42 --repo acme/example" },
+            resource: root,
+            threadId: "thread-1",
+          },
         },
-      }],
+      ],
     });
 
     const revision = await commitPolicyRevision(root);
     await repo.promoteProposal("babysitter", revision);
 
-    const persisted: unknown = JSON.parse(await readFile(join(root, "profiles", "babysitter.json"), "utf8"));
-    expect(persisted).toEqual(expect.objectContaining({
-      activationMaterializer: expect.objectContaining({ file: "materializers/activation/github-pull-request.ts" }),
-      allowedTargets: [],
-      policyRevision: revision,
-    }));
+    const persisted: unknown = JSON.parse(
+      await readFile(join(root, "profiles", "babysitter.json"), "utf8"),
+    );
+    expect(persisted).toEqual(
+      expect.objectContaining({
+        activationMaterializer: expect.objectContaining({
+          file: "materializers/activation/github-pull-request.ts",
+        }),
+        allowedTargets: [],
+        policyRevision: revision,
+      }),
+    );
     expect(JSON.stringify(persisted)).not.toContain("acme/example#42");
   });
 
@@ -439,16 +527,18 @@ describe("PolicyRepository", () => {
         id: "review",
         policyRevision: "pending-review",
       },
-      tests: [{
-        expected: "abstain",
-        name: "does not make a decision",
-        request: {
-          action: "claude.Bash",
-          arguments: { command: "git status" },
-          resource: "github:repository:acme/example",
-          threadId: "thread-1",
+      tests: [
+        {
+          expected: "abstain",
+          name: "does not make a decision",
+          request: {
+            action: "claude.Bash",
+            arguments: { command: "git status" },
+            resource: "github:repository:acme/example",
+            threadId: "thread-1",
+          },
         },
-      }],
+      ],
     });
     const revision = await commitPolicyRevision(repo.root);
     await Bun.write(join(repo.root, "proposals", "review.json"), "{}\n");

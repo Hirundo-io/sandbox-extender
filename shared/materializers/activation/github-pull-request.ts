@@ -15,12 +15,21 @@ type RunGh = (workingDirectory: string) => CommandOutput;
 
 type DenoCommand = new (
   command: string,
-  options: { readonly args: string[]; readonly cwd: string; readonly stderr: "null"; readonly stdout: "piped" },
+  options: {
+    readonly args: string[];
+    readonly cwd: string;
+    readonly stderr: "null";
+    readonly stdout: "piped";
+  },
 ) => { outputSync(): CommandOutput };
 
 function canonicalTarget(repository: string, pullRequest: number): string | undefined {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ||
-    !Number.isSafeInteger(pullRequest) || pullRequest <= 0) return undefined;
+  if (
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ||
+    !Number.isSafeInteger(pullRequest) ||
+    pullRequest <= 0
+  )
+    return undefined;
   return `github:pull-request:${repository.toLowerCase()}#${pullRequest}`;
 }
 
@@ -34,7 +43,10 @@ function activationArguments(candidate: unknown): GitHubPullRequestActivationArg
   };
 }
 
-export function runGh(workingDirectory: string, Command: DenoCommand = Deno.Command): CommandOutput {
+export function runGh(
+  workingDirectory: string,
+  Command: DenoCommand = Deno.Command,
+): CommandOutput {
   return new Command("gh", {
     args: ["pr", "view", "--json", "number,url"],
     cwd: workingDirectory,
@@ -67,8 +79,9 @@ export function materializeGitHubPullRequestActivation(
   const input = activationArguments(candidate);
   const hasExplicitTarget = input.repository !== undefined || input.pullRequest !== undefined;
   if (hasExplicitTarget) {
-    return input.workingDirectory === undefined && typeof input.repository === "string" &&
-        typeof input.pullRequest === "number"
+    return input.workingDirectory === undefined &&
+      typeof input.repository === "string" &&
+      typeof input.pullRequest === "number"
       ? canonicalTarget(input.repository, input.pullRequest)
       : undefined;
   }
@@ -87,4 +100,5 @@ export async function runGitHubPullRequestActivationMaterializer(
   return true;
 }
 
-if (import.meta.main) Deno.exit(await runGitHubPullRequestActivationMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);
+// prettier-ignore
+void (import.meta.main && Deno.exit((await runGitHubPullRequestActivationMaterializer(new Response(Deno.stdin.readable).json())) ? 0 : 1));

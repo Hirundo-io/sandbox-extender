@@ -6,20 +6,13 @@
     "name": "Ben Lewis"
   },
   "license": "MIT",
-  "keywords": [
-    "authorization",
-    "cedar",
-    "permissions",
-    "sandbox"
-  ],
+  "keywords": ["authorization", "cedar", "permissions", "sandbox"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.codex.json",
   "mcpServers": {
     "sandbox-extender": {
       "command": "bun",
-      "args": [
-        "./src/mcp-server.ts"
-      ],
+      "args": ["./src/mcp-server.ts"],
       "cwd": "."
     }
   },
@@ -29,10 +22,6 @@
     "longDescription": "Applies user-reviewed, target-bounded Cedar policy to supported approval requests.",
     "developerName": "Ben Lewis",
     "category": "Productivity",
-    "capabilities": [
-      "Skills",
-      "Hooks",
-      "MCP server"
-    ]
+    "capabilities": ["Skills", "Hooks", "MCP server"]
   }
 }

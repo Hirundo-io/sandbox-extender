@@ -81,22 +81,35 @@ For example, this Profile allows only Codex shell requests from one workspace:
 }
 ```
 
-Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists.
+Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists. Audit targets use `resourceDisplay`, `resolvedTargetDisplay`, and `resolvedTargetsDisplay`: these values and credential-bearing arguments are redacted for display and must not be treated as exact profile-authoring inputs. Use the original Agent Host request, or supply the exact value explicitly, when creating a proposal.
 
 ## Profile mutation Approval
 
 Profile mutations use MCP elicitation. Before changing the Policy Repository or
-a Thread Binding, the Agent Host displays the exact operation, Profile, Policy
-Revision, Activation Arguments, and Targets where they apply. The mutation runs
-only after the host returns `accept` with the confirmation field set. `decline`,
-`cancel`, malformed responses, and transport failures do not mutate anything.
-This Approval is authorization for one operation, not identity authentication.
+a Thread Binding, the Agent Host displays the exact operation, target Thread,
+Profile, Policy Revision, Activation Arguments, and Targets where they apply.
+The mutation runs only after the host returns `accept` with the confirmation
+field set. `decline`, `cancel`, malformed responses, and transport failures do
+not mutate anything. This Approval is authorization for one operation, not
+identity authentication. `threadId` is an MCP caller-supplied target: the
+engineer approving a mutation must verify the displayed target Thread before
+accepting it.
 
-Clients without form elicitation use the compatibility CLI. Its authorization
-names the host thread and operation and stores only a SHA-256 digest of the
-canonical arguments. It expires after two minutes and can be claimed once.
-Run it only after an MCP mutation reports that elicitation is unsupported, then
-retry the unchanged MCP call:
+MCP mutations use a continuation flow: the server returns the approval form
+and changes state only when Codex retries the request with an accepted
+response. An approved continuation is single-use and expires after two minutes;
+this avoids a nested host request and prevents a retry from rerunning a mutation.
+It is valid only while the same local MCP server process remains running; after
+a restart, submit the mutation again and approve its new continuation.
+Each process retains at most 128 prepared mutations. If that capacity is
+reached, the MCP tool returns the retryable error code
+`pending_mutation_capacity_exceeded`; retry after a pending approval is consumed
+or its two-minute continuation expires.
+
+For a human-operated, non-agent workflow, the standalone CLI performs the
+mutation directly from its explicit arguments. It does not create an
+authorization ticket and does not require an MCP retry. Agents must use MCP
+and must not invoke this command:
 
 ```sh
 bun run authorize:mutation -- <operation> \
@@ -115,10 +128,8 @@ bun run authorize:mutation -- activate_profile \
 Use `{}` or omit `--arguments-json` for
 `initialize_policy_repository` and `disable_profile`. The other argument
 objects match their MCP inputs with `threadId` removed. Run the command with
-`--help` to see each operation's shape. A mismatched, malformed, or expired
-authorization fails closed and is consumed. Do not use the fallback after a
-decline, cancel, or unrelated elicitation failure. Request evaluation remains
-available without mutation Approval.
+`--help` to see each operation's shape. Request evaluation remains available
+without mutation Approval.
 
 The disabled `shared/profile-templates/scout.json`,
 `shared/profile-templates/maker.json`, and
@@ -211,6 +222,12 @@ The `gh` process retains normal OS authority. Review the command and its output
 validation before accepting that `run` declaration.
 
 ## Development
+
+Husky installs the versioned pre-commit hook when dependencies are installed.
+It first formats and lints staged JSON, Markdown, and TypeScript files with
+lint-staged, then runs the same audit, unused-code, type, plugin-validation,
+and coverage-test gates as CI. Run the complete gate on demand with
+`bun run check:commit`.
 
 ```sh
 bun test

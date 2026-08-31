@@ -1,7 +1,16 @@
-import { ErrorCode, McpError, type ElicitRequestFormParams, type ElicitResult } from "@modelcontextprotocol/sdk/types.js";
+import { createHmac, randomBytes } from "node:crypto";
 
-import { consumeProfileMutationAuthorization } from "./mutation-authorization.js";
+import {
+  acceptedContent,
+  createRequestStateCodec,
+  inputRequired,
+  type InputRequiredResult,
+  type ServerContext,
+} from "@modelcontextprotocol/server";
+import { z } from "zod";
+
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
+import { redactSensitiveValue } from "./policy-service.js";
 
 export type MutationApprovalDetails = {
   readonly activationArguments?: Readonly<Record<string, unknown>>;
@@ -10,20 +19,65 @@ export type MutationApprovalDetails = {
   readonly targets?: readonly string[];
 };
 
-type ElicitApproval = (request: ElicitRequestFormParams) => Promise<ElicitResult>;
-
-type ApprovalDependencies = {
-  readonly consumeFallback?: typeof consumeProfileMutationAuthorization;
-  readonly elicit: ElicitApproval;
+type ApprovalState = {
+  readonly details: MutationApprovalDetails;
+  readonly identity: string;
+  readonly intent: SanitizedProfileMutationIntent;
+  readonly nonce: string;
+  readonly threadId: string;
 };
+
+type SanitizedProfileMutationIntent = {
+  readonly arguments: unknown;
+  readonly operation: ProfileMutationIntent["operation"];
+};
+
+export type ProfileMutationApproval = {
+  readonly approval?: InputRequiredResult;
+  readonly nonce: string;
+};
+
+const approvalResponseSchema = z.object({ approve: z.literal(true) }).strict();
+const approvalIdentityKey = randomBytes(32);
+const requestStateCodec = createRequestStateCodec<ApprovalState>({
+  bind: (ctx) => ctx.mcpReq.method,
+  key: randomBytes(32),
+  ttlSeconds: 120,
+});
+
+export const verifyProfileMutationRequestState = requestStateCodec.verify;
+
+const claimedNonces = new Map<string, number>();
+
+function isPlainRecord(value: object): value is Record<string, unknown> {
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function pruneClaimedNonces(now: number): void {
+  for (const [nonce, expiresAt] of claimedNonces) {
+    if (expiresAt <= now) claimedNonces.delete(nonce);
+  }
+}
+
+function claimNonce(nonce: string): void {
+  const now = Date.now();
+  pruneClaimedNonces(now);
+  if (claimedNonces.has(nonce)) throw new Error("profile mutation approval has already been used");
+  claimedNonces.set(nonce, now + 120_000);
+}
 
 function canonicalJsonValue(value: unknown): unknown {
   if (value === null || typeof value === "boolean" || typeof value === "string") return value;
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (Array.isArray(value)) return value.map(canonicalJsonValue);
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return Object.fromEntries(Object.keys(record).sort().map((key) => [key, canonicalJsonValue(record[key])]));
+  if (typeof value === "object" && isPlainRecord(value)) {
+    const record = value;
+    return Object.fromEntries(
+      Object.keys(record)
+        .sort()
+        .map((key) => [key, canonicalJsonValue(record[key])]),
+    );
   }
   throw new Error("mutation arguments must contain only JSON values");
 }
@@ -32,65 +86,109 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalJsonValue(value));
 }
 
+export function profileMutationApprovalIdentity(
+  intent: ProfileMutationIntent,
+  details: MutationApprovalDetails,
+): string {
+  return createHmac("sha256", approvalIdentityKey)
+    .update(canonicalJson({ details, intent }))
+    .digest("hex");
+}
+
 function line(label: string, value: string | undefined): string {
   return `${label}: ${value ?? "(not applicable)"}`;
 }
 
-function approvalMessage(intent: ProfileMutationIntent, details: MutationApprovalDetails): string {
-  const targets = details.targets?.length ? details.targets.map((target) => JSON.stringify(target)).join(", ") : undefined;
+function approvalMessage(
+  threadId: string,
+  intent: SanitizedProfileMutationIntent,
+  details: MutationApprovalDetails,
+): string {
+  const targets = details.targets?.length
+    ? details.targets.map((target) => JSON.stringify(target)).join(", ")
+    : undefined;
   return [
     "Approve this Sandbox Extender Profile mutation?",
+    line("Target Thread", threadId),
     line("Operation", intent.operation),
     line("Operation Arguments", canonicalJson(intent.arguments)),
     line("Profile", details.profileId),
     line("Policy Revision", details.policyRevision),
-    line("Activation Arguments", details.activationArguments && canonicalJson(details.activationArguments)),
+    line(
+      "Activation Arguments",
+      details.activationArguments && canonicalJson(details.activationArguments),
+    ),
     line("Targets", targets),
   ].join("\n");
 }
 
-function isUnsupportedElicitation(error: unknown): boolean {
-  return (error instanceof Error && error.message === "Client does not support form elicitation.") ||
-    (error instanceof McpError && (error.code === ErrorCode.MethodNotFound ||
-      error.code === ErrorCode.InvalidParams && /(?:form.*(?:not supported|unsupported)|(?:not supported|unsupported).*form)/i.test(error.message)));
+function sanitizedApprovalValues(
+  intent: ProfileMutationIntent,
+  details: MutationApprovalDetails,
+): { readonly details: MutationApprovalDetails; readonly intent: SanitizedProfileMutationIntent } {
+  return {
+    details: redactSensitiveValue(details) as MutationApprovalDetails,
+    intent: { arguments: redactSensitiveValue(intent.arguments), operation: intent.operation },
+  };
 }
 
-/** Requests host-mediated user approval, with the legacy CLI artifact as a compatibility fallback. */
-export async function approveProfileMutation(
-  root: string,
+export function approvalNonceFor(serverContext: ServerContext): string | undefined {
+  const state = serverContext.mcpReq.requestState<ApprovalState>();
+  return state?.nonce;
+}
+
+function matchesApprovalState(state: ApprovalState, threadId: string, identity: string): boolean {
+  return state.threadId === threadId && state.identity === identity;
+}
+
+/** Returns an MCP continuation request; only its matching approved retry can mutate. */
+export async function requestProfileMutationApproval(
   threadId: string,
   intent: ProfileMutationIntent,
   details: MutationApprovalDetails,
-  dependencies: ApprovalDependencies,
-): Promise<void> {
-  let result: ElicitResult;
-  try {
-    result = await dependencies.elicit({
-      mode: "form",
-      message: approvalMessage(intent, details),
-      requestedSchema: {
-        type: "object",
-        properties: {
-          approve: {
-            type: "boolean",
-            title: "Approve Profile mutation",
-            description: "Allow only the operation and values shown above.",
-            default: false,
+  serverContext: ServerContext,
+): Promise<ProfileMutationApproval> {
+  canonicalJson(intent);
+  canonicalJson(details);
+  const identity = profileMutationApprovalIdentity(intent, details);
+  const sanitized = sanitizedApprovalValues(intent, details);
+  const state = serverContext.mcpReq.requestState<ApprovalState>();
+  if (state !== undefined) {
+    if (!matchesApprovalState(state, threadId, identity)) {
+      throw new Error("profile mutation approval retry does not match the original request");
+    }
+    if (
+      acceptedContent(serverContext.mcpReq.inputResponses, "approval", approvalResponseSchema) ===
+      undefined
+    ) {
+      throw new Error("profile mutation approval was not confirmed");
+    }
+    claimNonce(state.nonce);
+    return { nonce: state.nonce };
+  }
+  const nonce = randomBytes(16).toString("hex");
+  const approval = await inputRequired({
+    inputRequests: {
+      approval: inputRequired.elicit({
+        message: approvalMessage(threadId, sanitized.intent, sanitized.details),
+        requestedSchema: {
+          type: "object",
+          properties: {
+            approve: {
+              type: "boolean",
+              title: "Approve Profile mutation",
+              description: "Allow only the operation and values shown above.",
+              default: false,
+            },
           },
+          required: ["approve"],
         },
-        required: ["approve"],
-      },
-    });
-  } catch (error) {
-    if (!isUnsupportedElicitation(error)) throw error;
-    await (dependencies.consumeFallback ?? consumeProfileMutationAuthorization)(root, threadId, intent);
-    return;
-  }
-
-  if (result.action !== "accept") {
-    throw new Error(`profile mutation approval ${result.action}`);
-  }
-  if (result.content?.approve !== true) {
-    throw new Error("profile mutation approval was not confirmed");
-  }
+      }),
+    },
+    requestState: await requestStateCodec.mint(
+      { details: sanitized.details, identity, intent: sanitized.intent, nonce, threadId },
+      serverContext,
+    ),
+  });
+  return { approval, nonce };
 }

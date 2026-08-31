@@ -1,17 +1,18 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer, type ServerContext } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+
 import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
-import { PolicyRepository } from "./policy-repository.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
-import { approveProfileMutation } from "./profile-mutation-approval.js";
-import type { MutationApprovalDetails } from "./profile-mutation-approval.js";
+import { PendingMutationCapacityError, PendingMutations } from "./pending-mutations.js";
+import { PolicyRepository } from "./policy-repository.js";
 import {
-  activatePreparedProfile,
-  disableProfile,
-  evaluateForThread,
-  prepareProfileActivation,
-} from "./policy-service.js";
-import { proposeProfile } from "./profile-authoring.js";
+  approvalNonceFor,
+  requestProfileMutationApproval,
+  verifyProfileMutationRequestState,
+} from "./profile-mutation-approval.js";
+import { prepareProfileMutation } from "./profile-mutations.js";
+import type { PreparedProfileMutation } from "./profile-mutations.js";
+import { evaluateForThread } from "./policy-service.js";
 import { getPolicyRoot } from "./policy-root.js";
 import {
   nonEmptyStringSchema,
@@ -22,179 +23,211 @@ import {
 
 const policyRoot = getPolicyRoot();
 const repository = new PolicyRepository(policyRoot);
+const pendingMutations = new PendingMutations();
 
 function text(value: string) {
   return { content: [{ type: "text" as const, text: value }] };
 }
 
-const server = new McpServer({
-  name: "sandbox-extender",
-  version: "0.1.2",
-});
-
-async function authorizeMutation(
-  threadId: string,
-  intent: ProfileMutationIntent,
-  details: MutationApprovalDetails = {},
-): Promise<void> {
-  await approveProfileMutation(policyRoot, threadId, intent, details, {
-    elicit: server.server.elicitInput.bind(server.server),
-  });
+function pendingMutationCapacityError(error: PendingMutationCapacityError) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        }),
+      },
+    ],
+    isError: true,
+  };
 }
 
-server.registerTool(
-  "initialize_policy_repository",
-  {
-    description: "Create the local directories used for profiles, proposals, tests, and thread state.",
-    inputSchema: { threadId: nonEmptyStringSchema },
-  },
-  async ({ threadId }) => {
-    await authorizeMutation(threadId, {
-      arguments: {},
-      operation: "initialize_policy_repository",
-    }, {});
-    await repository.initialize();
-    return text(`Initialized policy repository at ${policyRoot}.`);
-  },
-);
+function pendingMutationFor(nonce: string): PreparedProfileMutation | undefined {
+  return pendingMutations.get(nonce);
+}
 
-server.registerTool(
-  "list_profiles",
-  {
-    description: "List reviewed profiles whose stored contents still match their reviewed revision.",
-    inputSchema: {},
-  },
-  async () => listProfilesHandler(repository),
-);
+function rememberPendingMutation(nonce: string, mutation: PreparedProfileMutation): void {
+  pendingMutations.remember(nonce, mutation);
+}
 
-server.registerTool(
-  "get_active_profile",
-  {
-    description: "Report whether one agent thread has a verified active policy profile, without changing it.",
-    inputSchema: { threadId: nonEmptyStringSchema },
-  },
-  async ({ threadId }) => getActiveProfileHandler(repository, threadId),
-);
+async function runMutation(
+  threadId: string,
+  intent: ProfileMutationIntent,
+  serverContext: ServerContext,
+) {
+  const retryNonce = approvalNonceFor(serverContext);
+  const mutation =
+    retryNonce !== undefined
+      ? pendingMutationFor(retryNonce)
+      : await prepareProfileMutation(repository, threadId, intent);
+  if (mutation === undefined)
+    throw new Error("profile mutation approval has expired; submit the mutation again");
 
-server.registerTool(
-  "propose_profile",
-  {
-    description: "Write a narrow profile proposal and authorization tests from one observed request. It does not activate the profile.",
-    inputSchema: {
-      action: nonEmptyStringSchema,
-      arguments: requestArgumentsSchema,
-      profileId: profileIdSchema,
-      resource: nonEmptyStringSchema,
-      threadId: nonEmptyStringSchema,
+  const approval = await requestProfileMutationApproval(
+    threadId,
+    intent,
+    mutation.approvalDetails,
+    serverContext,
+  );
+  if (approval.approval !== undefined) {
+    try {
+      rememberPendingMutation(approval.nonce, mutation);
+    } catch (error) {
+      if (error instanceof PendingMutationCapacityError) return pendingMutationCapacityError(error);
+      throw error;
+    }
+    return approval.approval;
+  }
+  pendingMutations.delete(approval.nonce);
+  return text(await mutation.execute());
+}
+
+export function buildServer(): McpServer {
+  const server = new McpServer(
+    { name: "sandbox-extender", version: "0.1.2" },
+    { requestState: { verify: verifyProfileMutationRequestState } },
+  );
+
+  server.registerTool(
+    "initialize_policy_repository",
+    {
+      description:
+        "Create the local directories used for profiles, proposals, tests, and thread state.",
+      inputSchema: { threadId: nonEmptyStringSchema },
     },
-  },
-  async ({ action, arguments: requestArguments, profileId, resource, threadId }) => {
-    await authorizeMutation(threadId, {
-      arguments: {
-        action,
-        arguments: requestArguments,
-        profileId,
-        resource,
+    ({ threadId }, serverContext) =>
+      runMutation(
+        threadId,
+        { arguments: {}, operation: "initialize_policy_repository" },
+        serverContext,
+      ),
+  );
+
+  server.registerTool(
+    "list_profiles",
+    {
+      description:
+        "List reviewed profiles whose stored contents still match their reviewed revision.",
+      inputSchema: {},
+    },
+    () => listProfilesHandler(repository),
+  );
+
+  server.registerTool(
+    "get_active_profile",
+    {
+      description:
+        "Report whether one agent thread has a verified active policy profile, without changing it.",
+      inputSchema: { threadId: nonEmptyStringSchema },
+    },
+    ({ threadId }) => getActiveProfileHandler(repository, threadId),
+  );
+
+  server.registerTool(
+    "propose_profile",
+    {
+      description:
+        "Write a narrow profile proposal and authorization tests from one observed request. It does not activate the profile.",
+      inputSchema: {
+        action: nonEmptyStringSchema,
+        arguments: requestArgumentsSchema,
+        profileId: profileIdSchema,
+        resource: nonEmptyStringSchema,
+        threadId: nonEmptyStringSchema,
       },
-      operation: "propose_profile",
-    }, { profileId, targets: [resource] });
-    const proposal = await proposeProfile(profileId, { action, arguments: requestArguments, resource, threadId });
-    await repository.writeProposal(proposal);
-    return text(`Wrote proposal ${profileId}. Review proposals/${profileId}.json and tests/${profileId}.json before promoting it to profiles/.`);
-  },
-);
-
-server.registerTool(
-  "promote_profile",
-  {
-    description: "Promote a user-reviewed proposal into an activatable profile. Call only after the user has reviewed the proposal and its tests.",
-    inputSchema: {
-      policyRevision: policyRevisionSchema.describe("Reviewed full Git commit ID"),
-      profileId: profileIdSchema,
-      threadId: nonEmptyStringSchema,
     },
-  },
-  async ({ policyRevision, profileId, threadId }) => {
-    await authorizeMutation(threadId, {
-      arguments: { policyRevision, profileId },
-      operation: "promote_profile",
-    }, { policyRevision, profileId });
-    await repository.promoteProposal(profileId, policyRevision);
-    return text(`Promoted ${profileId}. It remains inactive until explicitly activated.`);
-  },
-);
+    ({ action, arguments: requestArguments, profileId, resource, threadId }, serverContext) =>
+      runMutation(
+        threadId,
+        {
+          arguments: { action, arguments: requestArguments, profileId, resource },
+          operation: "propose_profile",
+        },
+        serverContext,
+      ),
+  );
 
-server.registerTool(
-  "activate_profile",
-  {
-    description: "Activate a reviewed policy profile for one agent thread.",
-    inputSchema: {
-      arguments: requestArgumentsSchema,
-      profileId: profileIdSchema,
-      threadId: nonEmptyStringSchema,
+  server.registerTool(
+    "promote_profile",
+    {
+      description:
+        "Promote a user-reviewed proposal into an activatable profile. Call only after the user has reviewed the proposal and its tests.",
+      inputSchema: {
+        policyRevision: policyRevisionSchema.describe("Reviewed full Git commit ID"),
+        profileId: profileIdSchema,
+        threadId: nonEmptyStringSchema,
+      },
     },
-  },
-  async ({ arguments: activationArguments, profileId, threadId }) => {
-    const activation = await prepareProfileActivation(repository, profileId, activationArguments);
-    await authorizeMutation(threadId, {
-      arguments: { arguments: activationArguments, profileId },
-      operation: "activate_profile",
-    }, {
-      activationArguments,
-      policyRevision: activation.profile.policyRevision,
-      profileId,
-      targets: activation.targets,
-    });
-    const allowedTargets = await activatePreparedProfile(repository, threadId, activation);
-    return text(JSON.stringify({
-      message: `Activated ${profileId} for ${threadId}.`,
-      allowedTargets,
-      sessionContext: activation.profile.sessionContext ?? [],
-    }));
-  },
-);
+    ({ policyRevision, profileId, threadId }, serverContext) =>
+      runMutation(
+        threadId,
+        {
+          arguments: { policyRevision, profileId },
+          operation: "promote_profile",
+        },
+        serverContext,
+      ),
+  );
 
-server.registerTool(
-  "disable_profile",
-  {
-    description: "Disable the active policy profile for one agent thread.",
-    inputSchema: { threadId: nonEmptyStringSchema },
-  },
-  async ({ threadId }) => {
-    const binding = (await repository.readState())[threadId];
-    await authorizeMutation(threadId, {
-      arguments: {},
-      operation: "disable_profile",
-    }, binding && {
-      policyRevision: binding.policyRevision,
-      profileId: binding.profileId,
-      targets: binding.allowedTargets,
-    });
-    await disableProfile(repository, threadId);
-    return text(`Disabled the profile for ${threadId}.`);
-  },
-);
-
-server.registerTool(
-  "evaluate_request",
-  {
-    description: "Evaluate a normalized request against the active profile without executing it.",
-    inputSchema: {
-      action: nonEmptyStringSchema,
-      arguments: requestArgumentsSchema,
-      resource: nonEmptyStringSchema,
-      threadId: nonEmptyStringSchema,
+  server.registerTool(
+    "activate_profile",
+    {
+      description: "Activate a reviewed policy profile for one agent thread.",
+      inputSchema: {
+        arguments: requestArgumentsSchema,
+        profileId: profileIdSchema,
+        threadId: nonEmptyStringSchema,
+      },
     },
-  },
-  async ({ action, arguments: requestArguments, resource, threadId }) => {
-    const result = await evaluateForThread(repository, {
-      action,
-      arguments: requestArguments,
-      resource,
-      threadId,
-    });
-    return text(JSON.stringify(result));
-  },
-);
+    ({ arguments: activationArguments, profileId, threadId }, serverContext) =>
+      runMutation(
+        threadId,
+        {
+          arguments: { arguments: activationArguments, profileId },
+          operation: "activate_profile",
+        },
+        serverContext,
+      ),
+  );
 
-await server.connect(new StdioServerTransport());
+  server.registerTool(
+    "disable_profile",
+    {
+      description: "Disable the active policy profile for one agent thread.",
+      inputSchema: { threadId: nonEmptyStringSchema },
+    },
+    ({ threadId }, serverContext) =>
+      runMutation(threadId, { arguments: {}, operation: "disable_profile" }, serverContext),
+  );
+
+  server.registerTool(
+    "evaluate_request",
+    {
+      description: "Evaluate a normalized request against the active profile without executing it.",
+      inputSchema: {
+        action: nonEmptyStringSchema,
+        arguments: requestArgumentsSchema,
+        resource: nonEmptyStringSchema,
+        threadId: nonEmptyStringSchema,
+      },
+    },
+    async ({ action, arguments: requestArguments, resource, threadId }) =>
+      text(
+        JSON.stringify(
+          await evaluateForThread(repository, {
+            action,
+            arguments: requestArguments,
+            resource,
+            threadId,
+          }),
+        ),
+      ),
+  );
+
+  return server;
+}
+
+if (import.meta.main) serveStdio(() => buildServer());

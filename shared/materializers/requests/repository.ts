@@ -21,16 +21,26 @@ type RunGit = (arguments_: readonly string[]) => CommandOutput;
 
 type DenoCommand = new (
   command: string,
-  options: { readonly args: string[]; readonly stderr: "null"; readonly stdout: "piped" },
+  options: {
+    readonly args: string[];
+    readonly clearEnv: true;
+    readonly stderr: "null";
+    readonly stdout: "piped";
+  },
 ) => { outputSync(): CommandOutput };
 
 function toMaterializerInput(candidate: unknown): MaterializerInput {
   if (typeof candidate !== "object" || candidate === null) return {};
   const candidateRecord = candidate as Record<string, unknown>;
-  const command = typeof candidateRecord.command === "object" && candidateRecord.command !== null
-    ? candidateRecord.command as { readonly words?: unknown }
-    : undefined;
-  return { command, resource: candidateRecord.resource, workingDirectory: candidateRecord.workingDirectory };
+  const command =
+    typeof candidateRecord.command === "object" && candidateRecord.command !== null
+      ? (candidateRecord.command as { readonly words?: unknown })
+      : undefined;
+  return {
+    command,
+    resource: candidateRecord.resource,
+    workingDirectory: candidateRecord.workingDirectory,
+  };
 }
 
 function isDenseStringArray(candidate: unknown): candidate is string[] {
@@ -42,18 +52,33 @@ function isDenseStringArray(candidate: unknown): candidate is string[] {
 }
 
 function duplicateLongOptionCount(words: readonly string[]): number {
-  const options = words.filter((word) => word.startsWith("--")).map((word) => word.split("=", 1)[0]);
+  const options = words
+    .filter((word) => word.startsWith("--"))
+    .map((word) => word.split("=", 1)[0]);
   return options.length - new Set(options).size;
 }
 
-function gitRemoteArgument(words: readonly string[]): { readonly argumentsSafe: boolean; readonly remote: string } | undefined {
+function gitRemoteArgument(
+  words: readonly string[],
+): { readonly argumentsSafe: boolean; readonly remote: string } | undefined {
   if (words[1] === "fetch") {
     return words.length === 4 && words[2] === "--dry-run" && !words[3]?.startsWith("-")
       ? { argumentsSafe: true, remote: words[3]! }
       : undefined;
   }
   if (words[1] !== "ls-remote") return undefined;
-  const options = new Set(["-b", "--branches", "--exit-code", "--heads", "-q", "--quiet", "--refs", "--symref", "-t", "--tags"]);
+  const options = new Set([
+    "-b",
+    "--branches",
+    "--exit-code",
+    "--heads",
+    "-q",
+    "--quiet",
+    "--refs",
+    "--symref",
+    "-t",
+    "--tags",
+  ]);
   let index = 2;
   while (options.has(words[index] ?? "")) index += 1;
   if (words[index] === "--") index += 1;
@@ -66,9 +91,14 @@ function gitRemoteArgument(words: readonly string[]): { readonly argumentsSafe: 
     : undefined;
 }
 
-export function runGit(arguments_: readonly string[], Command: DenoCommand = Deno.Command): CommandOutput {
+export function runGit(
+  arguments_: readonly string[],
+  Command: DenoCommand = Deno.Command,
+): CommandOutput {
   return new Command("git", {
     args: [...arguments_],
+    // Repository-local config is still read after `git -C`; ambient Git overrides are excluded.
+    clearEnv: true,
     stderr: "null",
     stdout: "piped",
   }).outputSync();
@@ -82,7 +112,9 @@ function effectiveGitRemote(
   const result = execute(["-C", workingDirectory, "ls-remote", "--get-url", "--", remote]);
   if (result.code !== 0) return undefined;
   const effectiveRemote = new TextDecoder().decode(result.stdout).trim();
-  return effectiveRemote.length > 0 && !effectiveRemote.includes("\n") ? effectiveRemote : undefined;
+  return effectiveRemote.length > 0 && !effectiveRemote.includes("\n")
+    ? effectiveRemote
+    : undefined;
 }
 
 function isGitHubHost(hostname: string): boolean {
@@ -99,7 +131,10 @@ function isSafeGitRemote(remote: string | undefined): boolean {
       return false;
     }
   }
-  const scp = /^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?):[A-Za-z0-9._~/%+-]+(?:\/[A-Za-z0-9._~/%+-]+)*$/.exec(remote);
+  const scp =
+    /^(?:[A-Za-z0-9._][A-Za-z0-9._-]*@)?([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?):[A-Za-z0-9._~/%+-]+(?:\/[A-Za-z0-9._~/%+-]+)*$/.exec(
+      remote,
+    );
   return Boolean(scp && isGitHubHost(scp[1]!.toLowerCase()));
 }
 
@@ -147,9 +182,19 @@ export function materializeRepository(
 ): RepositoryOperation | undefined {
   const materializerInput = toMaterializerInput(candidate);
   const words = materializerInput.command?.words;
-  if (typeof materializerInput.resource !== "string" || typeof materializerInput.workingDirectory !== "string" ||
-    !isDenseStringArray(words)) return undefined;
-  if (words[0] === "git") return gitOperation(materializerInput.resource, materializerInput.workingDirectory, words, execute);
+  if (
+    typeof materializerInput.resource !== "string" ||
+    typeof materializerInput.workingDirectory !== "string" ||
+    !isDenseStringArray(words)
+  )
+    return undefined;
+  if (words[0] === "git")
+    return gitOperation(
+      materializerInput.resource,
+      materializerInput.workingDirectory,
+      words,
+      execute,
+    );
   if (words[0] === "gh") return githubOperation(words);
   return undefined;
 }
@@ -165,4 +210,5 @@ export async function runRepositoryMaterializer(
   return true;
 }
 
-if (import.meta.main) Deno.exit(await runRepositoryMaterializer(new Response(Deno.stdin.readable).json()) ? 0 : 1);
+// prettier-ignore
+void (import.meta.main && Deno.exit((await runRepositoryMaterializer(new Response(Deno.stdin.readable).json())) ? 0 : 1));

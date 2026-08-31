@@ -27,9 +27,7 @@ export type ShellCommandContext = {
   readonly words: readonly string[];
 };
 
-export type CapabilityEvaluator = (
-  context: EvaluationContext,
-) => Decision;
+export type CapabilityEvaluator = (context: EvaluationContext) => Decision;
 
 export type Grouping = {
   readonly evaluate: CapabilityEvaluator;

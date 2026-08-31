@@ -23,44 +23,60 @@ import type {
   RequestMaterializer,
 } from "./types.js";
 
-const cedarGroupingSchema = z.object({
-  id: z.string().min(1),
-  policies: z.record(z.string(), z.union([
-    z.string(),
-    z.array(z.string().min(1)).min(1),
-  ])),
-}).strict();
-const diskProfileSchema = z.object({
-  activationMaterializer: activationMaterializerSchema.optional(),
-  allowedTargets: z.array(z.string().min(1)),
-  groupings: z.array(cedarGroupingSchema),
-  id: profileIdSchema,
-  policyRevision: z.string().min(1),
-  sessionContext: z.array(z.string().min(1)).optional(),
-  targetScope: z.literal("single").optional(),
-  requestMaterializer: requestMaterializerSchema.optional(),
-}).strict();
-const diskProposalSchema = diskProfileSchema.extend({
-  policyRevision: z.literal("pending-review"),
-}).strict();
-const bindingsSchema = z.record(z.string().min(1), z.object({
-  allowedTargets: z.array(z.string().min(1)).min(1),
-  fingerprint: z.string().length(64),
-  policyRevision: z.string().min(1),
-  profileId: profileIdSchema,
-}).strict());
+const cedarGroupingSchema = z
+  .object({
+    id: z.string().min(1),
+    policies: z.record(z.string(), z.union([z.string(), z.array(z.string().min(1)).min(1)])),
+  })
+  .strict();
+const diskProfileSchema = z
+  .object({
+    activationMaterializer: activationMaterializerSchema.optional(),
+    allowedTargets: z.array(z.string().min(1)),
+    groupings: z.array(cedarGroupingSchema),
+    id: profileIdSchema,
+    policyRevision: z.string().min(1),
+    sessionContext: z.array(z.string().min(1)).optional(),
+    targetScope: z.literal("single").optional(),
+    requestMaterializer: requestMaterializerSchema.optional(),
+  })
+  .strict();
+const diskProposalSchema = diskProfileSchema
+  .extend({
+    policyRevision: z.literal("pending-review"),
+  })
+  .strict();
+const bindingsSchema = z.record(
+  z.string().min(1),
+  z
+    .object({
+      allowedTargets: z.array(z.string().min(1)).min(1),
+      fingerprint: z.string().length(64),
+      policyRevision: z.string().min(1),
+      profileId: profileIdSchema,
+    })
+    .strict(),
+);
 const auditEntriesSchema = z.array(z.record(z.string(), z.unknown()));
-const authorizationTestsSchema = z.array(z.object({
-  activationArguments: z.record(z.string(), z.unknown()).optional(),
-  expected: z.enum(["allow", "deny", "abstain"]),
-  name: z.string().min(1),
-  request: z.object({
-    action: z.string().min(1),
-    arguments: z.record(z.string(), z.unknown()),
-    resource: z.string().min(1),
-    threadId: z.string().min(1),
-  }).strict(),
-}).strict()).min(1);
+const authorizationTestsSchema = z
+  .array(
+    z
+      .object({
+        activationArguments: z.record(z.string(), z.unknown()).optional(),
+        expected: z.enum(["allow", "deny", "abstain"]),
+        name: z.string().min(1),
+        request: z
+          .object({
+            action: z.string().min(1),
+            arguments: z.record(z.string(), z.unknown()),
+            resource: z.string().min(1),
+            threadId: z.string().min(1),
+          })
+          .strict(),
+      })
+      .strict(),
+  )
+  .min(1);
 
 type DiskProfile = z.infer<typeof diskProfileSchema>;
 type DiskProposal = z.infer<typeof diskProposalSchema>;
@@ -80,33 +96,39 @@ class ProfileLoadError extends Error {
   }
 }
 
-function verifyCommitRevision(root: string, revision: string): void {
-  const result = Bun.spawnSync({
-    cmd: ["git", "-C", root, "cat-file", "-t", revision],
+function gitEnvironment(): Record<string, string> {
+  // Policy revisions must resolve from this repository's own object database. Ambient Git
+  // repository/object/config overrides are intentionally excluded so hooks cannot redirect review.
+  return {
+    HOME: process.env.HOME ?? "",
+    LANG: process.env.LANG ?? "",
+    PATH: process.env.PATH ?? "",
+    TMPDIR: process.env.TMPDIR ?? "",
+  };
+}
+
+function runRepositoryGit(root: string, arguments_: readonly string[]) {
+  return Bun.spawnSync({
+    cmd: ["git", "-C", root, ...arguments_],
+    env: gitEnvironment(),
     stderr: "pipe",
     stdout: "pipe",
   });
+}
+
+function verifyCommitRevision(root: string, revision: string): void {
+  const result = runRepositoryGit(root, ["cat-file", "-t", revision]);
   const objectType = new TextDecoder().decode(result.stdout).trim();
   if (result.exitCode !== 0 || objectType !== "commit") {
     throw new Error(`policy revision ${revision} is not a Git commit`);
   }
 }
 
-function readCommittedFile(
-  root: string,
-  revision: string,
-  relativePath: string,
-): string {
+function readCommittedFile(root: string, revision: string, relativePath: string): string {
   verifyCommitRevision(root, revision);
-  const result = Bun.spawnSync({
-    cmd: ["git", "-C", root, "show", `${revision}:${relativePath}`],
-    stderr: "pipe",
-    stdout: "pipe",
-  });
+  const result = runRepositoryGit(root, ["show", `${revision}:${relativePath}`]);
   if (result.exitCode !== 0) {
-    throw new Error(
-      `policy revision ${revision} does not contain ${relativePath}`,
-    );
+    throw new Error(`policy revision ${revision} does not contain ${relativePath}`);
   }
   return new TextDecoder().decode(result.stdout);
 }
@@ -138,11 +160,9 @@ function reconstructReviewedProfile(
     throw new ProfileStaleError(`profile ${profileId} has an invalid policy revision`);
   }
   const proposalFile = `proposals/${profileId}.json`;
-  const candidate: unknown = JSON.parse(readCommittedFile(
-    root,
-    liveProfile.policyRevision,
-    proposalFile,
-  ));
+  const candidate: unknown = JSON.parse(
+    readCommittedFile(root, liveProfile.policyRevision, proposalFile),
+  );
   const proposal = parseProposal(candidate, proposalFile);
   if (proposal.id !== profileId) {
     throw new Error(`${proposalFile} does not match its requested profile ID`);
@@ -151,14 +171,12 @@ function reconstructReviewedProfile(
   return { ...proposal, policyRevision: liveProfile.policyRevision };
 }
 
-function verifyReviewedProfile(
-  root: string,
-  profileId: string,
-  liveProfile: DiskProfile,
-): void {
+function verifyReviewedProfile(root: string, profileId: string, liveProfile: DiskProfile): void {
   const reviewedProfile = reconstructReviewedProfile(root, profileId, liveProfile);
   if (!isDeepStrictEqual(liveProfile, reviewedProfile)) {
-    throw new ProfileStaleError(`profile ${profileId} does not match policy revision ${liveProfile.policyRevision}`);
+    throw new ProfileStaleError(
+      `profile ${profileId} does not match policy revision ${liveProfile.policyRevision}`,
+    );
   }
 }
 
@@ -170,7 +188,9 @@ async function readVerifiedMaterializerSource(
   const reviewedSource = readCommittedFile(root, policyRevision, relativePath);
   const currentSource = await readFile(join(root, relativePath), "utf8");
   if (currentSource !== reviewedSource) {
-    throw new ProfileStaleError(`materializer ${relativePath} does not match policy revision ${policyRevision}`);
+    throw new ProfileStaleError(
+      `materializer ${relativePath} does not match policy revision ${policyRevision}`,
+    );
   }
   return reviewedSource;
 }
@@ -188,7 +208,9 @@ async function verifiedMaterializer<T extends ActivationMaterializer | RequestMa
   try {
     verifyMaterializerIntegrity(materializer, reviewedSource);
   } catch {
-    throw new ProfileStaleError(`materializer ${relative(root, materializer.file)} fails integrity verification`);
+    throw new ProfileStaleError(
+      `materializer ${relative(root, materializer.file)} fails integrity verification`,
+    );
   }
   return { ...materializer, reviewedSource };
 }
@@ -204,12 +226,7 @@ function committedMaterializer<T extends ActivationMaterializer | RequestMateria
 }
 
 function isMissingFile(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === "ENOENT",
-  );
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
 }
 
 function profileFromDisk(root: string, profile: DiskProfile): Profile {
@@ -275,10 +292,20 @@ export class PolicyRepository {
     const diskProfile = await loadLiveProfile(this.root, profileId);
     verifyReviewedProfile(this.root, profileId, diskProfile);
     const profile = profileFromDisk(this.root, diskProfile);
-    const activationMaterializer = profile.activationMaterializer &&
-      await verifiedMaterializer(this.root, diskProfile.policyRevision, profile.activationMaterializer);
-    const requestMaterializer = profile.requestMaterializer &&
-      await verifiedMaterializer(this.root, diskProfile.policyRevision, profile.requestMaterializer);
+    const activationMaterializer =
+      profile.activationMaterializer &&
+      (await verifiedMaterializer(
+        this.root,
+        diskProfile.policyRevision,
+        profile.activationMaterializer,
+      ));
+    const requestMaterializer =
+      profile.requestMaterializer &&
+      (await verifiedMaterializer(
+        this.root,
+        diskProfile.policyRevision,
+        profile.requestMaterializer,
+      ));
     return {
       ...profile,
       activationMaterializer,
@@ -301,15 +328,17 @@ export class PolicyRepository {
 
   async listVerifiedProfiles(): Promise<string[]> {
     const candidates = await this.listProfiles();
-    const verified = await Promise.all(candidates.map(async (profileId) => {
-      try {
-        await this.loadVerifiedProfile(profileId);
-        return profileId;
-      } catch (error) {
-        if (!(error instanceof ProfileStaleError)) throw error;
-        return undefined;
-      }
-    }));
+    const verified = await Promise.all(
+      candidates.map(async (profileId) => {
+        try {
+          await this.loadVerifiedProfile(profileId);
+          return profileId;
+        } catch (error) {
+          if (!(error instanceof ProfileStaleError)) throw error;
+          return undefined;
+        }
+      }),
+    );
     return verified.filter((profileId): profileId is string => profileId !== undefined);
   }
 
@@ -342,11 +371,9 @@ export class PolicyRepository {
     policyRevisionSchema.parse(policyRevision);
     await this.initialize();
     const proposalFile = `proposals/${profileId}.json`;
-    const candidate: unknown = JSON.parse(readCommittedFile(
-      this.root,
-      policyRevision,
-      proposalFile,
-    ));
+    const candidate: unknown = JSON.parse(
+      readCommittedFile(this.root, policyRevision, proposalFile),
+    );
     const proposal = parseProposal(candidate, proposalFile);
     if (proposal.id !== profileId) {
       throw new Error(`${proposalFile} does not match its requested profile ID`);
@@ -381,7 +408,9 @@ export class PolicyRepository {
   }
 
   async updateState(
-    update: (bindings: Readonly<Record<string, ProfileBinding>>) => Readonly<Record<string, ProfileBinding>>,
+    update: (
+      bindings: Readonly<Record<string, ProfileBinding>>,
+    ) => Readonly<Record<string, ProfileBinding>>,
   ): Promise<void> {
     await this.#serializeMutation(async () => {
       await this.writeState(update(await this.readState()));
@@ -418,19 +447,21 @@ export class PolicyRepository {
     policyRevision: string,
   ): Promise<void> {
     const testFile = `tests/${profileId}.json`;
-    const candidate: unknown = JSON.parse(readCommittedFile(
-      this.root,
-      policyRevision,
-      testFile,
-    ));
+    const candidate: unknown = JSON.parse(readCommittedFile(this.root, policyRevision, testFile));
     const tests = authorizationTestsSchema.parse(candidate);
-    const activationMaterializer = profile.activationMaterializer &&
+    const activationMaterializer =
+      profile.activationMaterializer &&
       committedMaterializer(this.root, policyRevision, profile.activationMaterializer);
-    const requestMaterializer = profile.requestMaterializer &&
+    const requestMaterializer =
+      profile.requestMaterializer &&
       committedMaterializer(this.root, policyRevision, profile.requestMaterializer);
     for (const authorizationTest of tests) {
       const activation = activationMaterializer
-        ? materializeActivation(activationMaterializer, authorizationTest.activationArguments ?? {}, this.root)
+        ? materializeActivation(
+            activationMaterializer,
+            authorizationTest.activationArguments ?? {},
+            this.root,
+          )
         : { targets: profile.allowedTargets };
       if (!activation) {
         throw new Error(`authorization test activation failed: ${authorizationTest.name}`);

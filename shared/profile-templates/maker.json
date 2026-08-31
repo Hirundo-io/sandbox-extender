@@ -4,16 +4,32 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/local-workspace.ts",
-    "integrity": "b5f9a4a59d67b07b778007fc7af4129f088507afe4246ab34e794f0d8078cbd3",
+    "integrity": "01121fc3fa30380f7af79f36779428c6cc7d64620e43e549d42e17dfbf4beb35",
     "language": "typescript",
-    "permissions": { "read": [], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "permissions": {
+      "read": [],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": [],
+      "ffi": []
+    },
     "runtimeVersion": "2.8.1"
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "a4fd46aea29e23ca865dd6f8dfa0b8fe19c2eb090402a2432f60b9f033d78a17",
+    "integrity": "3068b4d8b016beae1088d368a7f67f800915ce8d1d639d31f5175b528a3c7cf5",
     "language": "typescript",
-    "permissions": { "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"], "write": [], "env": [], "net": [], "sys": [], "run": [], "ffi": [] },
+    "permissions": {
+      "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": [],
+      "ffi": []
+    },
     "runtimeVersion": "2.8.1"
   },
   "sessionContext": [

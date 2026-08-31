@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { runFixtureGit } from "./git-fixture.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,16 +10,16 @@ import { PolicyRepository } from "../src/policy-repository.js";
 
 function commitReview(root: string): string {
   for (const command of [
-    ["git", "init", "--quiet"],
-    ["git", "config", "user.email", "sandbox-extender@example.test"],
-    ["git", "config", "user.name", "Sandbox Extender"],
-    ["git", "add", "proposals", "tests"],
-    ["git", "commit", "--quiet", "-m", "Review profile"],
+    ["init", "--quiet"],
+    ["config", "user.email", "sandbox-extender@example.test"],
+    ["config", "user.name", "Sandbox Extender"],
+    ["add", "proposals", "tests"],
+    ["commit", "--quiet", "-m", "Review profile"],
   ]) {
-    const result = Bun.spawnSync({ cmd: command, cwd: root });
+    const result = runFixtureGit(root, command);
     if (result.exitCode !== 0) throw new Error(`could not run ${command.join(" ")}`);
   }
-  const result = Bun.spawnSync({ cmd: ["git", "rev-parse", "HEAD"], cwd: root, stdout: "pipe" });
+  const result = runFixtureGit(root, ["rev-parse", "HEAD"]);
   return new TextDecoder().decode(result.stdout).trim();
 }
 
@@ -57,8 +58,8 @@ describe("host permission hooks", () => {
           session_id: "thread-1",
           tool_input: { command: "git status" },
           tool_name: "Bash",
-          },
-          "codex",
+        },
+        "codex",
       ),
     ).toEqual({
       hookSpecificOutput: { hookEventName: "PermissionRequest" },
@@ -76,23 +77,27 @@ describe("host permission hooks", () => {
       await repository.writeProposal({
         profile: {
           allowedTargets: ["/work/example"],
-          groupings: [{
-            id: "allow-bash",
-            policies: { allow: "permit(principal, action, resource);" },
-          }],
+          groupings: [
+            {
+              id: "allow-bash",
+              policies: { allow: "permit(principal, action, resource);" },
+            },
+          ],
           id: "allow",
           policyRevision: "pending-review",
         },
-        tests: [{
-          expected: "allow",
-          name: "allows the reviewed hook request",
-          request: {
-            action: "claude.Bash",
-            arguments: { command: "pwd" },
-            resource: "/work/example",
-            threadId: "thread-1",
+        tests: [
+          {
+            expected: "allow",
+            name: "allows the reviewed hook request",
+            request: {
+              action: "claude.Bash",
+              arguments: { command: "pwd" },
+              resource: "/work/example",
+              threadId: "thread-1",
+            },
           },
-        }],
+        ],
       });
       const revision = commitReview(root);
       await repository.promoteProposal("allow", revision);

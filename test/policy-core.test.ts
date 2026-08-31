@@ -7,7 +7,15 @@ import { join } from "node:path";
 import { PolicyCore, type NormalizedRequest, type Profile } from "../src/index.js";
 import { materializerIntegrity } from "../src/materializer-policy.js";
 
-const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
+const emptyPermissions = {
+  env: [],
+  ffi: [],
+  net: [],
+  read: [],
+  run: [],
+  sys: [],
+  write: [],
+} as const;
 
 const request: NormalizedRequest = {
   action: "github.pr.comment.create",
@@ -44,9 +52,14 @@ describe("PolicyCore", () => {
 
   test("rejects empty in-memory grouping IDs", () => {
     const core = new PolicyCore();
-    expect(() => core.activate(profile({
-      groupings: [{ id: "", evaluate: () => "allow" }],
-    }), request.threadId)).toThrow("grouping IDs must not be empty");
+    expect(() =>
+      core.activate(
+        profile({
+          groupings: [{ id: "", evaluate: () => "allow" }],
+        }),
+        request.threadId,
+      ),
+    ).toThrow("grouping IDs must not be empty");
   });
 
   test("abstains when the resolved target is outside the profile scope", async () => {
@@ -96,7 +109,10 @@ describe("PolicyCore", () => {
 
   test("invalidates tokens when their active profile is disabled", async () => {
     const core = new PolicyCore();
-    core.activate(profile({ groupings: [{ id: "allow", evaluate: () => "allow" }] }), request.threadId);
+    core.activate(
+      profile({ groupings: [{ id: "allow", evaluate: () => "allow" }] }),
+      request.threadId,
+    );
     const result = await core.evaluate(request);
     core.disable(request.threadId);
     expect(await core.consumeToken(result.token!.id, request)).toBe(false);
@@ -106,30 +122,44 @@ describe("PolicyCore", () => {
     const core = new PolicyCore();
     core.activate(
       profile({
-        groupings: [{
-          id: "npm",
-          evaluate: ({ request: evaluated }) =>
-            evaluated.arguments.command === "npm i zod" ? "allow" : "abstain",
-        }],
+        groupings: [
+          {
+            id: "npm",
+            evaluate: ({ request: evaluated }) =>
+              evaluated.arguments.command === "npm i zod" ? "allow" : "abstain",
+          },
+        ],
       }),
       request.threadId,
     );
 
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: { command: "cd packages/app && npm i zod" },
-    })).decision).toBe("allow");
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: { command: "for item in one; do npm i zod; done" },
-    })).decision).toBe("allow");
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: { command: "npm i zod && curl example.test" },
-    })).decision).toBe("abstain");
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: "cd packages/app && npm i zod" },
+        })
+      ).decision,
+    ).toBe("allow");
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: "for item in one; do npm i zod; done" },
+        })
+      ).decision,
+    ).toBe("allow");
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: "npm i zod && curl example.test" },
+        })
+      ).decision,
+    ).toBe("abstain");
   });
 
   test("automatically allows non-mutating shell builtins", async () => {
@@ -147,31 +177,44 @@ describe("PolicyCore", () => {
       "printf -- '-v' PATH",
       "test -n /tmp/literal-string",
     ]) {
-      expect((await core.evaluate({
-        ...request,
-        action: "codex.unified_exec",
-        arguments: { command },
-        resource: process.cwd(),
-      })).decision).toBe("allow");
+      expect(
+        (
+          await core.evaluate({
+            ...request,
+            action: "codex.unified_exec",
+            arguments: { command },
+            resource: process.cwd(),
+          })
+        ).decision,
+      ).toBe("allow");
     }
   });
 
   test("does not automatically authorize printf variable assignment", async () => {
     const core = new PolicyCore();
-    core.activate(profile({
-      groupings: [{
-        id: "npm",
-        evaluate: ({ request: evaluated }) =>
-          evaluated.arguments.command === "npm i zod" ? "allow" : "abstain",
-      }],
-    }), request.threadId);
+    core.activate(
+      profile({
+        groupings: [
+          {
+            id: "npm",
+            evaluate: ({ request: evaluated }) =>
+              evaluated.arguments.command === "npm i zod" ? "allow" : "abstain",
+          },
+        ],
+      }),
+      request.threadId,
+    );
 
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: { command: "printf -v PATH /tmp/attacker-bin; npm i zod" },
-      resource: process.cwd(),
-    })).decision).toBe("abstain");
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: "printf -v PATH /tmp/attacker-bin; npm i zod" },
+          resource: process.cwd(),
+        })
+      ).decision,
+    ).toBe("abstain");
   });
 
   test("automatically allows filesystem tests only within the working directory", async () => {
@@ -193,10 +236,14 @@ describe("PolicyCore", () => {
         "test -d nested",
         "test nested/older -nt nested/newer",
       ]) {
-        expect((await core.evaluate({
-          ...workspaceRequest,
-          arguments: { command },
-        })).decision).toBe("allow");
+        expect(
+          (
+            await core.evaluate({
+              ...workspaceRequest,
+              arguments: { command },
+            })
+          ).decision,
+        ).toBe("allow");
       }
 
       for (const command of [
@@ -205,16 +252,24 @@ describe("PolicyCore", () => {
         "test -f ../outside/file",
         "test -e linked/file",
       ]) {
-        expect((await core.evaluate({
-          ...workspaceRequest,
-          arguments: { command },
-        })).decision).toBe("abstain");
+        expect(
+          (
+            await core.evaluate({
+              ...workspaceRequest,
+              arguments: { command },
+            })
+          ).decision,
+        ).toBe("abstain");
       }
 
-      expect((await core.evaluate({
-        ...workspaceRequest,
-        arguments: { command: "[ -d nested ]" },
-      })).decision).toBe("abstain");
+      expect(
+        (
+          await core.evaluate({
+            ...workspaceRequest,
+            arguments: { command: "[ -d nested ]" },
+          })
+        ).decision,
+      ).toBe("abstain");
     } finally {
       await rm(workspace, { force: true, recursive: true });
       await rm(outside, { force: true, recursive: true });
@@ -227,21 +282,30 @@ describe("PolicyCore", () => {
     try {
       const command = `test -e ${outside}`;
       const core = new PolicyCore();
-      core.activate(profile({
-        allowedTargets: new Set([workspace]),
-        groupings: [{
-          id: "outside-test",
-          evaluate: ({ request: evaluated }) =>
-            evaluated.arguments.command === command ? "allow" : "abstain",
-        }],
-      }), request.threadId);
+      core.activate(
+        profile({
+          allowedTargets: new Set([workspace]),
+          groupings: [
+            {
+              id: "outside-test",
+              evaluate: ({ request: evaluated }) =>
+                evaluated.arguments.command === command ? "allow" : "abstain",
+            },
+          ],
+        }),
+        request.threadId,
+      );
 
-      expect((await core.evaluate({
-        ...request,
-        action: "codex.unified_exec",
-        arguments: { command },
-        resource: workspace,
-      })).decision).toBe("allow");
+      expect(
+        (
+          await core.evaluate({
+            ...request,
+            action: "codex.unified_exec",
+            arguments: { command },
+            resource: workspace,
+          })
+        ).decision,
+      ).toBe("allow");
     } finally {
       await rm(workspace, { force: true, recursive: true });
       await rm(outside, { force: true, recursive: true });
@@ -250,14 +314,21 @@ describe("PolicyCore", () => {
 
   test("rejects directory changes outside the original workspace", async () => {
     const core = new PolicyCore();
-    core.activate(profile({
-      groupings: [{ id: "allow", evaluate: () => "allow" }],
-    }), request.threadId);
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: { command: "cd ../outside && npm i zod" },
-    })).decision).toBe("abstain");
+    core.activate(
+      profile({
+        groupings: [{ id: "allow", evaluate: () => "allow" }],
+      }),
+      request.threadId,
+    );
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: "cd ../outside && npm i zod" },
+        })
+      ).decision,
+    ).toBe("abstain");
   });
 
   test("does not authorize filesystem paths that escape a workspace target", async () => {
@@ -268,10 +339,13 @@ describe("PolicyCore", () => {
       await mkdir(nested);
       await symlink(outside, join(workspace, "linked"));
       const core = new PolicyCore();
-      core.activate(profile({
-        allowedTargets: new Set([workspace]),
-        groupings: [{ id: "allow", evaluate: () => "allow" }],
-      }), request.threadId);
+      core.activate(
+        profile({
+          allowedTargets: new Set([workspace]),
+          groupings: [{ id: "allow", evaluate: () => "allow" }],
+        }),
+        request.threadId,
+      );
       const workspaceRequest = {
         ...request,
         action: "codex.unified_exec",
@@ -289,24 +363,40 @@ describe("PolicyCore", () => {
         "tool --cwd nested --config ../../outside",
         "tool ./linked/file",
       ]) {
-        expect((await core.evaluate({
-          ...workspaceRequest,
-          arguments: { command },
-        })).decision).toBe("abstain");
+        expect(
+          (
+            await core.evaluate({
+              ...workspaceRequest,
+              arguments: { command },
+            })
+          ).decision,
+        ).toBe("abstain");
       }
 
-      expect((await core.evaluate({
-        ...workspaceRequest,
-        arguments: { command: "git -C nested status -- ../nested" },
-      })).decision).toBe("allow");
-      expect((await core.evaluate({
-        ...workspaceRequest,
-        arguments: { command: "gh pr view --repo acme/example" },
-      })).decision).toBe("allow");
-      expect((await core.evaluate({
-        ...workspaceRequest,
-        arguments: { command: "curl https://example.test/api" },
-      })).decision).toBe("allow");
+      expect(
+        (
+          await core.evaluate({
+            ...workspaceRequest,
+            arguments: { command: "git -C nested status -- ../nested" },
+          })
+        ).decision,
+      ).toBe("allow");
+      expect(
+        (
+          await core.evaluate({
+            ...workspaceRequest,
+            arguments: { command: "gh pr view --repo acme/example" },
+          })
+        ).decision,
+      ).toBe("allow");
+      expect(
+        (
+          await core.evaluate({
+            ...workspaceRequest,
+            arguments: { command: "curl https://example.test/api" },
+          })
+        ).decision,
+      ).toBe("allow");
     } finally {
       await rm(workspace, { force: true, recursive: true });
       await rm(outside, { force: true, recursive: true });
@@ -331,43 +421,76 @@ describe("PolicyCore", () => {
     );
 
     expect((await core.evaluate(request)).decision).toBe("allow");
-    expect(
-      (await core.evaluate({ ...request, action: "github.pr.close" })).decision,
-    ).toBe("abstain");
+    expect((await core.evaluate({ ...request, action: "github.pr.close" })).decision).toBe(
+      "abstain",
+    );
   });
 
   test("exposes resolved loop arguments and control-flow facts to Capability Rules", async () => {
     const commands: unknown[] = [];
     const core = new PolicyCore();
-    core.activate(profile({
-      groupings: [{
-        id: "loops",
-        evaluate: ({ command }) => {
-          commands.push(command);
-          return "allow";
-        },
-      }],
-    }), request.threadId);
+    core.activate(
+      profile({
+        groupings: [
+          {
+            id: "loops",
+            evaluate: ({ command }) => {
+              commands.push(command);
+              return "allow";
+            },
+          },
+        ],
+      }),
+      request.threadId,
+    );
 
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: { command: 'for item in one "two words"; do tool "$item"; done' },
-    })).decision).toBe("allow");
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: 'for item in one "two words"; do tool "$item"; done' },
+        })
+      ).decision,
+    ).toBe("allow");
     expect(commands).toEqual([
-      expect.objectContaining({ controlFlow: "for", iteration: 0, repetition: "finite", role: "body", words: ["tool", "one"] }),
-      expect.objectContaining({ controlFlow: "for", iteration: 1, repetition: "finite", role: "body", words: ["tool", "two words"] }),
+      expect.objectContaining({
+        controlFlow: "for",
+        iteration: 0,
+        repetition: "finite",
+        role: "body",
+        words: ["tool", "one"],
+      }),
+      expect.objectContaining({
+        controlFlow: "for",
+        iteration: 1,
+        repetition: "finite",
+        role: "body",
+        words: ["tool", "two words"],
+      }),
     ]);
 
     commands.length = 0;
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: { command: "while probe; do work; done" },
-    })).decision).toBe("allow");
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: "while probe; do work; done" },
+        })
+      ).decision,
+    ).toBe("allow");
     expect(commands).toEqual([
-      expect.objectContaining({ controlFlow: "while", repetition: "potentially-unbounded", role: "condition" }),
-      expect.objectContaining({ controlFlow: "while", repetition: "potentially-unbounded", role: "body" }),
+      expect.objectContaining({
+        controlFlow: "while",
+        repetition: "potentially-unbounded",
+        role: "condition",
+      }),
+      expect.objectContaining({
+        controlFlow: "while",
+        repetition: "potentially-unbounded",
+        role: "body",
+      }),
     ]);
   });
 
@@ -375,28 +498,36 @@ describe("PolicyCore", () => {
     const file = join(process.cwd(), "shared", "materializers", "requests", "repository.ts");
     const reviewedSource = readFileSync(file, "utf8");
     const core = new PolicyCore();
-    core.activate(profile({
-      allowedTargets: new Set(["github:repository:acme/example"]),
-      groupings: [{
-        id: "read",
-        evaluate: () => "allow",
-      }],
-      requestMaterializer: {
-        file,
-        integrity: materializerIntegrity(reviewedSource, emptyPermissions, "2.8.1"),
-        language: "typescript",
-        permissions: emptyPermissions,
-        reviewedSource,
-        runtimeVersion: "2.8.1",
-      },
-    }), request.threadId);
-    expect((await core.evaluate({
-      ...request,
-      action: "codex.unified_exec",
-      arguments: {
-        command: "gh pr view --repo acme/example && gh pr view --repo evil/example",
-      },
-    })).decision).toBe("abstain");
+    core.activate(
+      profile({
+        allowedTargets: new Set(["github:repository:acme/example"]),
+        groupings: [
+          {
+            id: "read",
+            evaluate: () => "allow",
+          },
+        ],
+        requestMaterializer: {
+          file,
+          integrity: materializerIntegrity(reviewedSource, emptyPermissions, "2.8.1"),
+          language: "typescript",
+          permissions: emptyPermissions,
+          reviewedSource,
+          runtimeVersion: "2.8.1",
+        },
+      }),
+      request.threadId,
+    );
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: {
+            command: "gh pr view --repo acme/example && gh pr view --repo evil/example",
+          },
+        })
+      ).decision,
+    ).toBe("abstain");
   });
-
 });

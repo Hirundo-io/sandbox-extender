@@ -9,9 +9,5 @@ try {
   const hookEvent = hookEventSchema.parse(event);
   console.log(JSON.stringify(await handlePermissionRequest(hookEvent, host)));
 } catch {
-  console.log(JSON.stringify(hookOutput(
-    "abstain",
-    fallbackHost,
-    "policy context is unavailable",
-  )));
+  console.log(JSON.stringify(hookOutput("abstain", fallbackHost, "policy context is unavailable")));
 }
