@@ -1,6 +1,6 @@
 {
   "name": "sandbox-extender",
-  "version": "0.1.2+codex.20260824133755",
+  "version": "0.1.3+codex.20260831171913",
   "description": "Reusable, Cedar-backed approval extensions for coding agents.",
   "author": {
     "name": "Ben Lewis"
@@ -12,7 +12,7 @@
   "mcpServers": {
     "sandbox-extender": {
       "command": "bun",
-      "args": ["./src/mcp-server.ts"],
+      "args": ["./src/mcp-launcher.ts"],
       "cwd": "."
     }
   },
