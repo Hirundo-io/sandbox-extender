@@ -10,13 +10,17 @@ import {
 import { z } from "zod";
 
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
+import type { AuthorizationTest, ActivationMaterializer, RequestMaterializer } from "./types.js";
 import { redactSensitiveValue } from "./policy-service.js";
 
 export type MutationApprovalDetails = {
   readonly activationArguments?: Readonly<Record<string, unknown>>;
+  readonly affectedFiles?: readonly string[];
+  readonly materializers?: readonly (ActivationMaterializer | RequestMaterializer)[];
   readonly policyRevision?: string;
   readonly profileId?: string;
   readonly targets?: readonly string[];
+  readonly tests?: readonly AuthorizationTest[];
 };
 
 type ApprovalState = {
@@ -119,6 +123,9 @@ function approvalMessage(
       details.activationArguments && canonicalJson(details.activationArguments),
     ),
     line("Targets", targets),
+    line("Affected Files", details.affectedFiles?.join(", ")),
+    line("Materializers", details.materializers && canonicalJson(details.materializers)),
+    line("Authorization Tests", details.tests && canonicalJson(details.tests)),
   ].join("\n");
 }
 

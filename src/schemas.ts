@@ -40,6 +40,29 @@ export const requestMaterializerSchema = z
   })
   .strict();
 export const requestArgumentsSchema = z.record(z.string(), z.unknown());
+export const cedarGroupingSchema = z
+  .object({
+    id: nonEmptyStringSchema,
+    policies: z.record(
+      nonEmptyStringSchema,
+      z.union([nonEmptyStringSchema, z.array(nonEmptyStringSchema).min(1)]),
+    ),
+  })
+  .strict();
+export const authorizationTestSchema = z
+  .object({
+    activationArguments: requestArgumentsSchema.optional(),
+    expected: z.enum(["allow", "deny", "abstain"]),
+    name: nonEmptyStringSchema,
+    request: z
+      .object({
+        action: nonEmptyStringSchema,
+        arguments: requestArgumentsSchema,
+        resource: nonEmptyStringSchema,
+      })
+      .strict(),
+  })
+  .strict();
 export const normalizedRequestSchema = z
   .object({
     action: nonEmptyStringSchema,

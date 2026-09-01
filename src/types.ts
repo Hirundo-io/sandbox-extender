@@ -120,6 +120,23 @@ export type ProfileProposal = {
   readonly tests: readonly AuthorizationTest[];
 };
 
+/** Complete pending-review definition supplied through the MCP authoring operation. */
+export type CompleteProfileDefinition = Omit<
+  ProfileProposal["profile"],
+  "activationMaterializer" | "requestMaterializer"
+> & {
+  readonly activationMaterializer?: {
+    readonly permissions: MaterializerPermissionManifest;
+    readonly runtimeVersion: string;
+    readonly source: string;
+  };
+  readonly requestMaterializer?: {
+    readonly permissions: MaterializerPermissionManifest;
+    readonly runtimeVersion: string;
+    readonly source: string;
+  };
+};
+
 export type AuthorizationTest = {
   readonly activationArguments?: Readonly<Record<string, unknown>>;
   readonly expected: Decision;

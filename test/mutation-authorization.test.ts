@@ -32,4 +32,38 @@ describe("profile mutation intent", () => {
       parseProfileMutationIntent({ arguments: {}, operation: "disable_profile", unexpected: true }),
     ).toThrow();
   });
+
+  test("parses a complete pending-review definition only", () => {
+    expect(
+      parseProfileMutationIntent({
+        arguments: {
+          profile: {
+            allowedTargets: [],
+            groupings: [
+              { id: "allow", policies: { allow: "permit(principal, action, resource);" } },
+            ],
+            id: "maker",
+            policyRevision: "pending-review",
+          },
+          tests: [
+            {
+              expected: "allow",
+              name: "allows",
+              request: { action: "codex.unified_exec", arguments: {}, resource: "/workspace" },
+            },
+          ],
+        },
+        operation: "propose_complete_profile",
+      }),
+    ).toMatchObject({ operation: "propose_complete_profile" });
+    expect(() =>
+      parseProfileMutationIntent({
+        arguments: {
+          profile: { allowedTargets: [], groupings: [], id: "maker", policyRevision: "reviewed" },
+          tests: [],
+        },
+        operation: "propose_complete_profile",
+      }),
+    ).toThrow();
+  });
 });
