@@ -25,7 +25,7 @@
       "denoLock": "deno.lock"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "70c599453c373d968e10be56d7e795aabb76938e64f1d0029f163cbab24e448a",
+    "integrity": "3770dbb43122ed411ca9a2b24337b7f4dde725ccf46e139be30c09b242ca5178",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],

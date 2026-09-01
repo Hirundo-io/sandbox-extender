@@ -1,3 +1,5 @@
+import { Kind, parse } from "graphql";
+
 type RequestMaterializerInput = {
   readonly command?: { readonly words?: unknown };
 };
@@ -191,10 +193,7 @@ function reviewThreadsOperation(words: readonly string[]): PullRequestOperation 
   if (
     !ownerField?.startsWith("owner=") ||
     !repoField?.startsWith("repo=") ||
-    !pullRequestField?.startsWith("pr=") ||
-    owner === undefined ||
-    name === undefined ||
-    number === undefined
+    !pullRequestField?.startsWith("pr=")
   ) {
     return undefined;
   }
@@ -348,4 +347,3 @@ export async function runGitHubPullRequestMaterializer(
 
 // prettier-ignore
 void (import.meta.main && Deno.exit((await runGitHubPullRequestMaterializer(new Response(Deno.stdin.readable).json())) ? 0 : 1));
-import { Kind, parse } from "graphql";

@@ -131,6 +131,71 @@ describe("GitHub pull request request materializer", () => {
     ).toBeUndefined();
   });
 
+  test("fails closed on unreadable replies and invalid review-thread targets", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/invalid@owner/example/pulls/42/comments/9/replies",
+          "-f",
+          "body=_Replying as Codex",
+        ]),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/acme/example/pulls/42/comments/9/replies",
+          "-F",
+          "body=@reply.md",
+        ]),
+        () => {
+          throw new Error("unreadable");
+        },
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/acme/example/pulls/42/comments/9/replies",
+          "-F",
+          "body=@missing-reply.md",
+        ]),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/acme/example/pulls/42/comments/9/replies",
+          "-f",
+          "body=_Replying as Codex",
+        ]),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.review-comment.reply" }));
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${resolveReviewThreadMutation}`,
+          "-F",
+          "threadId=PRRT_kwDOUC1vvc6d0Nov",
+          "-f",
+          "clientMutationTag=invalid",
+        ]),
+      ),
+    ).toBeUndefined();
+  });
+
   test("materializes GraphQL resolution batches without variable-name conventions", () => {
     const query = `mutation($first: ID!, $second: ID!) { one: resolveReviewThread(input: { threadId: $first, clientMutationId: "acme/example#42" }) { thread { id } } two: resolveReviewThread(input: { threadId: $second, clientMutationId: "acme/example#42" }) { thread { id } } }`;
     expect(
@@ -153,6 +218,14 @@ describe("GitHub pull request request materializer", () => {
         resource: "github:pull-request:acme/example#42",
       }),
     );
+  });
+
+  test("rejects malformed batch resolution GraphQL", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "api", "graphql", "-f", "query=mutation(", "-f", "thread=PRRT_one"]),
+      ),
+    ).toBeUndefined();
   });
 
   test("writes the executable result and reports invalid input", async () => {
@@ -222,6 +295,21 @@ describe("GitHub pull request request materializer", () => {
       "repo=example",
       "-F",
       "pr=042",
+      "--paginate",
+      "--slurp",
+    ]),
+    candidate([
+      "gh",
+      "api",
+      "graphql",
+      "-f",
+      `query=${reviewThreadsQuery}`,
+      "-f",
+      "owner=acme",
+      "-f",
+      "repo=example",
+      "-F",
+      "pr42",
       "--paginate",
       "--slurp",
     ]),
