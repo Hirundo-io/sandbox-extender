@@ -4,13 +4,25 @@ import { cp, copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-type JsonRpcResponse = {
+type JsonRpcErrorResponse = {
+  readonly error: {
+    readonly code: number;
+    readonly message: string;
+  };
   readonly id: number;
+  readonly jsonrpc: "2.0";
+};
+
+type JsonRpcSuccessResponse = {
+  readonly id: number;
+  readonly jsonrpc: "2.0";
   readonly result: {
     readonly serverInfo?: { readonly version: string };
     readonly tools?: readonly { readonly name: string }[];
   };
 };
+
+type JsonRpcResponse = JsonRpcErrorResponse | JsonRpcSuccessResponse;
 
 type PluginManifest = {
   readonly mcpServers: Readonly<
@@ -39,6 +51,15 @@ function request(id: number, method: string, params: Readonly<Record<string, unk
   return `${JSON.stringify({ id, jsonrpc: "2.0", method, params })}\n`;
 }
 
+function requireSuccessfulResponse(response: JsonRpcResponse): JsonRpcSuccessResponse {
+  if ("error" in response) {
+    throw new Error(
+      `MCP request ${response.id} failed (${response.error.code}): ${response.error.message}`,
+    );
+  }
+  return response;
+}
+
 async function writeRequests(process: Bun.Subprocess<"pipe", "pipe", "pipe">): Promise<void> {
   process.stdin.write(
     request(1, "initialize", {
@@ -52,6 +73,16 @@ async function writeRequests(process: Bun.Subprocess<"pipe", "pipe", "pipe">): P
 }
 
 describe("MCP launcher", () => {
+  test("reports JSON-RPC errors with their request details", () => {
+    expect(() =>
+      requireSuccessfulResponse({
+        error: { code: -32_603, message: "Internal error" },
+        id: 2,
+        jsonrpc: "2.0",
+      }),
+    ).toThrow("MCP request 2 failed (-32603): Internal error");
+  });
+
   test("installs production dependencies and lists tools from a clean plugin copy", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-plugin-"));
     try {
@@ -110,8 +141,10 @@ describe("MCP launcher", () => {
         .split("\n")
         .map((line) => JSON.parse(line) as JsonRpcResponse);
       expect(responses.map(({ id }) => id)).toEqual([1, 2]);
-      expect(responses[0]?.result.serverInfo?.version).toBe(packageManifest.version);
-      expect(responses[1]?.result.tools?.map(({ name }) => name)).toEqual([
+      const initializeResponse = requireSuccessfulResponse(responses[0]!);
+      const toolsResponse = requireSuccessfulResponse(responses[1]!);
+      expect(initializeResponse.result.serverInfo?.version).toBe(packageManifest.version);
+      expect(toolsResponse.result.tools?.map(({ name }) => name)).toEqual([
         "initialize_policy_repository",
         "list_profiles",
         "get_active_profile",
