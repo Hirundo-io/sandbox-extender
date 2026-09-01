@@ -28,6 +28,7 @@ afterEach(() => {
 
 describe("Maker dependency request materializer", () => {
   test.each([
+    ["npm", ["npm", "install", "zod@4", "--ignore-scripts", "--cache", ".cache", "--prefix=."]],
     [
       "npm",
       [
@@ -109,6 +110,7 @@ describe("Maker dependency request materializer", () => {
           "bad@version",
           "--ignore-scripts",
           "--ignore-scripts",
+          "--package-lock-only",
           "--unknown",
           "--cache",
           "linked",

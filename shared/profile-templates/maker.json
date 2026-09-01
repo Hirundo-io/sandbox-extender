@@ -47,10 +47,10 @@
           "when {",
           "  context.materialized.manager == \"npm\" &&",
           "  [\"install\", \"i\", \"uninstall\", \"remove\", \"update\", \"up\"].contains(context.materialized.command) &&",
-          "  context.materialized.optionCount == 7 && context.materialized.duplicateOptionCount == 0 &&",
+          "  [6, 7].contains(context.materialized.optionCount) && context.materialized.duplicateOptionCount == 0 &&",
           "  context.materialized.unknownOptionCount == 0 && context.materialized.pathsWithinWorkspace &&",
           "  context.materialized.positionalsValid && context.materialized.options.ignoreScripts &&",
-          "  context.materialized.options.packageLockOnly && context.materialized.options.global == \"false\" &&",
+          "  context.materialized.options.global == \"false\" &&",
           "  context.materialized.options.location == \"project\" && context.materialized.options.workspaces == \"false\"",
           "};"
         ],

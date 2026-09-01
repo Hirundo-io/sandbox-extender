@@ -252,7 +252,7 @@ describe("shipped Profile templates", () => {
     }
   }, 20_000);
 
-  test("Maker permits lock-focused dependency changes inside the effective workspace", async () => {
+  test("Maker permits script-free npm installs inside the effective workspace", async () => {
     const workspace = await realpath(await mkdtemp(join(tmpdir(), "sandbox-extender-maker-")));
     try {
       const nested = join(workspace, "packages", "app");
@@ -263,8 +263,9 @@ describe("shipped Profile templates", () => {
       core.activate({ ...maker, allowedTargets: new Set([workspace]) }, "thread-1");
 
       for (const command of [
+        "npm install zod --ignore-scripts --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
-        "npm remove zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
+        "npm remove zod --ignore-scripts --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
         "bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         "bun remove zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         "uv add requests --no-sync --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
