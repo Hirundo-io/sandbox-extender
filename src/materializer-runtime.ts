@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,9 +136,14 @@ function executeMaterializer(
         readFileSync(join(dependencyDirectory, materializer.dependencies.denoLock)),
         { mode: 0o600 },
       );
+      cpSync(
+        dirname(fileURLToPath(import.meta.resolve("graphql"))),
+        join(temporaryDirectory, "node_modules", "graphql"),
+        { recursive: true },
+      );
       writeFileSync(
         join(temporaryDirectory, "deno.json"),
-        JSON.stringify({ imports: { graphql: "npm:graphql@16.14.2" } }),
+        JSON.stringify({ imports: { graphql: "./node_modules/graphql/index.mjs" } }),
         { mode: 0o600 },
       );
     }
@@ -147,6 +160,7 @@ function executeMaterializer(
               "--node-modules-dir=none",
               `--lock=${join(temporaryDirectory, "deno.lock")}`,
               `--import-map=${join(temporaryDirectory, "deno.json")}`,
+              `--allow-read=${temporaryDirectory}`,
             ]
           : ["--no-lock"]),
         ...denoPermissionFlags(materializer.permissions, workingDirectory, requestResource),
