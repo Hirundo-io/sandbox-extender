@@ -22,6 +22,14 @@ export const materializerPermissionManifestSchema = z
   })
   .strict();
 const materializerReferenceShape = {
+  dependencies: z
+    .object({
+      denoLock: z.literal("deno.lock"),
+      directory: z.string().regex(/^materializers\/dependencies\/[a-z0-9-]+$/),
+      packageJson: z.literal("package.json"),
+    })
+    .strict()
+    .optional(),
   integrity: z.string().regex(/^[0-9a-f]{64}$/),
   language: z.literal("typescript"),
   permissions: materializerPermissionManifestSchema,

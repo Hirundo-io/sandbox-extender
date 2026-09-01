@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { denoPermissionFlags, verifyMaterializerIntegrity } from "./materializer-policy.js";
@@ -101,17 +101,54 @@ function executeMaterializer(
 
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "sandbox-extender-materializer-"));
   const artifact = join(temporaryDirectory, "materializer.ts");
+  const dependencyDirectory = materializer.dependencies
+    ? join(dirname(dirname(dirname(materializer.file))), materializer.dependencies.directory)
+    : undefined;
   try {
     writeFileSync(artifact, materializer.reviewedSource, { encoding: "utf8", mode: 0o600 });
+    if (materializer.dependencies && dependencyDirectory) {
+      mkdirSync(join(temporaryDirectory, materializer.dependencies.directory), { recursive: true });
+      for (const file of [
+        materializer.dependencies.packageJson,
+        materializer.dependencies.denoLock,
+      ]) {
+        writeFileSync(
+          join(temporaryDirectory, materializer.dependencies.directory, file),
+          readFileSync(join(dependencyDirectory, file)),
+          { mode: 0o600 },
+        );
+      }
+      writeFileSync(
+        join(temporaryDirectory, "package.json"),
+        readFileSync(join(dependencyDirectory, materializer.dependencies.packageJson)),
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(temporaryDirectory, "deno.lock"),
+        readFileSync(join(dependencyDirectory, materializer.dependencies.denoLock)),
+        { mode: 0o600 },
+      );
+      writeFileSync(
+        join(temporaryDirectory, "deno.json"),
+        JSON.stringify({ imports: { graphql: "npm:graphql@16.14.2" } }),
+        { mode: 0o600 },
+      );
+    }
     const process = Bun.spawnSync({
       cmd: [
         resolvedOptions.denoExecutable,
         "run",
         "--no-prompt",
         "--no-config",
-        "--no-lock",
         "--cached-only",
         "--frozen",
+        ...(materializer.dependencies
+          ? [
+              "--node-modules-dir=none",
+              `--lock=${join(temporaryDirectory, "deno.lock")}`,
+              `--import-map=${join(temporaryDirectory, "deno.json")}`,
+            ]
+          : ["--no-lock"]),
         ...denoPermissionFlags(materializer.permissions, workingDirectory, requestResource),
         artifact,
       ],

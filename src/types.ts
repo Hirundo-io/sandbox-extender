@@ -56,6 +56,11 @@ export type Profile = {
 
 /** References engineer-reviewed executable code in the Policy Repository. */
 type MaterializerReference = {
+  readonly dependencies?: {
+    readonly directory: string;
+    readonly denoLock: string;
+    readonly packageJson: string;
+  };
   readonly file: string;
   /** SHA-256 of the complete self-contained source, permissions, and runtime version. */
   readonly integrity: string;

@@ -26,13 +26,35 @@ async function materializerReference(
   permissions: MaterializerPermissionManifest = emptyPermissions,
 ) {
   const source = await readFile(join(sharedMaterializerDirectory, kind, name), "utf8");
+  const isGitHubPullRequest = kind === "requests" && name === "github-pull-request.ts";
+  const materializerPermissions = isGitHubPullRequest
+    ? { ...permissions, env: ["NODE_ENV"], read: ["$WORKING_DIRECTORY"] }
+    : permissions;
   return {
+    ...(isGitHubPullRequest
+      ? {
+          dependencies: {
+            denoLock: "deno.lock",
+            directory: "materializers/dependencies/graphql",
+            packageJson: "package.json",
+          },
+        }
+      : {}),
     file: `materializers/${kind}/${name}`,
-    integrity: materializerIntegrity(source, permissions, "2.8.1"),
+    integrity: materializerIntegrity(source, materializerPermissions, "2.8.1"),
     language: "typescript" as const,
-    permissions,
+    permissions: materializerPermissions,
     runtimeVersion: "2.8.1",
   };
+}
+
+async function installGraphqlDependencies(root: string): Promise<void> {
+  const source = join(sharedMaterializerDirectory, "dependencies", "graphql");
+  const destination = join(root, "materializers", "dependencies", "graphql");
+  await mkdir(destination, { recursive: true });
+  for (const name of ["package.json", "deno.lock"]) {
+    await Bun.write(join(destination, name), await readFile(join(source, name)));
+  }
 }
 
 afterEach(async () => {
@@ -467,6 +489,7 @@ describe("PolicyRepository", () => {
     await repo.initialize();
     await installMaterializer(root, "activation", "github-pull-request.ts");
     await installMaterializer(root, "requests", "github-pull-request.ts");
+    await installGraphqlDependencies(root);
     await repo.writeProposal({
       profile: {
         allowedTargets: [],

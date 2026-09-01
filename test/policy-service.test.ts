@@ -29,11 +29,24 @@ const emptyPermissions = {
 } as const;
 
 function materializerReference(file: string, source: string) {
+  const isRequest = file.includes("requests/github-pull-request.ts");
+  const permissions = isRequest
+    ? { ...emptyPermissions, env: ["NODE_ENV"], read: ["$WORKING_DIRECTORY"] }
+    : emptyPermissions;
   return {
+    ...(isRequest
+      ? {
+          dependencies: {
+            denoLock: "deno.lock",
+            directory: "materializers/dependencies/graphql",
+            packageJson: "package.json",
+          },
+        }
+      : {}),
     file,
-    integrity: materializerIntegrity(source, emptyPermissions, "2.8.1"),
+    integrity: materializerIntegrity(source, permissions, "2.8.1"),
     language: "typescript" as const,
-    permissions: emptyPermissions,
+    permissions,
     runtimeVersion: "2.8.1",
   };
 }
@@ -224,6 +237,15 @@ describe("policy service", () => {
     try {
       await mkdir(join(root, "materializers", "activation"), { recursive: true });
       await mkdir(join(root, "materializers", "requests"), { recursive: true });
+      await mkdir(join(root, "materializers", "dependencies", "graphql"), { recursive: true });
+      for (const name of ["package.json", "deno.lock"]) {
+        await Bun.write(
+          join(root, "materializers", "dependencies", "graphql", name),
+          await readFile(
+            join(process.cwd(), "shared", "materializers", "dependencies", "graphql", name),
+          ),
+        );
+      }
       const activationSource = await readFile(
         join(process.cwd(), "shared", "materializers", "activation", "github-pull-request.ts"),
         "utf8",

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import {
   materializeGitHubPullRequest,
+  reviewThreadsQuery,
+  resolveReviewThreadMutation,
   runGitHubPullRequestMaterializer,
 } from "./github-pull-request.js";
 
@@ -41,7 +43,7 @@ describe("GitHub pull request request materializer", () => {
           "POST",
           "repos/acme/example/pulls/42/comments/9/replies",
           "-f",
-          "body=done",
+          "body=_Replying as Codex",
         ]),
       ),
     ).toEqual({
@@ -51,6 +53,106 @@ describe("GitHub pull request request materializer", () => {
       trailingArgumentCount: 0,
       trailingArguments: [],
     });
+  });
+
+  test("materializes the fixed read-only review-thread query", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${reviewThreadsQuery}`,
+          "-f",
+          "owner=Acme",
+          "-f",
+          "repo=Example",
+          "-F",
+          "pr=42",
+          "--paginate",
+          "--slurp",
+        ]),
+      ),
+    ).toEqual({
+      bodyPresent: false,
+      operation: "github.pull-request.review-threads",
+      resource: "github:pull-request:acme/example#42",
+      trailingArgumentCount: 0,
+      trailingArguments: [],
+    });
+  });
+
+  test("requires identified inline and file-backed replies", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/acme/example/pulls/42/comments/9/replies",
+          "-F",
+          "body=@reply.md",
+          "--jq",
+          ".html_url",
+        ]),
+        (path) => (path === "reply.md" ? "_Replying as Codex\n\nDone." : ""),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.review-comment.reply" }));
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${resolveReviewThreadMutation}`,
+          "-F",
+          "threadId=PRRT_kwDOUC1vvc6d0Nov",
+          "-f",
+          "clientMutationTag=acme/example#42",
+        ]),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        operation: "github.review-thread.resolve",
+        resource: "github:pull-request:acme/example#42",
+      }),
+    );
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/acme/example/pulls/42/comments/9/replies",
+          "-f",
+          "body=Done.",
+        ]),
+      ),
+    ).toBeUndefined();
+  });
+
+  test("materializes GraphQL resolution batches without variable-name conventions", () => {
+    const query = `mutation($first: ID!, $second: ID!) { one: resolveReviewThread(input: { threadId: $first, clientMutationId: "acme/example#42" }) { thread { id } } two: resolveReviewThread(input: { threadId: $second, clientMutationId: "acme/example#42" }) { thread { id } } }`;
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${query}`,
+          "-f",
+          "first=PRRT_one",
+          "-f",
+          "second=PRRT_two",
+        ]),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        operation: "github.review-thread.resolve",
+        resource: "github:pull-request:acme/example#42",
+      }),
+    );
   });
 
   test("writes the executable result and reports invalid input", async () => {
@@ -88,6 +190,41 @@ describe("GitHub pull request request materializer", () => {
       "body=x",
     ]),
     candidate(["gh", "api", "--method", "POST", "invalid", "-f", "body=x"]),
+    candidate([
+      "gh",
+      "api",
+      "graphql",
+      "-f",
+      "query=mutation { closeIssue(input: {}) { issue { id } } }",
+    ]),
+    candidate([
+      "gh",
+      "api",
+      "graphql",
+      "-f",
+      "query=query { viewer { login } }",
+      "-F",
+      "owner=acme",
+      "-F",
+      "name=example",
+      "-F",
+      "number=42",
+    ]),
+    candidate([
+      "gh",
+      "api",
+      "graphql",
+      "-f",
+      `query=${reviewThreadsQuery}`,
+      "-f",
+      "owner=acme",
+      "-f",
+      "repo=example",
+      "-F",
+      "pr=042",
+      "--paginate",
+      "--slurp",
+    ]),
     candidate([
       "gh",
       "api",

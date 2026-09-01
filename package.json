@@ -23,6 +23,7 @@
     "@cedar-policy/cedar-wasm": "^4.12.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "deno": "2.8.1",
+    "graphql": "16.14.2",
     "unbash": "4.0.10",
     "yaml": "^2.9.0",
     "zod": "^4.0.0"

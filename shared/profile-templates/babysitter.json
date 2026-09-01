@@ -19,13 +19,18 @@
   },
   "targetScope": "single",
   "requestMaterializer": {
+    "dependencies": {
+      "directory": "materializers/dependencies/graphql",
+      "packageJson": "package.json",
+      "denoLock": "deno.lock"
+    },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "6c6eef1d1cbdaf5af86728bc33324b9e1c47ee5e94f252b3252ff9226c4eeeac",
+    "integrity": "70c599453c373d968e10be56d7e795aabb76938e64f1d0029f163cbab24e448a",
     "language": "typescript",
     "permissions": {
-      "read": [],
+      "read": ["$WORKING_DIRECTORY"],
       "write": [],
-      "env": [],
+      "env": ["NODE_ENV"],
       "net": [],
       "sys": [],
       "run": [],
@@ -36,8 +41,10 @@
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",
     "Read pull-request status before changing code or responding to review.",
-    "Write only user-requested inline-body comments to that pull request.",
-    "Reply to review threads only through the pull request's explicit REST reply endpoint."
+    "Inspect all review threads with: gh api graphql --paginate --slurp -f 'query=<ReviewThreads query>' -f owner=<owner> -f repo=<repo> -F pr=<number>. The exact ReviewThreads query is in the reviewed request materializer.",
+    "Every reply must begin with _Replying as **Codex**. followed by a blank line. Run one gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment-id>/replies command per comment, each with -f body='_Replying as **Codex**.\n\n<reply>' or -F body=@<workspace-root reply-file> whose first bytes are that prefix. You may place multiple such commands in one ordinary shell sequence; do not use command substitution.",
+    "Resolve addressed threads with the reviewed ResolveReviewThread GraphQL mutation. You may resolve one thread per call or use the reviewed batch form with one PRRT variable per thread; every mutation in the batch must carry clientMutationTag=<owner>/<repo>#<pr>.",
+    "After replying to or resolving threads, tell the user which threads were replied to or resolved and include the resulting comment or thread links. Reading threads alone does not require a user-facing report."
   ],
   "groupings": [
     {
@@ -47,7 +54,7 @@
           "permit(principal, action, resource)",
           "when {",
           "  (context.materialized.trailingArgumentCount == 0 &&",
-          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\"].contains(context.materialized.operation)) ||",
+          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\", \"github.pull-request.review-threads\", \"github.review-thread.resolve\"].contains(context.materialized.operation)) ||",
           "  (context.materialized.operation == \"github.pull-request.checks\" &&",
           "    context.materialized.trailingArgumentCount == 1 && context.materialized.trailingArguments.contains(\"--watch\")) ||",
           "  (context.materialized.operation == \"github.pull-request.comment\" &&",
