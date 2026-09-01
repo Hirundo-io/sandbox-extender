@@ -71,7 +71,7 @@ async function writePlugin(root: string): Promise<void> {
   await mkdir(join(root, "src"));
   await mkdir(join(root, "shared", "profile-templates"), { recursive: true });
   await mkdir(join(root, "shared", "materializers", "requests"), { recursive: true });
-  await writeFile(join(root, "src", "mcp-server.ts"), "");
+  await writeFile(join(root, "src", "mcp-launcher.ts"), "");
   await writeCodexMarketplace(root, "test");
   await writeClaudeMarketplace(root, "test");
   await writeClaudePlugin(root, "test");
@@ -79,7 +79,7 @@ async function writePlugin(root: string): Promise<void> {
     join(root, ".codex-plugin", "plugin.json"),
     JSON.stringify({
       hooks: "./hooks/hooks.codex.json",
-      mcpServers: { test: { args: ["./src/mcp-server.ts"], command: "bun", cwd: "." } },
+      mcpServers: { test: { args: ["./src/mcp-launcher.ts"], command: "bun", cwd: "." } },
       name: "test",
       skills: "./skills",
       version: "1",
@@ -141,9 +141,9 @@ describe("plugin validation", () => {
     try {
       await writePlugin(root);
       await expect(validatePlugin(root)).resolves.toBeUndefined();
-      await rm(join(root, "src", "mcp-server.ts"));
+      await rm(join(root, "src", "mcp-launcher.ts"));
       await expect(validatePlugin(root)).rejects.toThrow();
-      await writeFile(join(root, "src", "mcp-server.ts"), "");
+      await writeFile(join(root, "src", "mcp-launcher.ts"), "");
       await writeFile(join(root, ".claude-plugin", "plugin.json"), "{}");
       await expect(validatePlugin(root)).rejects.toThrow();
       await writeClaudePlugin(root, "other");

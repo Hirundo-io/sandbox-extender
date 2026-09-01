@@ -10,6 +10,7 @@ import {
 } from "./materializer-policy.js";
 import {
   assertSupportedPlatform,
+  denoPackageName,
   materializeActivation,
   materializeRequest,
 } from "./materializer-runtime.js";
@@ -80,6 +81,14 @@ function request() {
 }
 
 describe("materializer runtime", () => {
+  test("resolves supported Deno packages and rejects unsupported platforms", () => {
+    expect(denoPackageName("darwin", "arm64")).toBe("darwin-arm64");
+    expect(denoPackageName("linux", "x64")).toBe("linux-x64-glibc");
+    expect(denoPackageName("win32", "x64")).toBe("win32-x64");
+    expect(() => denoPackageName("freebsd", "x64")).toThrow("unsupported Deno platform");
+    expect(() => denoPackageName("linux", "riscv64")).toThrow("unsupported Deno platform");
+  });
+
   test("rejects Linux musl before materialization", () => {
     expect(() => assertSupportedPlatform("linux", true)).toThrow("requires glibc");
     expect(() => assertSupportedPlatform("linux", false)).not.toThrow();

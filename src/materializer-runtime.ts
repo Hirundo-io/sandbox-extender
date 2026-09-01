@@ -11,7 +11,24 @@ import type {
   ShellCommandContext,
 } from "./types.js";
 
-const defaultDenoExecutable = fileURLToPath(new URL("../node_modules/.bin/deno", import.meta.url));
+export function denoPackageName(platform: NodeJS.Platform, architecture: string): string {
+  const platformName = platform === "linux" ? "linux" : platform;
+  const architectureName =
+    architecture === "x64" || architecture === "arm64" ? architecture : undefined;
+  if (!architectureName || !["darwin", "linux", "win32"].includes(platformName)) {
+    throw new Error(`unsupported Deno platform: ${platform}-${architecture}`);
+  }
+  const libc = platformName === "linux" ? "-glibc" : "";
+  return `${platformName}-${architectureName}${libc}`;
+}
+
+const denoExecutableName = process.platform === "win32" ? "deno.exe" : "deno";
+const defaultDenoExecutable = fileURLToPath(
+  new URL(
+    `../node_modules/@deno/${denoPackageName(process.platform, process.arch)}/${denoExecutableName}`,
+    import.meta.url,
+  ),
+);
 const defaultTimeoutMs = 5_000;
 const defaultOutputLimitBytes = 64 * 1024;
 

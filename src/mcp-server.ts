@@ -1,5 +1,6 @@
 import { McpServer, type ServerContext } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import packageManifest from "../package.json" with { type: "json" };
 
 import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
@@ -87,7 +88,7 @@ async function runMutation(
 
 export function buildServer(): McpServer {
   const server = new McpServer(
-    { name: "sandbox-extender", version: "0.1.2" },
+    { name: "sandbox-extender", version: packageManifest.version },
     { requestState: { verify: verifyProfileMutationRequestState } },
   );
 
