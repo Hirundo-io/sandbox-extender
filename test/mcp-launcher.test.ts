@@ -152,7 +152,6 @@ describe("MCP launcher", () => {
         "promote_profile",
         "activate_profile",
         "disable_profile",
-        "evaluate_request",
       ]);
     } finally {
       await rm(root, { force: true, recursive: true });
