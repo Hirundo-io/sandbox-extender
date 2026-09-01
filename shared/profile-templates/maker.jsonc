@@ -13,9 +13,9 @@
       "net": [],
       "sys": [],
       "run": [],
-      "ffi": []
+      "ffi": [],
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
@@ -28,15 +28,15 @@
       "net": [],
       "sys": [],
       "run": [],
-      "ffi": []
+      "ffi": [],
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
   },
   "sessionContext": [
     "Prefer established packages with multiple maintainers and recent updates.",
     "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
     "Keep dependency changes narrow; explain package and lockfile changes.",
-    "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace."
+    "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace.",
   ],
   "groupings": [
     {
@@ -52,7 +52,7 @@
           "  context.materialized.positionalsValid && context.materialized.options.ignoreScripts &&",
           "  context.materialized.options.packageLockOnly && context.materialized.options.global == \"false\" &&",
           "  context.materialized.options.location == \"project\" && context.materialized.options.workspaces == \"false\"",
-          "};"
+          "};",
         ],
         "allowBunDependencyChanges": [
           "permit(principal, action, resource)",
@@ -63,7 +63,7 @@
           "  context.materialized.unknownOptionCount == 0 && context.materialized.pathsWithinWorkspace &&",
           "  context.materialized.positionalsValid && context.materialized.options.ignoreScripts &&",
           "  context.materialized.options.lockfileOnly",
-          "};"
+          "};",
         ],
         "allowUvDependencyChanges": [
           "permit(principal, action, resource)",
@@ -76,7 +76,7 @@
           "  context.materialized.options.noPythonDownloads && context.materialized.options.noSources &&",
           "  ((context.materialized.command == \"lock\" && context.materialized.optionCount == 6) ||",
           "   (context.materialized.command != \"lock\" && context.materialized.optionCount == 7 && context.materialized.options.noSync))",
-          "};"
+          "};",
         ],
         "allowPixiDependencyChanges": [
           "permit(principal, action, resource)",
@@ -87,9 +87,9 @@
           "  context.materialized.unknownOptionCount == 0 && context.materialized.pathsWithinWorkspace &&",
           "  context.materialized.positionalsValid && context.materialized.options.noConfig &&",
           "  context.materialized.options.noInstall && context.materialized.options.offline",
-          "};"
-        ]
-      }
-    }
-  ]
+          "};",
+        ],
+      },
+    },
+  ],
 }

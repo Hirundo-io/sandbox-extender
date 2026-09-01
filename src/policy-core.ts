@@ -405,6 +405,9 @@ export class PolicyCore {
     if (!segments) {
       return { decision: "abstain", reason: "shell syntax cannot be authorized safely" };
     }
+    if (profile.singleCommand && segments.length !== 1) {
+      return { decision: "abstain", reason: "profile requires one shell command" };
+    }
 
     const matchedGroupingIds: string[] = [];
     const resolvedTargets: string[] = [];

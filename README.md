@@ -131,9 +131,11 @@ objects match their MCP inputs with `threadId` removed. Run the command with
 `--help` to see each operation's shape. Request evaluation remains available
 without mutation Approval.
 
-The disabled `shared/profile-templates/scout.json`,
-`shared/profile-templates/maker.json`, and
-`shared/profile-templates/babysitter.json` files are Profile templates. Their
+The disabled `shared/profile-templates/scout.jsonc`,
+`shared/profile-templates/maker.jsonc`, and
+`shared/profile-templates/babysitter.jsonc` files are Profile templates. They
+use JSONC so the reviewed policy and permission rationale can sit beside the
+declarations as inline comments. Their
 `pending-review` revision prevents activation until you copy, scope, review,
 and promote them. A Profile template is not itself a Cedar policy or an active
 Profile. It contains the Profile's target scope, ordered groupings, Cedar
@@ -214,7 +216,7 @@ runs `gh pr view --json number,url` when activation receives
 repository and pull-request number. It validates the returned GitHub URL and
 number before freezing one canonical pull-request Target. Its Profile uses this
 data-only declaration in the canonical
-[`shared/profile-templates/babysitter.json`](shared/profile-templates/babysitter.json)
+[`shared/profile-templates/babysitter.jsonc`](shared/profile-templates/babysitter.jsonc)
 template. Use that file rather than copying its integrity digest into another
 profile or document.
 

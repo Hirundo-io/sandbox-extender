@@ -92,10 +92,10 @@ async function writePlugin(root: string): Promise<void> {
     }),
   );
   await writeFile(
-    join(root, "shared", "profile-templates", "scout.json"),
-    JSON.stringify({
+    join(root, "shared", "profile-templates", "scout.jsonc"),
+    `// Profile templates may carry reviewed inline rationale.\n${JSON.stringify({
       requestMaterializer: requestMaterializerReference(),
-    }),
+    })}`,
   );
   await writeFile(join(root, "shared", "materializers", "requests", "repository.ts"), "");
 }
@@ -170,14 +170,14 @@ describe("plugin validation", () => {
       await writeCodexMarketplace(root, "test");
       await writeClaudeMarketplace(root, "test");
       await writeFile(
-        join(root, "shared", "profile-templates", "scout.json"),
+        join(root, "shared", "profile-templates", "scout.jsonc"),
         JSON.stringify({
           requestMaterializer: requestMaterializerReference("../../arbitrary-code.ts"),
         }),
       );
       await expect(validatePlugin(root)).rejects.toThrow();
       await writeFile(
-        join(root, "shared", "profile-templates", "scout.json"),
+        join(root, "shared", "profile-templates", "scout.jsonc"),
         JSON.stringify({
           requestMaterializer: requestMaterializerReference(),
         }),

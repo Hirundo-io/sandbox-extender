@@ -30,6 +30,7 @@ describe("repository request materializer", () => {
     ).toEqual({
       argumentsSafe: true,
       duplicateOptionCount: 1,
+      localSafe: false,
       operation: "github.pr.view",
       remoteSafe: true,
       resource: "github:repository:acme/example",
@@ -64,6 +65,36 @@ describe("repository request materializer", () => {
         gitRemote("git@github.com:acme/example.git"),
       ),
     ).toEqual(expect.objectContaining({ remoteSafe: true }));
+  });
+
+  test("materializes allowlisted local Git inspection", () => {
+    for (const words of [
+      ["git", "status"],
+      ["git", "status", "--short"],
+      ["git", "diff"],
+      ["git", "diff", "--check", "--name-only"],
+      ["git", "log", "HEAD"],
+      ["git", "show", "HEAD"],
+      ["git", "rev-parse", "HEAD"],
+      ["git", "branch", "--show-current"],
+      ["git", "config", "--get", "core.hooksPath"],
+    ]) {
+      expect(materializeRepository(candidate(words))).toEqual(
+        expect.objectContaining({
+          argumentsSafe: true,
+          duplicateOptionCount: 0,
+          localSafe: true,
+          remoteSafe: false,
+          resource: "/work",
+        }),
+      );
+    }
+  });
+
+  test("does not bind local inspection from another directory", () => {
+    expect(materializeRepository(candidate(["git", "status"], "/work", "/work/nested"))).toEqual(
+      expect.objectContaining({ localSafe: false }),
+    );
   });
 
   test("uses git to resolve a remote by default", () => {
@@ -131,6 +162,13 @@ describe("repository request materializer", () => {
     candidate(["git", "fetch", "--dry-run", "-x"]),
     candidate(["git", "push", "origin"]),
     candidate(["git", "ls-remote", "--upload-pack=sh", "origin"]),
+    candidate(["git", "status", "--porcelain"]),
+    candidate(["git", "diff", "--output=/tmp/diff"]),
+    candidate(["git", "log", "--config=alias.log=!sh"]),
+    candidate(["git", "show", "--no-ext-diff"]),
+    candidate(["git", "rev-parse", "--git-path", "hooks"]),
+    candidate(["git", "branch", "--show-current", "main"]),
+    candidate(["git", "config", "--get", "core.sshCommand"]),
   ])("rejects unsupported input %#", (value) =>
     expect(materializeRepository(value)).toBeUndefined(),
   );

@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   materializeTargetSetActivation,
@@ -8,6 +11,15 @@ import {
 describe("target set activation materializer", () => {
   test("returns a non-empty unique target set", () => {
     expect(materializeTargetSetActivation({ targets: ["one", "two"] })).toEqual(["one", "two"]);
+  });
+
+  test("binds a workspace activation to its realpath", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "sandbox-extender-scout-"));
+    try {
+      expect(materializeTargetSetActivation({ workspace })).toEqual([realpathSync(workspace)]);
+    } finally {
+      rmSync(workspace, { force: true, recursive: true });
+    }
   });
 
   test("writes the executable result and reports invalid input", async () => {
@@ -31,6 +43,8 @@ describe("target set activation materializer", () => {
     { targets: [""] },
     { targets: ["one", 2] },
     { targets: ["one", "one"] },
+    { workspace: "relative" },
+    { workspace: "/does/not/exist" },
   ])("rejects invalid arguments %#", (candidate) => {
     expect(materializeTargetSetActivation(candidate)).toBeUndefined();
   });

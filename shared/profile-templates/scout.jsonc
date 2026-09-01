@@ -1,10 +1,12 @@
 {
   "id": "scout",
   "policyRevision": "pending-review",
+  // Every Scout shell request must contain exactly one executable command.
+  "singleCommand": true,
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/target-set.ts",
-    "integrity": "5efe81e659f4ddf62fcd0c6b8712806fff6eac4dabe6ae67dcb0bb305359e389",
+    "integrity": "ec4ee0a3f14d9ad4e400c2be514ad3dbca441750df33eb2bcab5970ed143e070",
     "language": "typescript",
     "permissions": {
       "read": [],
@@ -13,26 +15,29 @@
       "net": [],
       "sys": [],
       "run": [],
-      "ffi": []
+      "ffi": [],
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
   },
   "requestMaterializer": {
     "file": "materializers/requests/repository.ts",
-    "integrity": "ddc6da5f9d82469b567aa7d0976ef1a4b189e629b512087fe93d7930a5f67c59",
+    "integrity": "900312828cc4ff5e8614232f5585c6744dcea92520ac6e03b23e1e70b2aedd7e",
     "language": "typescript",
     "permissions": {
-      "read": [],
+      // Policy Core substitutes canonical request paths and verifies containment.
+      "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
       "write": [],
       "env": [],
       "net": [],
       "sys": [],
       "run": ["git"],
-      "ffi": []
+      "ffi": [],
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
   },
   "sessionContext": ["Use this profile only for inspection. Do not alter files or remote state."],
+  // Local inspection is limited to the listed read-only Git operations. The
+  // materializer rejects mutations, unsafe options, path escapes, and helpers.
   "groupings": [
     {
       "id": "read-only-inspection",
@@ -49,9 +54,20 @@
           "    \"github.run.list\", \"github.run.view\", \"github.workflow.list\", \"github.workflow.view\",",
           "    \"git.fetch\", \"git.ls-remote\"",
           "  ].contains(context.materialized.operation)",
-          "};"
-        ]
-      }
-    }
-  ]
+          "};",
+        ],
+        "allowLocalInspection": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.materialized.argumentsSafe && context.materialized.duplicateOptionCount == 0 &&",
+          "  context.materialized.localSafe &&",
+          "  [",
+          "    \"git.branch\", \"git.config\", \"git.diff\", \"git.log\", \"git.rev-parse\",",
+          "    \"git.show\", \"git.status\"",
+          "  ].contains(context.materialized.operation)",
+          "};",
+        ],
+      },
+    },
+  ],
 }

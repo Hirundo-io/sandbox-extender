@@ -49,6 +49,8 @@ export type Profile = {
   readonly id: string;
   readonly policyRevision: string;
   readonly sessionContext?: readonly string[];
+  /** Reject shell requests containing more than one executable segment. */
+  readonly singleCommand?: true;
   /** Requires exactly one reviewed target before this profile can authorize. */
   readonly targetScope?: "single";
   readonly requestMaterializer?: RequestMaterializer;
@@ -114,6 +116,7 @@ export type ProfileProposal = {
     readonly id: string;
     readonly policyRevision: string;
     readonly sessionContext?: readonly string[];
+    readonly singleCommand?: true;
     readonly targetScope?: "single";
     readonly requestMaterializer?: Omit<RequestMaterializer, "reviewedSource">;
   };

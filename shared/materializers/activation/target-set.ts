@@ -1,6 +1,18 @@
+import { realpathSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
+
 export function materializeTargetSetActivation(candidate: unknown): readonly string[] | undefined {
-  if (typeof candidate !== "object" || candidate === null || !("targets" in candidate))
-    return undefined;
+  if (typeof candidate !== "object" || candidate === null) return undefined;
+  if ("workspace" in candidate) {
+    if (typeof candidate.workspace !== "string" || !isAbsolute(candidate.workspace))
+      return undefined;
+    try {
+      return [realpathSync(resolve(candidate.workspace))];
+    } catch {
+      return undefined;
+    }
+  }
+  if (!("targets" in candidate)) return undefined;
   const values = candidate.targets;
   return Array.isArray(values) &&
     values.length > 0 &&

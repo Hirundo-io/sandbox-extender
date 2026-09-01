@@ -105,6 +105,7 @@ function stubRepository(
         id: profile.id,
         policyRevision: profile.policyRevision,
         sessionContext: profile.sessionContext ?? [],
+        singleCommand: profile.singleCommand,
         targetScope: profile.targetScope,
         activationMaterializer: profile.activationMaterializer,
         requestMaterializer: profile.requestMaterializer,

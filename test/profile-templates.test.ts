@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { parse, type ParseError } from "jsonc-parser";
+
 import { PolicyCore, type CedarGrouping, type Profile } from "../src/index.js";
 import { evaluateCedarGrouping } from "../src/cedar.js";
 import { materializeGitHubPullRequest } from "../shared/materializers/requests/github-pull-request.js";
@@ -22,9 +24,13 @@ function runGit(workspace: string, ...arguments_: string[]): void {
 }
 
 async function profileTemplate(name: string): Promise<Profile> {
-  const candidate: unknown = JSON.parse(
-    await readFile(join(profileTemplateDirectory, `${name}.json`), "utf8"),
+  const errors: ParseError[] = [];
+  const candidate: unknown = parse(
+    await readFile(join(profileTemplateDirectory, `${name}.jsonc`), "utf8"),
+    errors,
+    { allowTrailingComma: true },
   );
+  if (errors.length > 0) throw new Error(`${name} template is not valid JSONC`);
   const profile = candidate as Omit<Profile, "allowedTargets"> & { allowedTargets: string[] };
   const allowedTargets =
     name === "babysitter"
@@ -71,7 +77,11 @@ describe("shipped Profile templates", () => {
       read: ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
     });
     expect(scout.activationMaterializer?.permissions).toEqual(emptyPermissions);
-    expect(scout.requestMaterializer?.permissions).toEqual({ ...emptyPermissions, run: ["git"] });
+    expect(scout.requestMaterializer?.permissions).toEqual({
+      ...emptyPermissions,
+      read: ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
+      run: ["git"],
+    });
 
     for (const profile of [babysitter, maker, scout]) {
       expect(profile.activationMaterializer?.reviewedSource).not.toMatch(/\bBun\b/);
@@ -183,7 +193,7 @@ describe("shipped Profile templates", () => {
   }, 20_000);
 
   test("Scout permits safe Git remotes and rejects executable remote helpers", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "sandbox-extender-scout-"));
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "sandbox-extender-scout-")));
     try {
       const nested = join(workspace, "nested");
       await mkdir(nested);
@@ -235,6 +245,65 @@ describe("shipped Profile templates", () => {
         "git ls-remote ssh://-F/example.git",
         "git ls-remote --upload-pack=sh origin",
         "cd nested && git ls-remote origin",
+      ]) {
+        expect(
+          (
+            await core.evaluate({
+              action: "codex.unified_exec",
+              arguments: { command },
+              resource: workspace,
+              threadId: "thread-1",
+            })
+          ).decision,
+        ).toBe("abstain");
+      }
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+    }
+  }, 20_000);
+
+  test("Scout permits only bound local Git inspection", async () => {
+    const workspace = await realpath(
+      await mkdtemp(join(tmpdir(), "sandbox-extender-scout-local-")),
+    );
+    const nested = join(workspace, "nested");
+    try {
+      await mkdir(nested);
+      runGit(workspace, "init", "--quiet");
+      const scout = await profileTemplate("scout");
+      const core = new PolicyCore();
+      core.activate({ ...scout, allowedTargets: new Set([workspace]) }, "thread-1");
+
+      for (const command of [
+        "git status",
+        "git status --short",
+        "git diff --check",
+        "git diff --name-only",
+        "git log",
+        "git show HEAD",
+        "git rev-parse HEAD",
+        "git branch --show-current",
+        "git config --get core.hooksPath",
+      ]) {
+        expect(
+          (
+            await core.evaluate({
+              action: "codex.unified_exec",
+              arguments: { command },
+              resource: workspace,
+              threadId: "thread-1",
+            })
+          ).decision,
+        ).toBe("allow");
+      }
+
+      for (const command of [
+        "git add .",
+        "git status --porcelain",
+        "git -C ../outside status",
+        "git diff --output=/tmp/diff",
+        "git status && git diff",
+        "cd nested && git status",
       ]) {
         expect(
           (

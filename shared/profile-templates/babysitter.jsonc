@@ -13,9 +13,9 @@
       "net": [],
       "sys": [],
       "run": ["gh"],
-      "ffi": []
+      "ffi": [],
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
   },
   "targetScope": "single",
   "requestMaterializer": {
@@ -29,15 +29,15 @@
       "net": [],
       "sys": [],
       "run": [],
-      "ffi": []
+      "ffi": [],
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
   },
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",
     "Read pull-request status before changing code or responding to review.",
     "Write only user-requested inline-body comments to that pull request.",
-    "Reply to review threads only through the pull request's explicit REST reply endpoint."
+    "Reply to review threads only through the pull request's explicit REST reply endpoint.",
   ],
   "groupings": [
     {
@@ -52,15 +52,15 @@
           "    context.materialized.trailingArgumentCount == 1 && context.materialized.trailingArguments.contains(\"--watch\")) ||",
           "  (context.materialized.operation == \"github.pull-request.comment\" &&",
           "    context.materialized.trailingArgumentCount == 2 && context.materialized.bodyPresent)",
-          "};"
+          "};",
         ],
         "allowReviewThreadReplies": [
           "permit(principal, action, resource)",
           "when {",
           "  context.materialized.operation == \"github.review-comment.reply\" && context.materialized.bodyPresent",
-          "};"
-        ]
-      }
-    }
-  ]
+          "};",
+        ],
+      },
+    },
+  ],
 }
