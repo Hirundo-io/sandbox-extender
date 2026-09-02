@@ -12,6 +12,44 @@ function candidate(words: unknown): unknown {
   return { command: { words } };
 }
 
+function currentPullRequest(repository = "Hirundo-io/hirundo-platform", number = 513) {
+  return {
+    headSha: "a".repeat(40),
+    resource: `github:pull-request:${repository.toLowerCase()}#${number}`,
+  };
+}
+
+const watcherPullRequestFields =
+  "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
+const watcherChecksFields = "name,state,bucket,link,workflow,event,startedAt,completedAt";
+const watcherReviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          comments(first: 100) {
+            pageInfo { hasNextPage endCursor }
+            nodes { databaseId createdAt body path line originalLine url authorAssociation author { login __typename } pullRequestReview { state } }
+          }
+        }
+      }
+    }
+  }
+}`;
+const watcherThreadCommentsQuery = `query($threadId: ID!, $cursor: String) {
+  node(id: $threadId) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { databaseId body }
+      }
+    }
+  }
+}`;
+
 function mockDenoCommand(stdout: string, success = true): () => void {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
   Object.defineProperty(globalThis, "Deno", {
@@ -20,6 +58,32 @@ function mockDenoCommand(stdout: string, success = true): () => void {
       Command: class {
         outputSync() {
           return { success, stdout: new TextEncoder().encode(stdout) };
+        }
+      },
+    },
+  });
+  return () => {
+    if (descriptor) Object.defineProperty(globalThis, "Deno", descriptor);
+    else Reflect.deleteProperty(globalThis, "Deno");
+  };
+}
+
+function mockDenoCommandSequence(outputs: readonly string[], observed: string[][]): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+  let outputIndex = 0;
+  Object.defineProperty(globalThis, "Deno", {
+    configurable: true,
+    value: {
+      Command: class {
+        constructor(executable: string, options: { readonly args: readonly string[] }) {
+          observed.push([executable, ...options.args]);
+        }
+
+        outputSync() {
+          return {
+            success: true,
+            stdout: new TextEncoder().encode(outputs[outputIndex++] ?? ""),
+          };
         }
       },
     },
@@ -50,6 +114,294 @@ describe("GitHub pull request request materializer", () => {
     ).toEqual(
       expect.objectContaining({ bodyPresent: true, operation: "github.pull-request.comment" }),
     );
+  });
+
+  test("materializes an attributed pull-request conversation comment", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "--method",
+          "POST",
+          "repos/Hirundo-io/hirundo-platform/issues/513/comments",
+          "-f",
+          "body=_Replying as Codex. Addressed the review feedback.",
+        ]),
+      ),
+    ).toEqual({
+      bodyPresent: true,
+      operation: "github.pull-request.conversation-comment",
+      resource: "github:pull-request:hirundo-io/hirundo-platform#513",
+      trailingArgumentCount: 0,
+      trailingArguments: [],
+    });
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "--method",
+          "POST",
+          "repos/Hirundo-io/hirundo-platform/issues/513/comments",
+          "-f",
+          "body=[from Codex]: Addressed the review feedback.",
+        ]),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.conversation-comment" }));
+  });
+
+  test("materializes only the reviewed repo-local checks JSON selection", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "pr", "checks", "513", "--json", "name,state,bucket,link,workflow"]),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+      ),
+    ).toEqual({
+      bodyPresent: false,
+      operation: "github.pull-request.checks",
+      resource: "github:pull-request:hirundo-io/hirundo-platform#513",
+      trailingArgumentCount: 2,
+      trailingArguments: ["--json", "name,state,bucket,link,workflow"],
+    });
+  });
+
+  test("materializes the watcher's PR metadata and checks commands", () => {
+    for (const words of [
+      ["gh", "pr", "view", "--json", watcherPullRequestFields],
+      [
+        "gh",
+        "-R",
+        "Hirundo-io/hirundo-platform",
+        "pr",
+        "view",
+        "513",
+        "--json",
+        watcherPullRequestFields,
+      ],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+          currentPullRequest(),
+        ),
+      ).toEqual(expect.objectContaining({ operation: "github.pull-request.view" }));
+    }
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "-R",
+          "Hirundo-io/hirundo-platform",
+          "pr",
+          "checks",
+          "513",
+          "--json",
+          watcherChecksFields,
+        ]),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.checks" }));
+  });
+
+  test("materializes the watcher's PR-scoped REST and Actions reads", () => {
+    const pullRequestLookup = () => currentPullRequest();
+    const runLookup = (repository: string, runId: string) =>
+      repository.toLowerCase() === "hirundo-io/hirundo-platform" && runId === "9001"
+        ? currentPullRequest().resource
+        : undefined;
+    for (const [words, operation] of [
+      [
+        ["gh", "api", "repos/Hirundo-io/hirundo-platform/issues/513/comments?per_page=100&page=2"],
+        "github.pull-request.conversation-comments",
+      ],
+      [
+        ["gh", "api", "repos/Hirundo-io/hirundo-platform/pulls/513/reviews?per_page=100&page=1"],
+        "github.pull-request.reviews",
+      ],
+      [
+        [
+          "gh",
+          "api",
+          "repos/Hirundo-io/hirundo-platform/actions/runs",
+          "-X",
+          "GET",
+          "-f",
+          `head_sha=${"a".repeat(40)}`,
+          "-f",
+          "per_page=100",
+          "-f",
+          "page=1",
+        ],
+        "github.actions.runs",
+      ],
+      [
+        [
+          "gh",
+          "api",
+          "repos/Hirundo-io/hirundo-platform/actions/runs/9001/jobs",
+          "-X",
+          "GET",
+          "-f",
+          "per_page=100",
+          "-f",
+          "page=1",
+        ],
+        "github.actions.jobs",
+      ],
+    ] as const) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(words),
+          undefined,
+          undefined,
+          undefined,
+          pullRequestLookup,
+          runLookup,
+        ),
+      ).toEqual(expect.objectContaining({ operation }));
+    }
+  });
+
+  test("materializes verified workflow-run diagnosis and failed reruns", () => {
+    const runLookup = () => currentPullRequest().resource;
+    const jobLookup = () => true;
+    for (const [words, operation] of [
+      [
+        [
+          "gh",
+          "-R",
+          "Hirundo-io/hirundo-platform",
+          "run",
+          "view",
+          "9001",
+          "--json",
+          "jobs,name,workflowName,conclusion,status,url,headSha",
+        ],
+        "github.actions.run-view",
+      ],
+      [
+        [
+          "gh",
+          "run",
+          "view",
+          "9001",
+          "--json",
+          "jobs,name,workflowName,conclusion,status,url,headSha",
+        ],
+        "github.actions.run-view",
+      ],
+      [
+        [
+          "gh",
+          "-R",
+          "Hirundo-io/hirundo-platform",
+          "run",
+          "view",
+          "9001",
+          "--job",
+          "7001",
+          "--log",
+        ],
+        "github.actions.run-view",
+      ],
+      [
+        ["gh", "-R", "Hirundo-io/hirundo-platform", "run", "rerun", "9001", "--failed"],
+        "github.actions.rerun-failed",
+      ],
+    ] as const) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(words),
+          undefined,
+          undefined,
+          undefined,
+          () => currentPullRequest(),
+          runLookup,
+          jobLookup,
+        ),
+      ).toEqual(expect.objectContaining({ operation }));
+    }
+  });
+
+  test("verifies workflow runs without account, auth, token, or configuration queries", () => {
+    const observed: string[][] = [];
+    const restore = mockDenoCommandSequence(
+      [
+        `${"a".repeat(40)}\n`,
+        JSON.stringify({
+          headRefOid: "a".repeat(40),
+          number: 513,
+          url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+        }),
+      ],
+      observed,
+    );
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "-R",
+            "Hirundo-io/hirundo-platform",
+            "run",
+            "rerun",
+            "9001",
+            "--failed",
+          ]),
+        ),
+      ).toEqual(expect.objectContaining({ operation: "github.actions.rerun-failed" }));
+      expect(observed).toEqual([
+        ["gh", "api", "repos/Hirundo-io/hirundo-platform/actions/runs/9001", "--jq", ".head_sha"],
+        ["gh", "pr", "view", "--json", "number,url,headRefOid"],
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("materializes both watcher GraphQL pagination queries", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${watcherReviewThreadsQuery}`,
+          "-F",
+          "owner=Hirundo-io",
+          "-F",
+          "name=hirundo-platform",
+          "-F",
+          "number=513",
+          "-F",
+          "cursor=cursor-2",
+        ]),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.review-threads" }));
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${watcherThreadCommentsQuery}`,
+          "-F",
+          "threadId=PRRT_current",
+          "-F",
+          "cursor=cursor-2",
+        ]),
+        undefined,
+        () => currentPullRequest().resource,
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.review-thread.comments" }));
   });
 
   test("materializes REST review replies", () => {
@@ -191,7 +543,102 @@ describe("GitHub pull request request materializer", () => {
       trailingArgumentCount: 0,
       trailingArguments: [],
     });
+    const reformattedQuery = reviewThreadsQuery.replaceAll("\n", " ").replaceAll(/\s+/g, " ");
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "--paginate",
+          "--slurp",
+          "-f",
+          "owner=Acme",
+          "-f",
+          "repo=Example",
+          "-F",
+          "pr=42",
+          "-f",
+          `query=${reformattedQuery}`,
+        ]),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.review-threads" }));
   });
+
+  test("allows flexible pagination and comment projections in the review-thread query", () => {
+    const query = `query($owner:String!,$repo:String!,$pr:Int!,$endCursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$pr){headRefOid reviewThreads(first:37,after:$endCursor){nodes{id isResolved isOutdated path line comments(first:73){nodes{id databaseId state authorAssociation reactionGroups{content users{totalCount}}}}} pageInfo{hasNextPage endCursor}}}}}`;
+    const command = [
+      "gh",
+      "api",
+      "graphql",
+      "--paginate",
+      "--slurp",
+      "-f",
+      "owner=Acme",
+      "-f",
+      "repo=Example",
+      "-F",
+      "pr=42",
+      "-f",
+      `query=${query}`,
+    ];
+    expect(materializeGitHubPullRequest(candidate(command))).toEqual(
+      expect.objectContaining({ operation: "github.pull-request.review-threads" }),
+    );
+    const withoutPageInfo = query.replace(" pageInfo{hasNextPage endCursor}", "");
+    expect(
+      materializeGitHubPullRequest(
+        candidate(command.with(command.length - 1, `query=${withoutPageInfo}`)),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.review-threads" }));
+  });
+
+  test.each([
+    [
+      "conversation comment without attribution",
+      [
+        "gh",
+        "api",
+        "--method",
+        "POST",
+        "repos/Hirundo-io/hirundo-platform/issues/513/comments",
+        "-f",
+        "body=Missing attribution.",
+      ],
+    ],
+    [
+      "checks with an unreviewed JSON field",
+      ["gh", "pr", "checks", "513", "--json", "name,state,bucket,link,workflow,event"],
+    ],
+    [
+      "checks with a trailing flag",
+      ["gh", "pr", "checks", "513", "--json", "name,state,bucket,link,workflow", "--watch"],
+    ],
+    [
+      "a non-numeric comments page size",
+      [
+        "gh",
+        "api",
+        "graphql",
+        "--paginate",
+        "--slurp",
+        "-f",
+        "owner=Acme",
+        "-f",
+        "repo=Example",
+        "-F",
+        "pr=42",
+        "-f",
+        `query=${reviewThreadsQuery.replace("first: 20", "first: $pr")}`,
+      ],
+    ],
+  ])("rejects %s", (_name, words) =>
+    expect(
+      materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+        currentPullRequest(),
+      ),
+    ).toBeUndefined(),
+  );
 
   test("materializes the documented GraphQL review reply only for a live pull-request thread", () => {
     const query = `mutation($thread:ID!, $body:String!) { addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread, body:$body}) { comment { url } } }`;
@@ -515,6 +962,33 @@ describe("GitHub pull request request materializer", () => {
       ),
     ).toBeUndefined();
   });
+
+  test.each(
+    [
+      ["gh", "auth", "status"],
+      ["gh", "auth", "token"],
+      ["gh", "api", "user"],
+      ["gh", "api", "user", "--jq", ".login"],
+      ["gh", "api", "rate_limit"],
+      ["gh", "api", "repos/Hirundo-io/hirundo-platform/actions/secrets"],
+      ["gh", "-R", "Hirundo-io/other", "run", "rerun", "9001", "--failed"],
+      ["gh", "-R", "Hirundo-io/hirundo-platform", "run", "view", "9001", "--job", "9999", "--log"],
+    ].map((words) => [words] as const),
+  )("rejects account, credential, generic API, and unrelated-repository access %#", (words) =>
+    expect(
+      materializeGitHubPullRequest(
+        candidate(words),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+        (repository) =>
+          repository.toLowerCase() === "hirundo-io/hirundo-platform"
+            ? currentPullRequest().resource
+            : undefined,
+      ),
+    ).toBeUndefined(),
+  );
 
   test("writes the executable result and reports invalid input", async () => {
     const output: string[] = [];

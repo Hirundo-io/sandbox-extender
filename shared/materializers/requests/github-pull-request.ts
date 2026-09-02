@@ -1,4 +1,4 @@
-import { Kind, parse } from "graphql";
+import { Kind, parse, visit, type ASTNode, type DocumentNode } from "graphql";
 
 type RequestMaterializerInput = {
   readonly command?: { readonly words?: unknown };
@@ -13,6 +13,10 @@ type PullRequestOperation = {
 };
 
 const replyPrefix = "_Replying as ";
+const watcherPullRequestFields =
+  "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
+const watcherChecksFields = "name,state,bucket,link,workflow,event,startedAt,completedAt";
+const reviewedChecksFields = "name,state,bucket,link,workflow";
 type ReadTextFile = (path: string) => string;
 type ReviewThreadLookup = (threadId: string) => string | undefined;
 type ReviewCommentLookup = (
@@ -21,37 +25,60 @@ type ReviewCommentLookup = (
   pullRequestNumber: string,
   commentId: string,
 ) => boolean;
+type PullRequestLookup = () => { readonly headSha: string; readonly resource: string } | undefined;
+type RunLookup = (repository: string, runId: string) => string | undefined;
+type JobLookup = (repository: string, runId: string, jobId: string) => boolean;
 
-export const reviewThreadsQuery = `query ReviewThreads($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
+export const reviewThreadsQuery = `query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $pr) {
+      headRefOid
       reviewThreads(first: 100, after: $endCursor) {
-        nodes {
-          id
-          isResolved
-          isOutdated
-          comments(first: 100) {
-            nodes {
-              id
-              body
-              author {
-                login
-              }
-              path
-              line
-              originalLine
-              diffHunk
-              createdAt
-              updatedAt
-              url
-            }
-          }
-        }
         pageInfo {
           hasNextPage
           endCursor
         }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first: 20) {
+            nodes {
+              fullDatabaseId
+              author {
+                login
+              }
+              body
+              url
+            }
+          }
+        }
       }
+    }
+  }
+}`;
+
+const watcherReviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          comments(first: 100) { nodes { databaseId } }
+        }
+      }
+    }
+  }
+}`;
+
+const watcherReviewThreadCommentsQuery = `query($threadId: ID!, $cursor: String) {
+  node(id: $threadId) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $cursor) { nodes { databaseId } }
     }
   }
 }`;
@@ -118,6 +145,28 @@ function canonicalTarget(repository: string, number: string): string | undefined
   return `github:pull-request:${repository.toLowerCase()}#${number}`;
 }
 
+function repositoryFromPullRequestUrl(url: string): string | undefined {
+  return /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/[1-9][0-9]*$/
+    .exec(url)
+    ?.slice(1, 3)
+    .join("/");
+}
+
+function repositoryFromTarget(resource: string): string | undefined {
+  return /^github:pull-request:([^#]+)#[1-9][0-9]*$/.exec(resource)?.[1];
+}
+
+function scopedGhCommand(
+  words: readonly string[],
+): { readonly command: readonly string[]; readonly repository?: string } | undefined {
+  if (words[0] !== "gh") return undefined;
+  if (words[1] !== "-R" && words[1] !== "--repo") return { command: words.slice(1) };
+  const repository = words[2];
+  return repository && canonicalTarget(repository, "1")
+    ? { command: words.slice(3), repository }
+    : undefined;
+}
+
 function liveReviewThreadTarget(threadId: string): string | undefined {
   if (typeof Deno === "undefined") return undefined;
   const result = new Deno.Command("gh", {
@@ -162,6 +211,150 @@ function liveReviewCommentBelongsTo(
   return result.success && new TextDecoder().decode(result.stdout).trim() === commentId;
 }
 
+function liveCurrentPullRequest():
+  { readonly headSha: string; readonly resource: string } | undefined {
+  if (typeof Deno === "undefined") return undefined;
+  const result = new Deno.Command("gh", {
+    args: ["pr", "view", "--json", "number,url,headRefOid"],
+    stderr: "null",
+    stdout: "piped",
+  }).outputSync();
+  if (!result.success) return undefined;
+  try {
+    const value = JSON.parse(new TextDecoder().decode(result.stdout)) as {
+      headRefOid?: unknown;
+      number?: unknown;
+      url?: unknown;
+    };
+    const repository =
+      typeof value.url === "string" ? repositoryFromPullRequestUrl(value.url) : undefined;
+    const resource =
+      repository && typeof value.number === "number"
+        ? canonicalTarget(repository, String(value.number))
+        : undefined;
+    return resource &&
+      typeof value.headRefOid === "string" &&
+      /^[0-9a-f]{40}$/.test(value.headRefOid)
+      ? { headSha: value.headRefOid, resource }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function liveRunTarget(repository: string, runId: string): string | undefined {
+  if (typeof Deno === "undefined" || !/^[1-9][0-9]*$/.test(runId)) return undefined;
+  const result = new Deno.Command("gh", {
+    args: ["api", `repos/${repository}/actions/runs/${runId}`, "--jq", ".head_sha"],
+    stderr: "null",
+    stdout: "piped",
+  }).outputSync();
+  if (!result.success) return undefined;
+  const pullRequest = liveCurrentPullRequest();
+  const headSha = new TextDecoder().decode(result.stdout).trim();
+  return pullRequest &&
+    repositoryFromTarget(pullRequest.resource)?.toLowerCase() === repository.toLowerCase() &&
+    pullRequest.headSha === headSha
+    ? pullRequest.resource
+    : undefined;
+}
+
+function liveJobBelongsToRun(repository: string, runId: string, jobId: string): boolean {
+  if (typeof Deno === "undefined" || !/^[1-9][0-9]*$/.test(runId) || !/^[1-9][0-9]*$/.test(jobId))
+    return false;
+  const result = new Deno.Command("gh", {
+    args: ["api", `repos/${repository}/actions/jobs/${jobId}`, "--jq", ".run_url"],
+    stderr: "null",
+    stdout: "piped",
+  }).outputSync();
+  if (!result.success) return false;
+  return new TextDecoder()
+    .decode(result.stdout)
+    .trim()
+    .endsWith(`/repos/${repository}/actions/runs/${runId}`);
+}
+
+function targetFromPullRequestSpecifier(
+  specifier: string | undefined,
+  repository: string | undefined,
+  pullRequestLookup: PullRequestLookup,
+): string | undefined {
+  if (specifier?.startsWith("https://github.com/")) {
+    const match = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/([1-9][0-9]*)$/.exec(specifier);
+    if (
+      !match ||
+      (repository && `${match[1]}/${match[2]}`.toLowerCase() !== repository.toLowerCase())
+    )
+      return undefined;
+    return canonicalTarget(`${match[1]}/${match[2]}`, match[3]!);
+  }
+  if (specifier && repository) return canonicalTarget(repository, specifier);
+  const current = pullRequestLookup();
+  if (!current) return undefined;
+  if (
+    repository &&
+    repositoryFromTarget(current.resource)?.toLowerCase() !== repository.toLowerCase()
+  )
+    return undefined;
+  return !specifier || current.resource.endsWith(`#${specifier}`) ? current.resource : undefined;
+}
+
+function watcherPullRequestViewOperation(
+  words: readonly string[],
+  pullRequestLookup: PullRequestLookup,
+): PullRequestOperation | undefined {
+  const scoped = scopedGhCommand(words);
+  if (!scoped || scoped.command[0] !== "pr" || scoped.command[1] !== "view") return undefined;
+  const arguments_ = scoped.command.slice(2);
+  const hasSpecifier = arguments_[0] !== "--json";
+  const specifier = hasSpecifier ? arguments_[0] : undefined;
+  const jsonIndex = hasSpecifier ? 1 : 0;
+  if (
+    arguments_[jsonIndex] !== "--json" ||
+    arguments_[jsonIndex + 1] !== watcherPullRequestFields ||
+    arguments_.length !== jsonIndex + 2
+  )
+    return undefined;
+  const resource = targetFromPullRequestSpecifier(specifier, scoped.repository, pullRequestLookup);
+  return resource
+    ? {
+        bodyPresent: false,
+        operation: "github.pull-request.view",
+        resource,
+        trailingArguments: [],
+        trailingArgumentCount: 0,
+      }
+    : undefined;
+}
+
+function pullRequestChecksOperation(
+  words: readonly string[],
+  pullRequestLookup: PullRequestLookup,
+): PullRequestOperation | undefined {
+  const scoped = scopedGhCommand(words);
+  if (!scoped) return undefined;
+  const [pr, checks, number, jsonFlag, jsonFields] = scoped.command;
+  if (
+    pr !== "pr" ||
+    checks !== "checks" ||
+    !number ||
+    jsonFlag !== "--json" ||
+    (jsonFields !== reviewedChecksFields && jsonFields !== watcherChecksFields) ||
+    scoped.command.length !== 5
+  )
+    return undefined;
+  const resource = targetFromPullRequestSpecifier(number, scoped.repository, pullRequestLookup);
+  return resource
+    ? {
+        bodyPresent: false,
+        operation: "github.pull-request.checks",
+        resource,
+        trailingArguments: [jsonFlag, jsonFields],
+        trailingArgumentCount: 2,
+      }
+    : undefined;
+}
+
 function pullRequestOperation(words: readonly string[]): PullRequestOperation | undefined {
   const [gh, pr, subcommand, number, repoFlag, repository, ...rest] = words;
   if (
@@ -187,15 +380,235 @@ function pullRequestOperation(words: readonly string[]): PullRequestOperation | 
   };
 }
 
+function pullRequestRestReadOperation(words: readonly string[]): PullRequestOperation | undefined {
+  const [gh, api, endpoint] = words;
+  if (gh !== "gh" || api !== "api" || !endpoint || words.length !== 3) return undefined;
+  const match =
+    /^repos\/([^/]+)\/([^/]+)\/(issues|pulls)\/([1-9][0-9]*)\/(comments|reviews)\?per_page=100&page=([1-9][0-9]*)$/.exec(
+      endpoint,
+    );
+  if (!match || (match[3] === "issues" ? match[5] !== "comments" : match[5] !== "reviews"))
+    return undefined;
+  const resource = canonicalTarget(`${match[1]}/${match[2]}`, match[4]!);
+  return resource
+    ? {
+        bodyPresent: false,
+        operation:
+          match[3] === "issues"
+            ? "github.pull-request.conversation-comments"
+            : "github.pull-request.reviews",
+        resource,
+        trailingArguments: [],
+        trailingArgumentCount: 0,
+      }
+    : undefined;
+}
+
+function exactFields(
+  fields: readonly string[],
+  expected: Readonly<Record<string, { readonly flag: string; readonly value: RegExp }>>,
+): Readonly<Record<string, string>> | undefined {
+  if (fields.length !== Object.keys(expected).length * 2) return undefined;
+  const values: Record<string, string> = {};
+  for (let index = 0; index < fields.length; index += 2) {
+    const flag = fields[index];
+    const field = fields[index + 1];
+    const match = /^([^=]+)=(.*)$/s.exec(field ?? "");
+    const rule = match && expected[match[1]!];
+    if (!match || !rule || flag !== rule.flag || !rule.value.test(match[2]!) || match[1] in values)
+      return undefined;
+    values[match[1]!] = match[2]!;
+  }
+  return values;
+}
+
+function actionsReadOperation(
+  words: readonly string[],
+  pullRequestLookup: PullRequestLookup,
+  runLookup: RunLookup,
+): PullRequestOperation | undefined {
+  const [gh, api, endpoint, methodFlag, method, ...fields] = words;
+  if (gh !== "gh" || api !== "api" || methodFlag !== "-X" || method !== "GET" || !endpoint)
+    return undefined;
+  const runs = /^repos\/([^/]+)\/([^/]+)\/actions\/runs$/.exec(endpoint);
+  if (runs) {
+    const values = exactFields(fields, {
+      head_sha: { flag: "-f", value: /^[0-9a-f]{40}$/ },
+      ...(fields.length === 6 ? { page: { flag: "-f", value: /^[1-9][0-9]*$/ } } : {}),
+      per_page: { flag: "-f", value: /^100$/ },
+    });
+    const current = values && pullRequestLookup();
+    const repository = `${runs[1]}/${runs[2]}`;
+    if (
+      !current ||
+      current.headSha !== values?.head_sha ||
+      repositoryFromTarget(current.resource)?.toLowerCase() !== repository.toLowerCase()
+    )
+      return undefined;
+    return {
+      bodyPresent: false,
+      operation: "github.actions.runs",
+      resource: current.resource,
+      trailingArguments: [],
+      trailingArgumentCount: 0,
+    };
+  }
+  const jobs = /^repos\/([^/]+)\/([^/]+)\/actions\/runs\/([1-9][0-9]*)\/jobs$/.exec(endpoint);
+  if (!jobs) return undefined;
+  const values = exactFields(fields, {
+    ...(fields.length === 4 ? { page: { flag: "-f", value: /^[1-9][0-9]*$/ } } : {}),
+    per_page: { flag: "-f", value: /^100$/ },
+  });
+  const repository = `${jobs[1]}/${jobs[2]}`;
+  const resource = values && runLookup(repository, jobs[3]!);
+  return resource
+    ? {
+        bodyPresent: false,
+        operation: "github.actions.jobs",
+        resource,
+        trailingArguments: [],
+        trailingArgumentCount: 0,
+      }
+    : undefined;
+}
+
+function workflowRunOperation(
+  words: readonly string[],
+  pullRequestLookup: PullRequestLookup,
+  runLookup: RunLookup,
+  jobLookup: JobLookup,
+): PullRequestOperation | undefined {
+  const scoped = scopedGhCommand(words);
+  if (!scoped || scoped.command[0] !== "run") return undefined;
+  const [run, subcommand, runId, ...rest] = scoped.command;
+  if (run !== "run" || !runId || !/^[1-9][0-9]*$/.test(runId)) return undefined;
+  const repository = scoped.repository ?? repositoryFromTarget(pullRequestLookup()?.resource ?? "");
+  if (!repository) return undefined;
+  const allowedView =
+    subcommand === "view" &&
+    ((rest.length === 2 &&
+      rest[0] === "--json" &&
+      rest[1] === "jobs,name,workflowName,conclusion,status,url,headSha") ||
+      (rest.length === 1 && rest[0] === "--log-failed") ||
+      (rest.length === 3 &&
+        rest[0] === "--job" &&
+        /^[1-9][0-9]*$/.test(rest[1]!) &&
+        rest[2] === "--log" &&
+        jobLookup(repository, runId, rest[1]!)));
+  const allowedRerun = subcommand === "rerun" && rest.length === 1 && rest[0] === "--failed";
+  if (!allowedView && !allowedRerun) return undefined;
+  const resource = runLookup(repository, runId);
+  return resource
+    ? {
+        bodyPresent: false,
+        operation: allowedRerun ? "github.actions.rerun-failed" : "github.actions.run-view",
+        resource,
+        trailingArguments: [],
+        trailingArgumentCount: 0,
+      }
+    : undefined;
+}
+
+function identifiedReplyBody(body: string): boolean {
+  return (
+    (body.startsWith(replyPrefix) && body.length > replyPrefix.length) ||
+    /^\[from [A-Za-z0-9_. -]+\]:\s+\S/.test(body)
+  );
+}
+
 function replyBodyIsIdentified(
   bodyFlag: string,
   bodyField: string,
   readTextFile: ReadTextFile,
 ): boolean {
-  if (bodyFlag === "-f") return bodyField.startsWith(`body=${replyPrefix}`);
+  if (bodyFlag === "-f") return identifiedReplyBody(bodyField.slice("body=".length));
   if (bodyFlag !== "-F" || !/^body=@[^/\\]+$/.test(bodyField)) return false;
   try {
-    return readTextFile(bodyField.slice("body=@".length)).startsWith(replyPrefix);
+    return identifiedReplyBody(readTextFile(bodyField.slice("body=@".length)));
+  } catch {
+    return false;
+  }
+}
+
+function conversationCommentOperation(words: readonly string[]): PullRequestOperation | undefined {
+  const [gh, api, methodFlag, method, endpoint, bodyFlag, bodyField] = words;
+  if (
+    gh !== "gh" ||
+    api !== "api" ||
+    methodFlag !== "--method" ||
+    method !== "POST" ||
+    bodyFlag !== "-f" ||
+    !bodyField?.startsWith("body=") ||
+    !identifiedReplyBody(bodyField.slice("body=".length)) ||
+    words.length !== 7
+  )
+    return undefined;
+  const match = /^repos\/([^/]+)\/([^/]+)\/issues\/([1-9][0-9]*)\/comments$/.exec(endpoint ?? "");
+  const resource = match && canonicalTarget(`${match[1]}/${match[2]}`, match[3]!);
+  return resource
+    ? {
+        bodyPresent: true,
+        operation: "github.pull-request.conversation-comment",
+        resource,
+        trailingArguments: [],
+        trailingArgumentCount: 0,
+      }
+    : undefined;
+}
+
+function enclosingFieldName(
+  ancestors: readonly (ASTNode | readonly ASTNode[])[],
+): string | undefined {
+  return ancestors.findLast(
+    (ancestor): ancestor is Extract<ASTNode, { readonly kind: typeof Kind.FIELD }> =>
+      "kind" in ancestor && ancestor.kind === Kind.FIELD,
+  )?.name.value;
+}
+
+function normalizedReviewThreadsDocument(document: DocumentNode): DocumentNode | undefined {
+  let valid = true;
+  const normalized = visit(document, {
+    Field(node, _key, _parent, _path, ancestors) {
+      const parentField = enclosingFieldName(ancestors);
+      if (node.name.value === "pageInfo" && parentField === "reviewThreads") return null;
+      if (node.name.value !== "reviewThreads" && node.name.value !== "comments") return undefined;
+      const first = node.arguments?.find((argument) => argument.name.value === "first");
+      if (!first || first.value.kind !== Kind.INT || !node.selectionSet) {
+        valid = false;
+        return undefined;
+      }
+      return {
+        ...node,
+        arguments: node.arguments?.map((argument) =>
+          argument.name.value === "first"
+            ? { ...argument, value: { kind: Kind.INT, value: "1" } }
+            : argument,
+        ),
+        selectionSet:
+          node.name.value === "comments"
+            ? { ...node.selectionSet, selections: [] }
+            : node.selectionSet,
+      };
+    },
+  });
+  return valid ? normalized : undefined;
+}
+
+function isReviewedReviewThreadsQuery(
+  queryField: string | undefined,
+  reviewedQuery = reviewThreadsQuery,
+): boolean {
+  if (!queryField?.startsWith("query=")) return false;
+  try {
+    const candidate = normalizedReviewThreadsDocument(
+      parse(queryField.slice("query=".length), { noLocation: true }),
+    );
+    const reviewed = normalizedReviewThreadsDocument(parse(reviewedQuery, { noLocation: true }));
+    return (
+      candidate !== undefined &&
+      reviewed !== undefined &&
+      JSON.stringify(candidate) === JSON.stringify(reviewed)
+    );
   } catch {
     return false;
   }
@@ -252,7 +665,8 @@ function graphqlReviewReplyOperation(
     threadFlag !== "-f" ||
     !/^thread=PRRT_[A-Za-z0-9_-]+$/.test(threadField ?? "") ||
     bodyFlag !== "-f" ||
-    !bodyField?.startsWith(`body=${replyPrefix}`) ||
+    !bodyField?.startsWith("body=") ||
+    !identifiedReplyBody(bodyField.slice("body=".length)) ||
     words.length !== 9
   )
     return undefined;
@@ -327,47 +741,43 @@ function graphqlReviewReplyOperation(
 function reviewThreadsOperation(words: readonly string[]): PullRequestOperation | undefined {
   const pagination = words.filter((word) => word === "--paginate" || word === "--slurp");
   const command = words.filter((word) => word !== "--paginate" && word !== "--slurp");
-  const [
-    gh,
-    api,
-    graphql,
-    queryFlag,
-    queryField,
-    ownerFlag,
-    ownerField,
-    repoFlag,
-    repoField,
-    pullRequestFlag,
-    pullRequestField,
-  ] = command;
+  const [gh, api, graphql, ...fields] = command;
+  if (gh !== "gh" || api !== "api" || graphql !== "graphql") return undefined;
+  const reviewedPagination =
+    pagination.length === 2 && pagination.includes("--paginate") && pagination.includes("--slurp");
+  const reviewedValues = reviewedPagination
+    ? exactFields(fields, {
+        owner: { flag: "-f", value: /^[A-Za-z0-9_.-]+$/ },
+        pr: { flag: "-F", value: /^[1-9][0-9]*$/ },
+        query: { flag: "-f", value: /^[\s\S]+$/ },
+        repo: { flag: "-f", value: /^[A-Za-z0-9_.-]+$/ },
+      })
+    : undefined;
+  const watcherValues =
+    pagination.length === 0
+      ? exactFields(fields, {
+          ...(fields.length === 10 ? { cursor: { flag: "-F", value: /^\S+$/ } } : {}),
+          name: { flag: "-F", value: /^[A-Za-z0-9_.-]+$/ },
+          number: { flag: "-F", value: /^[1-9][0-9]*$/ },
+          owner: { flag: "-F", value: /^[A-Za-z0-9_.-]+$/ },
+          query: { flag: "-f", value: /^[\s\S]+$/ },
+        })
+      : undefined;
+  const values = reviewedValues ?? watcherValues;
+  const query = values?.query;
   if (
-    gh !== "gh" ||
-    api !== "api" ||
-    graphql !== "graphql" ||
-    queryFlag !== "-f" ||
-    queryField !== `query=${reviewThreadsQuery}` ||
-    ownerFlag !== "-f" ||
-    repoFlag !== "-f" ||
-    pullRequestFlag !== "-F" ||
-    command.length !== 11 ||
-    !(
-      pagination.length === 2 &&
-      pagination.includes("--paginate") &&
-      pagination.includes("--slurp")
+    !values ||
+    !query ||
+    !isReviewedReviewThreadsQuery(
+      `query=${query}`,
+      watcherValues ? watcherReviewThreadsQuery : reviewThreadsQuery,
     )
-  ) {
+  )
     return undefined;
-  }
-  const owner = ownerField?.slice("owner=".length);
-  const name = repoField?.slice("repo=".length);
-  const pullRequestNumber = pullRequestField?.slice("pr=".length);
-  if (
-    !ownerField?.startsWith("owner=") ||
-    !repoField?.startsWith("repo=") ||
-    !pullRequestField?.startsWith("pr=") ||
-    !pullRequestNumber ||
-    Number(pullRequestNumber) > 2_147_483_647
-  ) {
+  const owner = values.owner;
+  const name = values.repo ?? values.name;
+  const pullRequestNumber = values.pr ?? values.number;
+  if (!owner || !name || !pullRequestNumber || Number(pullRequestNumber) > 2_147_483_647) {
     return undefined;
   }
   const resource = canonicalTarget(`${owner}/${name}`, pullRequestNumber);
@@ -389,7 +799,7 @@ function reviewThreadCommentsOperation(
   const pagination = words.filter((word) => word === "--paginate" || word === "--slurp");
   const command = words.filter((word) => word !== "--paginate" && word !== "--slurp");
   const [gh, api, graphql, queryFlag, queryField, idFlag, idField] = command;
-  if (
+  const reviewedInvalid =
     gh !== "gh" ||
     api !== "api" ||
     graphql !== "graphql" ||
@@ -400,10 +810,32 @@ function reviewThreadCommentsOperation(
     command.length !== 7 ||
     pagination.length !== 2 ||
     !pagination.includes("--paginate") ||
-    !pagination.includes("--slurp")
+    !pagination.includes("--slurp");
+  if (!reviewedInvalid) {
+    const resource = reviewThreadLookup(idField.slice("id=".length));
+    return resource
+      ? {
+          bodyPresent: false,
+          operation: "github.review-thread.comments",
+          resource,
+          trailingArguments: [],
+          trailingArgumentCount: 0,
+        }
+      : undefined;
+  }
+  if (gh !== "gh" || api !== "api" || graphql !== "graphql" || pagination.length !== 0)
+    return undefined;
+  const values = exactFields(command.slice(3), {
+    cursor: { flag: "-F", value: /^\S+$/ },
+    query: { flag: "-f", value: /^[\s\S]+$/ },
+    threadId: { flag: "-F", value: /^PRRT_[A-Za-z0-9_-]+$/ },
+  });
+  if (
+    !values ||
+    !isReviewedReviewThreadsQuery(`query=${values.query}`, watcherReviewThreadCommentsQuery)
   )
     return undefined;
-  const resource = reviewThreadLookup(idField.slice("id=".length));
+  const resource = reviewThreadLookup(values.threadId!);
   return resource
     ? {
         bodyPresent: false,
@@ -541,10 +973,19 @@ export function materializeGitHubPullRequest(
   readTextFile: ReadTextFile = (path) => Deno.readTextFileSync(path),
   reviewThreadLookup: ReviewThreadLookup = liveReviewThreadTarget,
   reviewCommentLookup: ReviewCommentLookup = liveReviewCommentBelongsTo,
+  pullRequestLookup: PullRequestLookup = liveCurrentPullRequest,
+  runLookup: RunLookup = liveRunTarget,
+  jobLookup: JobLookup = liveJobBelongsToRun,
 ): PullRequestOperation | undefined {
   const words = input(candidate).command?.words;
   if (!Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
   return (
+    watcherPullRequestViewOperation(words, pullRequestLookup) ??
+    conversationCommentOperation(words) ??
+    pullRequestRestReadOperation(words) ??
+    pullRequestChecksOperation(words, pullRequestLookup) ??
+    actionsReadOperation(words, pullRequestLookup, runLookup) ??
+    workflowRunOperation(words, pullRequestLookup, runLookup, jobLookup) ??
     reviewThreadResolutionOperation(words, reviewThreadLookup) ??
     graphqlReviewReplyOperation(words, reviewThreadLookup) ??
     reviewThreadCommentsOperation(words, reviewThreadLookup) ??
