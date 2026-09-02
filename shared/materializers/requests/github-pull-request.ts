@@ -29,31 +29,53 @@ type PullRequestLookup = () => { readonly headSha: string; readonly resource: st
 type RunLookup = (repository: string, runId: string) => string | undefined;
 type JobLookup = (repository: string, runId: string, jobId: string) => boolean;
 
-export const reviewThreadsQuery = `query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
+export const reviewThreadsQuery = `query ReviewThreads($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $pr) {
-      headRefOid
       reviewThreads(first: 100, after: $endCursor) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            nodes {
+              id
+              body
+              author {
+                login
+              }
+              path
+              line
+              originalLine
+              diffHunk
+              createdAt
+              updatedAt
+              url
+            }
+          }
+        }
         pageInfo {
           hasNextPage
           endCursor
         }
+      }
+    }
+  }
+}`;
+
+const flexibleReviewThreadsQuery = `query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      headRefOid
+      reviewThreads(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
           isOutdated
           path
           line
-          comments(first: 20) {
-            nodes {
-              fullDatabaseId
-              author {
-                login
-              }
-              body
-              url
-            }
-          }
+          comments(first: 100) { nodes { databaseId } }
         }
       }
     }
@@ -389,19 +411,16 @@ function pullRequestRestReadOperation(words: readonly string[]): PullRequestOper
     );
   if (!match || (match[3] === "issues" ? match[5] !== "comments" : match[5] !== "reviews"))
     return undefined;
-  const resource = canonicalTarget(`${match[1]}/${match[2]}`, match[4]!);
-  return resource
-    ? {
-        bodyPresent: false,
-        operation:
-          match[3] === "issues"
-            ? "github.pull-request.conversation-comments"
-            : "github.pull-request.reviews",
-        resource,
-        trailingArguments: [],
-        trailingArgumentCount: 0,
-      }
-    : undefined;
+  return {
+    bodyPresent: false,
+    operation:
+      match[3] === "issues"
+        ? "github.pull-request.conversation-comments"
+        : "github.pull-request.reviews",
+    resource: canonicalTarget(`${match[1]}/${match[2]}`, match[4]!)!,
+    trailingArguments: [],
+    trailingArgumentCount: 0,
+  };
 }
 
 function exactFields(
@@ -480,22 +499,25 @@ function workflowRunOperation(
 ): PullRequestOperation | undefined {
   const scoped = scopedGhCommand(words);
   if (!scoped || scoped.command[0] !== "run") return undefined;
-  const [run, subcommand, runId, ...rest] = scoped.command;
+  const [run, subcommand, runId, ...subcommandArguments] = scoped.command;
   if (run !== "run" || !runId || !/^[1-9][0-9]*$/.test(runId)) return undefined;
   const repository = scoped.repository ?? repositoryFromTarget(pullRequestLookup()?.resource ?? "");
   if (!repository) return undefined;
   const allowedView =
     subcommand === "view" &&
-    ((rest.length === 2 &&
-      rest[0] === "--json" &&
-      rest[1] === "jobs,name,workflowName,conclusion,status,url,headSha") ||
-      (rest.length === 1 && rest[0] === "--log-failed") ||
-      (rest.length === 3 &&
-        rest[0] === "--job" &&
-        /^[1-9][0-9]*$/.test(rest[1]!) &&
-        rest[2] === "--log" &&
-        jobLookup(repository, runId, rest[1]!)));
-  const allowedRerun = subcommand === "rerun" && rest.length === 1 && rest[0] === "--failed";
+    ((subcommandArguments.length === 2 &&
+      subcommandArguments[0] === "--json" &&
+      subcommandArguments[1] === "jobs,name,workflowName,conclusion,status,url,headSha") ||
+      (subcommandArguments.length === 1 && subcommandArguments[0] === "--log-failed") ||
+      (subcommandArguments.length === 3 &&
+        subcommandArguments[0] === "--job" &&
+        /^[1-9][0-9]*$/.test(subcommandArguments[1]!) &&
+        subcommandArguments[2] === "--log" &&
+        jobLookup(repository, runId, subcommandArguments[1]!)));
+  const allowedRerun =
+    subcommand === "rerun" &&
+    subcommandArguments.length === 1 &&
+    subcommandArguments[0] === "--failed";
   if (!allowedView && !allowedRerun) return undefined;
   const resource = runLookup(repository, runId);
   return resource
@@ -510,10 +532,9 @@ function workflowRunOperation(
 }
 
 function identifiedReplyBody(body: string): boolean {
-  return (
-    (body.startsWith(replyPrefix) && body.length > replyPrefix.length) ||
-    /^\[from [A-Za-z0-9_. -]+\]:\s+\S/.test(body)
-  );
+  if (body.startsWith(replyPrefix)) return body.slice(replyPrefix.length).trim().length > 0;
+  const bracketedAgent = /^\[from ([A-Za-z0-9_. -]+)\]:\s+\S/.exec(body);
+  return bracketedAgent !== null && bracketedAgent[1]!.trim().length > 0;
 }
 
 function replyBodyIsIdentified(
@@ -765,13 +786,13 @@ function reviewThreadsOperation(words: readonly string[]): PullRequestOperation 
       : undefined;
   const values = reviewedValues ?? watcherValues;
   const query = values?.query;
+  const reviewedQuery = watcherValues ? watcherReviewThreadsQuery : reviewThreadsQuery;
   if (
     !values ||
     !query ||
-    !isReviewedReviewThreadsQuery(
-      `query=${query}`,
-      watcherValues ? watcherReviewThreadsQuery : reviewThreadsQuery,
-    )
+    (!isReviewedReviewThreadsQuery(`query=${query}`, reviewedQuery) &&
+      (watcherValues ||
+        !isReviewedReviewThreadsQuery(`query=${query}`, flexibleReviewThreadsQuery)))
   )
     return undefined;
   const owner = values.owner;
@@ -780,16 +801,13 @@ function reviewThreadsOperation(words: readonly string[]): PullRequestOperation 
   if (!owner || !name || !pullRequestNumber || Number(pullRequestNumber) > 2_147_483_647) {
     return undefined;
   }
-  const resource = canonicalTarget(`${owner}/${name}`, pullRequestNumber);
-  return resource
-    ? {
-        bodyPresent: false,
-        operation: "github.pull-request.review-threads",
-        resource,
-        trailingArguments: [],
-        trailingArgumentCount: 0,
-      }
-    : undefined;
+  return {
+    bodyPresent: false,
+    operation: "github.pull-request.review-threads",
+    resource: canonicalTarget(`${owner}/${name}`, pullRequestNumber)!,
+    trailingArguments: [],
+    trailingArgumentCount: 0,
+  };
 }
 
 function reviewThreadCommentsOperation(
