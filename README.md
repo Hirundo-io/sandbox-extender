@@ -11,6 +11,10 @@ codex plugin marketplace add /absolute/path/to/sandbox-extender
 codex plugin add sandbox-extender@sandbox-extender
 ```
 
+For developers refreshing a released installation from `main`, use the bundled
+`reinstall-sandbox-extender` skill. It updates both the local Codex and Claude
+Code installations and can include explicit SSH hosts as additional targets.
+
 Then ask your agent to create a target-bound profile. For example:
 
 ```text
