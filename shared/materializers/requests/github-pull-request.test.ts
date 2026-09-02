@@ -151,6 +151,24 @@ describe("GitHub pull request request materializer", () => {
     ).toEqual(expect.objectContaining({ operation: "github.pull-request.conversation-comment" }));
   });
 
+  test("rejects whitespace-only reply attribution", () => {
+    for (const body of ["_Replying as    ", "[from    ]: Addressed the feedback."]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "api",
+            "--method",
+            "POST",
+            "repos/Hirundo-io/hirundo-platform/issues/513/comments",
+            "-f",
+            `body=${body}`,
+          ]),
+        ),
+      ).toBeUndefined();
+    }
+  });
+
   test("materializes only the reviewed repo-local checks JSON selection", () => {
     expect(
       materializeGitHubPullRequest(
@@ -365,6 +383,131 @@ describe("GitHub pull request request materializer", () => {
     }
   });
 
+  test("fails closed across live workflow verification boundaries", () => {
+    const rerun = ["gh", "-R", "Hirundo-io/hirundo-platform", "run", "rerun", "9001", "--failed"];
+    for (const outputs of [
+      ["a".repeat(40), "not-json"],
+      ["a".repeat(40), "{}"],
+      [
+        "b".repeat(40),
+        JSON.stringify({
+          headRefOid: "a".repeat(40),
+          number: 513,
+          url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+        }),
+      ],
+    ]) {
+      const restore = mockDenoCommandSequence(outputs, []);
+      try {
+        expect(materializeGitHubPullRequest(candidate(rerun))).toBeUndefined();
+      } finally {
+        restore();
+      }
+    }
+
+    const restore = mockDenoCommandSequence(
+      [
+        "https://api.github.com/repos/Hirundo-io/hirundo-platform/actions/runs/9001",
+        "a".repeat(40),
+        JSON.stringify({
+          headRefOid: "a".repeat(40),
+          number: 513,
+          url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+        }),
+      ],
+      [],
+    );
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "-R",
+            "Hirundo-io/hirundo-platform",
+            "run",
+            "view",
+            "9001",
+            "--job",
+            "7001",
+            "--log",
+          ]),
+        ),
+      ).toEqual(expect.objectContaining({ operation: "github.actions.run-view" }));
+    } finally {
+      restore();
+    }
+  });
+
+  test("handles explicit PR URLs and invalid scoped targets", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "pr",
+          "view",
+          "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+          "--json",
+          watcherPullRequestFields,
+        ]),
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.view" }));
+    for (const words of [
+      ["gh", "-R", "invalid", "pr", "view", "513", "--json", watcherPullRequestFields],
+      ["gh", "pr", "view", "https://github.com/not-a-pull", "--json", watcherPullRequestFields],
+      [
+        "gh",
+        "-R",
+        "Hirundo-io/other",
+        "pr",
+        "view",
+        "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+        "--json",
+        watcherPullRequestFields,
+      ],
+    ]) {
+      expect(materializeGitHubPullRequest(candidate(words))).toBeUndefined();
+    }
+  });
+
+  test("returns undefined when otherwise valid watcher targets cannot be verified", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "pr", "view", "999", "--json", watcherPullRequestFields]),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "pr", "checks", "999", "--json", watcherChecksFields]),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/Hirundo-io/hirundo-platform/actions/runs/9001/jobs",
+          "-X",
+          "GET",
+          "-f",
+          "per_page=100",
+        ]),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+        () => undefined,
+      ),
+    ).toBeUndefined();
+  });
+
   test("materializes both watcher GraphQL pagination queries", () => {
     expect(
       materializeGitHubPullRequest(
@@ -402,6 +545,23 @@ describe("GitHub pull request request materializer", () => {
         () => currentPullRequest().resource,
       ),
     ).toEqual(expect.objectContaining({ operation: "github.review-thread.comments" }));
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${watcherThreadCommentsQuery}`,
+          "-F",
+          "threadId=PRRT_other",
+          "-F",
+          "cursor=cursor-2",
+        ]),
+        undefined,
+        () => undefined,
+      ),
+    ).toBeUndefined();
   });
 
   test("materializes REST review replies", () => {
@@ -593,6 +753,33 @@ describe("GitHub pull request request materializer", () => {
     ).toEqual(expect.objectContaining({ operation: "github.pull-request.review-threads" }));
   });
 
+  test("rejects malformed and out-of-range review-thread queries", () => {
+    for (const [query, number] of [
+      ["query(", "42"],
+      [reviewThreadsQuery, "2147483648"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "api",
+            "graphql",
+            "--paginate",
+            "--slurp",
+            "-f",
+            "owner=Acme",
+            "-f",
+            "repo=Example",
+            "-F",
+            `pr=${number}`,
+            "-f",
+            `query=${query}`,
+          ]),
+        ),
+      ).toBeUndefined();
+    }
+  });
+
   test.each([
     [
       "conversation comment without attribution",
@@ -629,7 +816,7 @@ describe("GitHub pull request request materializer", () => {
         "-F",
         "pr=42",
         "-f",
-        `query=${reviewThreadsQuery.replace("first: 20", "first: $pr")}`,
+        `query=${reviewThreadsQuery.replace("comments(first: 100)", "comments(first: $pr)")}`,
       ],
     ],
   ])("rejects %s", (_name, words) =>
