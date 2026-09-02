@@ -481,6 +481,15 @@ describe("GitHub pull request request materializer", () => {
     ).toBeUndefined();
     expect(
       materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/invalid@owner/example/issues/513/comments?per_page=100&page=1",
+        ]),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
         candidate(["gh", "pr", "checks", "999", "--json", watcherChecksFields]),
         undefined,
         undefined,

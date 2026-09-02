@@ -411,13 +411,15 @@ function pullRequestRestReadOperation(words: readonly string[]): PullRequestOper
     );
   if (!match || (match[3] === "issues" ? match[5] !== "comments" : match[5] !== "reviews"))
     return undefined;
+  const resource = canonicalTarget(`${match[1]}/${match[2]}`, match[4]!);
+  if (!resource) return undefined;
   return {
     bodyPresent: false,
     operation:
       match[3] === "issues"
         ? "github.pull-request.conversation-comments"
         : "github.pull-request.reviews",
-    resource: canonicalTarget(`${match[1]}/${match[2]}`, match[4]!)!,
+    resource,
     trailingArguments: [],
     trailingArgumentCount: 0,
   };
