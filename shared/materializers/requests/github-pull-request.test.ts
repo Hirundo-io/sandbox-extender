@@ -89,8 +89,8 @@ describe("GitHub pull request request materializer", () => {
     });
   });
 
-  test("materializes GraphQL review replies only for a live pull-request thread", () => {
-    const query = `mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }`;
+  test("materializes the documented GraphQL review reply only for a live pull-request thread", () => {
+    const query = `mutation($thread:ID!, $body:String!) { addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread, body:$body}) { comment { url } } }`;
     expect(
       materializeGitHubPullRequest(
         candidate([
@@ -128,6 +128,23 @@ describe("GitHub pull request request materializer", () => {
         ]),
         undefined,
         () => undefined,
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${query}`,
+          "-f",
+          "thread=PRRT_current",
+          "-f",
+          "body=Fixed without attribution.",
+        ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
       ),
     ).toBeUndefined();
   });
