@@ -48,7 +48,7 @@ function resolvedPermissions(
 
 export function assertSelfContainedMaterializer(
   source: string,
-  dependencies?: ActivationMaterializer["dependencies"],
+  _dependencies?: ActivationMaterializer["dependencies"],
 ): void {
   const imports = new Bun.Transpiler({ loader: "ts" }).scan(source).imports;
   const unsupported = imports.find(
@@ -64,7 +64,7 @@ export function materializerIntegrity(
   source: string,
   permissions: MaterializerPermissionManifest,
   runtimeVersion: string,
-  dependencies?: { readonly denoLock: string; readonly packageJson: string },
+  dependencies?: ActivationMaterializer["dependencies"],
 ): string {
   return createHash("sha256")
     .update(
@@ -72,7 +72,13 @@ export function materializerIntegrity(
         permissions: canonicalPermissions(permissions),
         runtimeVersion,
         source,
-        dependencies,
+        dependencies: dependencies && {
+          denoLock: dependencies.denoLock,
+          denoLockIntegrity: dependencies.denoLockIntegrity,
+          directory: dependencies.directory,
+          packageJson: dependencies.packageJson,
+          packageJsonIntegrity: dependencies.packageJsonIntegrity,
+        },
       }),
     )
     .digest("hex");
@@ -87,6 +93,7 @@ export function verifyMaterializerIntegrity(
     source,
     materializer.permissions,
     materializer.runtimeVersion,
+    materializer.dependencies,
   );
   if (actual !== materializer.integrity)
     throw new Error(`materializer integrity mismatch for ${materializer.file}`);

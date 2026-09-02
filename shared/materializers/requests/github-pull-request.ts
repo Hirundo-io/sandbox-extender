@@ -14,6 +14,13 @@ type PullRequestOperation = {
 
 const replyPrefix = "_Replying as ";
 type ReadTextFile = (path: string) => string;
+type ReviewThreadLookup = (threadId: string) => string | undefined;
+type ReviewCommentLookup = (
+  owner: string,
+  repository: string,
+  pullRequestNumber: string,
+  commentId: string,
+) => boolean;
 
 export const reviewThreadsQuery = `query ReviewThreads($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -64,6 +71,37 @@ export const resolveReviewThreadMutation = `mutation ResolveReviewThread($thread
   }
 }`;
 
+export const reviewThreadCommentsQuery = `query ReviewThreadComments($id: ID!, $endCursor: String) {
+  node(id: $id) {
+    ... on PullRequestReviewThread {
+      id
+      pullRequest {
+        number
+        repository {
+          nameWithOwner
+        }
+      }
+      comments(first: 100, after: $endCursor) {
+        nodes {
+          id
+          databaseId
+          body
+          author {
+            login
+          }
+          url
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}`;
+
+const reviewThreadTargetQuery = `query ReviewThreadTarget($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { pullRequest { number repository { nameWithOwner } } } } }`;
+
 function input(candidate: unknown): RequestMaterializerInput {
   if (typeof candidate !== "object" || candidate === null) return {};
   const command =
@@ -78,6 +116,50 @@ function canonicalTarget(repository: string, number: string): string | undefined
     return undefined;
   }
   return `github:pull-request:${repository.toLowerCase()}#${number}`;
+}
+
+function liveReviewThreadTarget(threadId: string): string | undefined {
+  if (typeof Deno === "undefined") return undefined;
+  const result = new Deno.Command("gh", {
+    args: ["api", "graphql", "-f", `query=${reviewThreadTargetQuery}`, "-F", `id=${threadId}`],
+    stderr: "null",
+    stdout: "piped",
+  }).outputSync();
+  if (!result.success) return undefined;
+  try {
+    const value = JSON.parse(new TextDecoder().decode(result.stdout)) as {
+      data?: {
+        node?: { pullRequest?: { number?: number; repository?: { nameWithOwner?: string } } };
+      };
+    };
+    const pullRequest = value.data?.node?.pullRequest;
+    return typeof pullRequest?.number === "number" &&
+      typeof pullRequest.repository?.nameWithOwner === "string"
+      ? canonicalTarget(pullRequest.repository.nameWithOwner, String(pullRequest.number))
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function liveReviewCommentBelongsTo(
+  owner: string,
+  repository: string,
+  pullRequestNumber: string,
+  commentId: string,
+): boolean {
+  if (typeof Deno === "undefined") return false;
+  const result = new Deno.Command("gh", {
+    args: [
+      "api",
+      `repos/${owner}/${repository}/pulls/${pullRequestNumber}/comments/${commentId}`,
+      "--jq",
+      ".id",
+    ],
+    stderr: "null",
+    stdout: "piped",
+  }).outputSync();
+  return result.success && new TextDecoder().decode(result.stdout).trim() === commentId;
 }
 
 function pullRequestOperation(words: readonly string[]): PullRequestOperation | undefined {
@@ -122,6 +204,7 @@ function replyBodyIsIdentified(
 function reviewReplyOperation(
   words: readonly string[],
   readTextFile: ReadTextFile,
+  reviewCommentLookup: ReviewCommentLookup,
 ): PullRequestOperation | undefined {
   const [gh, api, ...arguments_] = words;
   if (gh !== "gh" || api !== "api") return undefined;
@@ -143,7 +226,7 @@ function reviewReplyOperation(
   ) {
     return undefined;
   }
-  return resource
+  return resource && reviewCommentLookup(match[1]!, match[2]!, match[3]!, match[4]!)
     ? {
         bodyPresent,
         operation: "github.review-comment.reply",
@@ -152,6 +235,93 @@ function reviewReplyOperation(
         trailingArgumentCount: 0,
       }
     : undefined;
+}
+
+function graphqlReviewReplyOperation(
+  words: readonly string[],
+  reviewThreadLookup: ReviewThreadLookup,
+): PullRequestOperation | undefined {
+  const [gh, api, graphql, queryFlag, queryField, threadFlag, threadField, bodyFlag, bodyField] =
+    words;
+  if (
+    gh !== "gh" ||
+    api !== "api" ||
+    graphql !== "graphql" ||
+    queryFlag !== "-f" ||
+    !queryField?.startsWith("query=") ||
+    threadFlag !== "-f" ||
+    !/^thread=PRRT_[A-Za-z0-9_-]+$/.test(threadField ?? "") ||
+    bodyFlag !== "-f" ||
+    !bodyField?.startsWith(`body=${replyPrefix}`) ||
+    words.length !== 9
+  )
+    return undefined;
+  let document;
+  try {
+    document = parse(queryField.slice("query=".length), { noLocation: true });
+  } catch {
+    return undefined;
+  }
+  if (
+    document.definitions.length !== 1 ||
+    document.definitions[0]?.kind !== Kind.OPERATION_DEFINITION
+  )
+    return undefined;
+  const operation = document.definitions[0];
+  const variables = operation.variableDefinitions ?? [];
+  const isRequiredNamedType = (name: string, type: (typeof variables)[number]["type"]) =>
+    type.kind === Kind.NON_NULL_TYPE &&
+    type.type.kind === Kind.NAMED_TYPE &&
+    type.type.name.value === name;
+  if (
+    operation.operation !== "mutation" ||
+    (operation.directives?.length ?? 0) !== 0 ||
+    variables.length !== 2 ||
+    variables.some(
+      (variable) => variable.defaultValue || (variable.directives?.length ?? 0) !== 0,
+    ) ||
+    !variables.some(
+      (variable) =>
+        variable.variable.name.value === "thread" && isRequiredNamedType("ID", variable.type),
+    ) ||
+    !variables.some(
+      (variable) =>
+        variable.variable.name.value === "body" && isRequiredNamedType("String", variable.type),
+    ) ||
+    operation.selectionSet.selections.length !== 1
+  )
+    return undefined;
+  const selection = operation.selectionSet.selections[0];
+  if (
+    selection?.kind !== Kind.FIELD ||
+    selection.name.value !== "addPullRequestReviewThreadReply" ||
+    (selection.directives?.length ?? 0) !== 0 ||
+    selection.arguments?.length !== 1 ||
+    selection.arguments[0]?.name.value !== "input" ||
+    selection.arguments[0].value.kind !== Kind.OBJECT ||
+    selection.arguments[0].value.fields.length !== 2
+  )
+    return undefined;
+  const input = selection.arguments![0]!.value.fields;
+  const thread = input.find((field) => field.name.value === "pullRequestReviewThreadId")?.value;
+  const body = input.find((field) => field.name.value === "body")?.value;
+  const threadId = threadField.slice("thread=".length);
+  const resource = reviewThreadLookup(threadId);
+  if (
+    thread?.kind !== Kind.VARIABLE ||
+    thread.name.value !== "thread" ||
+    body?.kind !== Kind.VARIABLE ||
+    body.name.value !== "body" ||
+    !resource
+  )
+    return undefined;
+  return {
+    bodyPresent: true,
+    operation: "github.review-thread.reply",
+    resource,
+    trailingArguments: [],
+    trailingArgumentCount: 0,
+  };
 }
 
 function reviewThreadsOperation(words: readonly string[]): PullRequestOperation | undefined {
@@ -179,6 +349,7 @@ function reviewThreadsOperation(words: readonly string[]): PullRequestOperation 
     ownerFlag !== "-f" ||
     repoFlag !== "-f" ||
     pullRequestFlag !== "-F" ||
+    command.length !== 11 ||
     !(
       pagination.length === 2 &&
       pagination.includes("--paginate") &&
@@ -189,15 +360,17 @@ function reviewThreadsOperation(words: readonly string[]): PullRequestOperation 
   }
   const owner = ownerField?.slice("owner=".length);
   const name = repoField?.slice("repo=".length);
-  const number = pullRequestField?.slice("pr=".length);
+  const pullRequestNumber = pullRequestField?.slice("pr=".length);
   if (
     !ownerField?.startsWith("owner=") ||
     !repoField?.startsWith("repo=") ||
-    !pullRequestField?.startsWith("pr=")
+    !pullRequestField?.startsWith("pr=") ||
+    !pullRequestNumber ||
+    Number(pullRequestNumber) > 2_147_483_647
   ) {
     return undefined;
   }
-  const resource = canonicalTarget(`${owner}/${name}`, number);
+  const resource = canonicalTarget(`${owner}/${name}`, pullRequestNumber);
   return resource
     ? {
         bodyPresent: false,
@@ -209,30 +382,32 @@ function reviewThreadsOperation(words: readonly string[]): PullRequestOperation 
     : undefined;
 }
 
-function reviewThreadResolutionOperation(
+function reviewThreadCommentsOperation(
   words: readonly string[],
+  reviewThreadLookup: ReviewThreadLookup,
 ): PullRequestOperation | undefined {
-  const [gh, api, graphql, queryFlag, queryField, threadFlag, threadField, tagFlag, tagField] =
-    words;
+  const pagination = words.filter((word) => word === "--paginate" || word === "--slurp");
+  const command = words.filter((word) => word !== "--paginate" && word !== "--slurp");
+  const [gh, api, graphql, queryFlag, queryField, idFlag, idField] = command;
   if (
     gh !== "gh" ||
     api !== "api" ||
     graphql !== "graphql" ||
     queryFlag !== "-f" ||
-    queryField !== `query=${resolveReviewThreadMutation}` ||
-    threadFlag !== "-F" ||
-    !/^threadId=PRRT_[A-Za-z0-9_-]+$/.test(threadField ?? "") ||
-    tagFlag !== "-f" ||
-    words.length !== 9
+    queryField !== `query=${reviewThreadCommentsQuery}` ||
+    idFlag !== "-F" ||
+    !/^id=PRRT_[A-Za-z0-9_-]+$/.test(idField ?? "") ||
+    command.length !== 7 ||
+    pagination.length !== 2 ||
+    !pagination.includes("--paginate") ||
+    !pagination.includes("--slurp")
   )
-    return batchReviewThreadResolutionOperation(words);
-  const tag = tagField?.slice("clientMutationTag=".length);
-  const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9][0-9]*)$/.exec(tag ?? "");
-  const resource = match && canonicalTarget(`${match[1]}/${match[2]}`, match[3]!);
+    return undefined;
+  const resource = reviewThreadLookup(idField.slice("id=".length));
   return resource
     ? {
         bodyPresent: false,
-        operation: "github.review-thread.resolve",
+        operation: "github.review-thread.comments",
         resource,
         trailingArguments: [],
         trailingArgumentCount: 0,
@@ -242,12 +417,11 @@ function reviewThreadResolutionOperation(
 
 function batchReviewThreadResolutionOperation(
   words: readonly string[],
+  reviewThreadLookup: ReviewThreadLookup,
 ): PullRequestOperation | undefined {
   const [gh, api, graphql, queryFlag, queryField, ...fields] = words;
   if (gh !== "gh" || api !== "api" || graphql !== "graphql" || queryFlag !== "-f") return undefined;
-  const query = queryField?.startsWith("query=mutation(")
-    ? queryField.slice("query=".length)
-    : undefined;
+  const query = queryField?.startsWith("query=") ? queryField.slice("query=".length) : undefined;
   if (!query || fields.length === 0 || fields.length % 2 !== 0) return undefined;
   let document;
   try {
@@ -263,13 +437,20 @@ function batchReviewThreadResolutionOperation(
   const operation = document.definitions[0];
   if (operation.operation !== "mutation" || (operation.directives?.length ?? 0) !== 0)
     return undefined;
-  const variables = (operation.variableDefinitions ?? []).map(
-    (definition) => definition.variable.name.value,
-  );
+  const definitions = operation.variableDefinitions ?? [];
+  const variables = definitions.map((definition) => definition.variable.name.value);
   if (
     variables.length === 0 ||
     variables.length > 20 ||
-    new Set(variables).size !== variables.length
+    new Set(variables).size !== variables.length ||
+    definitions.some(
+      (definition) =>
+        definition.defaultValue ||
+        (definition.directives?.length ?? 0) !== 0 ||
+        definition.type.kind !== Kind.NON_NULL_TYPE ||
+        definition.type.type.kind !== Kind.NAMED_TYPE ||
+        definition.type.type.name.value !== "ID",
+    )
   )
     return undefined;
   const threadIds = new Map<string, string>();
@@ -281,7 +462,6 @@ function batchReviewThreadResolutionOperation(
   }
   if (threadIds.size !== variables.length || variables.some((variable) => !threadIds.has(variable)))
     return undefined;
-  const tags: string[] = [];
   for (const selection of operation.selectionSet.selections) {
     if (
       selection.kind !== Kind.FIELD ||
@@ -292,7 +472,11 @@ function batchReviewThreadResolutionOperation(
     const threadId = selection.arguments?.find(
       (argument) => argument.name.value === "input",
     )?.value;
-    if (threadId?.kind !== Kind.OBJECT || threadId.fields.length !== 2) return undefined;
+    if (
+      threadId?.kind !== Kind.OBJECT ||
+      (threadId.fields.length !== 1 && threadId.fields.length !== 2)
+    )
+      return undefined;
     const threadField = threadId.fields.find((field) => field.name.value === "threadId")?.value;
     const tagField = threadId.fields.find(
       (field) => field.name.value === "clientMutationId",
@@ -300,36 +484,72 @@ function batchReviewThreadResolutionOperation(
     if (
       threadField?.kind !== Kind.VARIABLE ||
       !threadIds.has(threadField.name.value) ||
-      tagField?.kind !== Kind.STRING
+      (tagField !== undefined && tagField.kind !== Kind.STRING)
     )
       return undefined;
-    tags.push(tagField.value);
   }
-  if (operation.selectionSet.selections.length !== variables.length || new Set(tags).size !== 1)
+  if (operation.selectionSet.selections.length !== variables.length) return undefined;
+  const resource = reviewThreadLookup(threadIds.values().next().value!);
+  if (
+    !resource ||
+    [...threadIds.values()].some((threadId) => reviewThreadLookup(threadId) !== resource)
+  )
     return undefined;
-  const target = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9][0-9]*)$/.exec(tags[0] ?? "");
-  const resource = target && canonicalTarget(`${target[1]}/${target[2]}`, target[3]!);
-  return resource
-    ? {
-        bodyPresent: false,
-        operation: "github.review-thread.resolve",
-        resource,
-        trailingArguments: [],
-        trailingArgumentCount: 0,
-      }
-    : undefined;
+  return {
+    bodyPresent: false,
+    operation: "github.review-thread.resolve",
+    resource,
+    trailingArguments: [],
+    trailingArgumentCount: 0,
+  };
+}
+
+function reviewThreadResolutionOperation(
+  words: readonly string[],
+  reviewThreadLookup: ReviewThreadLookup,
+): PullRequestOperation | undefined {
+  const [gh, api, graphql, queryFlag, queryField, threadFlag, threadField, tagFlag, tagField] =
+    words;
+  if (
+    gh === "gh" &&
+    api === "api" &&
+    graphql === "graphql" &&
+    queryFlag === "-f" &&
+    queryField === `query=${resolveReviewThreadMutation}` &&
+    threadFlag === "-F" &&
+    /^threadId=PRRT_[A-Za-z0-9_-]+$/.test(threadField ?? "") &&
+    tagFlag === "-f" &&
+    tagField?.startsWith("clientMutationTag=") &&
+    words.length === 9
+  ) {
+    const resource = reviewThreadLookup(threadField.slice("threadId=".length));
+    return resource
+      ? {
+          bodyPresent: false,
+          operation: "github.review-thread.resolve",
+          resource,
+          trailingArguments: [],
+          trailingArgumentCount: 0,
+        }
+      : undefined;
+  }
+  return batchReviewThreadResolutionOperation(words, reviewThreadLookup);
 }
 
 export function materializeGitHubPullRequest(
   candidate: unknown,
   readTextFile: ReadTextFile = (path) => Deno.readTextFileSync(path),
+  reviewThreadLookup: ReviewThreadLookup = liveReviewThreadTarget,
+  reviewCommentLookup: ReviewCommentLookup = liveReviewCommentBelongsTo,
 ): PullRequestOperation | undefined {
   const words = input(candidate).command?.words;
   if (!Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
   return (
-    reviewThreadResolutionOperation(words) ??
+    reviewThreadResolutionOperation(words, reviewThreadLookup) ??
+    graphqlReviewReplyOperation(words, reviewThreadLookup) ??
+    reviewThreadCommentsOperation(words, reviewThreadLookup) ??
     reviewThreadsOperation(words) ??
-    reviewReplyOperation(words, readTextFile) ??
+    reviewReplyOperation(words, readTextFile, reviewCommentLookup) ??
     pullRequestOperation(words)
   );
 }

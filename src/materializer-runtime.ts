@@ -1,12 +1,5 @@
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -115,27 +108,19 @@ function executeMaterializer(
   try {
     writeFileSync(artifact, materializer.reviewedSource, { encoding: "utf8", mode: 0o600 });
     if (materializer.dependencies && dependencyDirectory) {
-      mkdirSync(join(temporaryDirectory, materializer.dependencies.directory), { recursive: true });
-      for (const file of [
-        materializer.dependencies.packageJson,
-        materializer.dependencies.denoLock,
-      ]) {
-        writeFileSync(
-          join(temporaryDirectory, materializer.dependencies.directory, file),
-          readFileSync(join(dependencyDirectory, file)),
-          { mode: 0o600 },
-        );
-      }
-      writeFileSync(
-        join(temporaryDirectory, "package.json"),
-        readFileSync(join(dependencyDirectory, materializer.dependencies.packageJson)),
-        { mode: 0o600 },
+      const packageJson = readFileSync(
+        join(dependencyDirectory, materializer.dependencies.packageJson),
       );
-      writeFileSync(
-        join(temporaryDirectory, "deno.lock"),
-        readFileSync(join(dependencyDirectory, materializer.dependencies.denoLock)),
-        { mode: 0o600 },
-      );
+      const denoLock = readFileSync(join(dependencyDirectory, materializer.dependencies.denoLock));
+      if (
+        createHash("sha256").update(packageJson).digest("hex") !==
+          materializer.dependencies.packageJsonIntegrity ||
+        createHash("sha256").update(denoLock).digest("hex") !==
+          materializer.dependencies.denoLockIntegrity
+      )
+        throw new Error("materializer dependency integrity mismatch");
+      writeFileSync(join(temporaryDirectory, "package.json"), packageJson, { mode: 0o600 });
+      writeFileSync(join(temporaryDirectory, "deno.lock"), denoLock, { mode: 0o600 });
       cpSync(
         dirname(fileURLToPath(import.meta.resolve("graphql"))),
         join(temporaryDirectory, "node_modules", "graphql"),

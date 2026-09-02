@@ -59,7 +59,9 @@ type MaterializerReference = {
   readonly dependencies?: {
     readonly directory: string;
     readonly denoLock: string;
+    readonly denoLockIntegrity?: string;
     readonly packageJson: string;
+    readonly packageJsonIntegrity?: string;
   };
   readonly file: string;
   /** SHA-256 of the complete self-contained source, permissions, and runtime version. */

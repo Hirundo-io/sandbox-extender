@@ -76,6 +76,7 @@ describe("shipped Profile templates", () => {
       ...emptyPermissions,
       env: ["NODE_ENV"],
       read: ["$WORKING_DIRECTORY"],
+      run: ["gh"],
     });
     expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(maker.requestMaterializer?.permissions).toEqual({
@@ -394,7 +395,6 @@ describe("shipped Profile templates", () => {
       "gh pr checks 42 --repo acme/example",
       "gh pr checks 42 --repo acme/example --watch",
       'gh pr comment 42 --repo acme/example --body "Reviewed."',
-      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="_Replying as Codex. Fixed in the latest revision."',
       reviewThreadsCommand(),
     ]) {
       expect(
@@ -408,6 +408,20 @@ describe("shipped Profile templates", () => {
         ).decision,
       ).toBe("allow");
     }
+
+    expect(
+      (
+        await core.evaluate({
+          action: "codex.unified_exec",
+          arguments: {
+            command:
+              'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="_Replying as Codex. Fixed in the latest revision."',
+          },
+          resource: workspaceTarget,
+          threadId: "thread-1",
+        })
+      ).decision,
+    ).toBe("abstain");
 
     for (const command of [
       'gh pr comment 43 --repo acme/example --body "Reviewed."',

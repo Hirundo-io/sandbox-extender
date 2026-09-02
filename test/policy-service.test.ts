@@ -31,20 +31,21 @@ const emptyPermissions = {
 function materializerReference(file: string, source: string) {
   const isRequest = file.includes("requests/github-pull-request.ts");
   const permissions = isRequest
-    ? { ...emptyPermissions, env: ["NODE_ENV"], read: ["$WORKING_DIRECTORY"] }
+    ? { ...emptyPermissions, env: ["NODE_ENV"], read: ["$WORKING_DIRECTORY"], run: ["gh"] }
     : emptyPermissions;
+  const dependencies = isRequest
+    ? {
+        denoLock: "deno.lock",
+        denoLockIntegrity: "aca6e0be73c277546f14128673fcf485919e507ca8e5a55bfde76d348bdf5670",
+        directory: "materializers/dependencies/graphql",
+        packageJson: "package.json",
+        packageJsonIntegrity: "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177",
+      }
+    : undefined;
   return {
-    ...(isRequest
-      ? {
-          dependencies: {
-            denoLock: "deno.lock",
-            directory: "materializers/dependencies/graphql",
-            packageJson: "package.json",
-          },
-        }
-      : {}),
+    ...(dependencies ? { dependencies } : {}),
     file,
-    integrity: materializerIntegrity(source, permissions, "2.8.1"),
+    integrity: materializerIntegrity(source, permissions, "2.8.1", dependencies),
     language: "typescript" as const,
     permissions,
     runtimeVersion: "2.8.1",

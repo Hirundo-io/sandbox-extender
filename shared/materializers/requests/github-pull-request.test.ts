@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   materializeGitHubPullRequest,
+  reviewThreadCommentsQuery,
   reviewThreadsQuery,
   resolveReviewThreadMutation,
   runGitHubPullRequestMaterializer,
@@ -45,6 +46,9 @@ describe("GitHub pull request request materializer", () => {
           "-f",
           "body=_Replying as Codex",
         ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
+        () => true,
       ),
     ).toEqual({
       bodyPresent: true,
@@ -73,6 +77,8 @@ describe("GitHub pull request request materializer", () => {
           "--paginate",
           "--slurp",
         ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
       ),
     ).toEqual({
       bodyPresent: false,
@@ -81,6 +87,118 @@ describe("GitHub pull request request materializer", () => {
       trailingArgumentCount: 0,
       trailingArguments: [],
     });
+  });
+
+  test("materializes GraphQL review replies only for a live pull-request thread", () => {
+    const query = `mutation($thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { url } } }`;
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${query}`,
+          "-f",
+          "thread=PRRT_current",
+          "-f",
+          "body=_Replying as Codex\n\nFixed.",
+        ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        operation: "github.review-thread.reply",
+        resource: "github:pull-request:acme/example#42",
+      }),
+    );
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${query}`,
+          "-f",
+          "thread=PRRT_other",
+          "-f",
+          "body=_Replying as Codex\n\nFixed.",
+        ]),
+        undefined,
+        () => undefined,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("requires exact read-query arguments and live thread ownership", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${reviewThreadsQuery}`,
+          "-f",
+          "owner=acme",
+          "-f",
+          "repo=example",
+          "-F",
+          "pr=42",
+          "--paginate",
+          "--slurp",
+          "--input",
+          "mutation.json",
+        ]),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${reviewThreadCommentsQuery}`,
+          "-F",
+          "id=PRRT_current",
+          "--paginate",
+          "--slurp",
+        ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.review-thread.comments" }));
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${resolveReviewThreadMutation}`,
+          "-F",
+          "threadId=PRRT_current",
+          "-f",
+          "clientMutationTag=anything-at-all",
+        ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.review-thread.resolve" }));
+  });
+
+  test("allows a parsed resolution mutation without clientMutationId", () => {
+    const query = `mutation($thread: ID!) { resolveReviewThread(input: { threadId: $thread }) { thread { isResolved } } }`;
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "api", "graphql", "-f", `query=${query}`, "-f", "thread=PRRT_current"]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
+      ),
+    ).toEqual(expect.objectContaining({ operation: "github.review-thread.resolve" }));
   });
 
   test("requires identified inline and file-backed replies", () => {
@@ -96,6 +214,8 @@ describe("GitHub pull request request materializer", () => {
           ".html_url",
         ]),
         (path) => (path === "reply.md" ? "_Replying as Codex\n\nDone." : ""),
+        undefined,
+        () => true,
       ),
     ).toEqual(expect.objectContaining({ operation: "github.review-comment.reply" }));
     expect(
@@ -111,6 +231,8 @@ describe("GitHub pull request request materializer", () => {
           "-f",
           "clientMutationTag=acme/example#42",
         ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
       ),
     ).toEqual(
       expect.objectContaining({
@@ -127,6 +249,9 @@ describe("GitHub pull request request materializer", () => {
           "-f",
           "body=Done.",
         ]),
+        undefined,
+        undefined,
+        () => true,
       ),
     ).toBeUndefined();
   });
@@ -141,6 +266,9 @@ describe("GitHub pull request request materializer", () => {
           "-f",
           "body=_Replying as Codex",
         ]),
+        undefined,
+        undefined,
+        () => true,
       ),
     ).toBeUndefined();
     expect(
@@ -177,6 +305,9 @@ describe("GitHub pull request request materializer", () => {
           "-f",
           "body=_Replying as Codex",
         ]),
+        undefined,
+        undefined,
+        () => true,
       ),
     ).toEqual(expect.objectContaining({ operation: "github.review-comment.reply" }));
     expect(
@@ -211,6 +342,8 @@ describe("GitHub pull request request materializer", () => {
           "-f",
           "second=PRRT_two",
         ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
       ),
     ).toEqual(
       expect.objectContaining({
