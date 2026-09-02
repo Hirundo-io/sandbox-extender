@@ -12,6 +12,24 @@ function candidate(words: unknown): unknown {
   return { command: { words } };
 }
 
+function mockDenoCommand(stdout: string, success = true): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+  Object.defineProperty(globalThis, "Deno", {
+    configurable: true,
+    value: {
+      Command: class {
+        outputSync() {
+          return { success, stdout: new TextEncoder().encode(stdout) };
+        }
+      },
+    },
+  });
+  return () => {
+    if (descriptor) Object.defineProperty(globalThis, "Deno", descriptor);
+    else Reflect.deleteProperty(globalThis, "Deno");
+  };
+}
+
 describe("GitHub pull request request materializer", () => {
   test("materializes pull request operations", () => {
     expect(
@@ -57,6 +75,72 @@ describe("GitHub pull request request materializer", () => {
       trailingArgumentCount: 0,
       trailingArguments: [],
     });
+  });
+
+  test("uses live GitHub lookups for reply and thread authorization", () => {
+    const restoreThreadLookup = mockDenoCommand(
+      JSON.stringify({
+        data: {
+          node: { pullRequest: { number: 42, repository: { nameWithOwner: "Acme/Example" } } },
+        },
+      }),
+    );
+    try {
+      const query = `mutation($thread:ID!, $body:String!) { addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$thread, body:$body}) { comment { url } } }`;
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            `query=${query}`,
+            "-f",
+            "thread=PRRT_current",
+            "-f",
+            "body=_Replying as Codex\n\nFixed.",
+          ]),
+        ),
+      ).toEqual(expect.objectContaining({ operation: "github.review-thread.reply" }));
+    } finally {
+      restoreThreadLookup();
+    }
+    const restoreCommentLookup = mockDenoCommand("9\n");
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "api",
+            "repos/acme/example/pulls/42/comments/9/replies",
+            "-f",
+            "body=_Replying as Codex\n\nFixed.",
+          ]),
+        ),
+      ).toEqual(expect.objectContaining({ operation: "github.review-comment.reply" }));
+    } finally {
+      restoreCommentLookup();
+    }
+    const restoreMalformedLookup = mockDenoCommand("not JSON");
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            `query=${resolveReviewThreadMutation}`,
+            "-F",
+            "threadId=PRRT_current",
+            "-f",
+            "clientMutationTag=untrusted",
+          ]),
+        ),
+      ).toBeUndefined();
+    } finally {
+      restoreMalformedLookup();
+    }
   });
 
   test("materializes the fixed read-only review-thread query", () => {
@@ -142,6 +226,23 @@ describe("GitHub pull request request materializer", () => {
           "thread=PRRT_current",
           "-f",
           "body=Fixed without attribution.",
+        ]),
+        undefined,
+        () => "github:pull-request:acme/example#42",
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          "query=mutation(",
+          "-f",
+          "thread=PRRT_current",
+          "-f",
+          "body=_Replying as Codex\n\nFixed.",
         ]),
         undefined,
         () => "github:pull-request:acme/example#42",
