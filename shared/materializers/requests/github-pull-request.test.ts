@@ -787,6 +787,37 @@ describe("GitHub pull request request materializer", () => {
         ),
       ).toBeUndefined();
     }
+    for (const first of ["0", "-1", "101"]) {
+      const invalidReviewThreads = reviewThreadsQuery.replace(
+        "reviewThreads(first: 100",
+        `reviewThreads(first: ${first}`,
+      );
+      const invalidComments = reviewThreadsQuery.replace(
+        "comments(first: 100)",
+        `comments(first: ${first})`,
+      );
+      for (const query of [invalidReviewThreads, invalidComments]) {
+        expect(
+          materializeGitHubPullRequest(
+            candidate([
+              "gh",
+              "api",
+              "graphql",
+              "--paginate",
+              "--slurp",
+              "-f",
+              "owner=Acme",
+              "-f",
+              "repo=Example",
+              "-F",
+              "pr=42",
+              "-f",
+              `query=${query}`,
+            ]),
+          ),
+        ).toBeUndefined();
+      }
+    }
   });
 
   test.each([

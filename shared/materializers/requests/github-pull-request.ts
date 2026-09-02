@@ -596,7 +596,8 @@ function normalizedReviewThreadsDocument(document: DocumentNode): DocumentNode |
       if (node.name.value === "pageInfo" && parentField === "reviewThreads") return null;
       if (node.name.value !== "reviewThreads" && node.name.value !== "comments") return undefined;
       const first = node.arguments?.find((argument) => argument.name.value === "first");
-      if (!first || first.value.kind !== Kind.INT || !node.selectionSet) {
+      const firstValue = first?.value.kind === Kind.INT ? Number(first.value.value) : undefined;
+      if (firstValue === undefined || firstValue < 1 || firstValue > 100 || !node.selectionSet) {
         valid = false;
         return undefined;
       }
