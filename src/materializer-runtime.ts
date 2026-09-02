@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { denoPermissionFlags, verifyMaterializerIntegrity } from "./materializer-policy.js";
@@ -101,17 +102,52 @@ function executeMaterializer(
 
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "sandbox-extender-materializer-"));
   const artifact = join(temporaryDirectory, "materializer.ts");
+  const dependencyDirectory = materializer.dependencies
+    ? join(dirname(dirname(dirname(materializer.file))), materializer.dependencies.directory)
+    : undefined;
   try {
     writeFileSync(artifact, materializer.reviewedSource, { encoding: "utf8", mode: 0o600 });
+    if (materializer.dependencies && dependencyDirectory) {
+      const packageJson = readFileSync(
+        join(dependencyDirectory, materializer.dependencies.packageJson),
+      );
+      const denoLock = readFileSync(join(dependencyDirectory, materializer.dependencies.denoLock));
+      if (
+        createHash("sha256").update(packageJson).digest("hex") !==
+          materializer.dependencies.packageJsonIntegrity ||
+        createHash("sha256").update(denoLock).digest("hex") !==
+          materializer.dependencies.denoLockIntegrity
+      )
+        throw new Error("materializer dependency integrity mismatch");
+      writeFileSync(join(temporaryDirectory, "package.json"), packageJson, { mode: 0o600 });
+      writeFileSync(join(temporaryDirectory, "deno.lock"), denoLock, { mode: 0o600 });
+      cpSync(
+        dirname(fileURLToPath(import.meta.resolve("graphql"))),
+        join(temporaryDirectory, "node_modules", "graphql"),
+        { recursive: true },
+      );
+      writeFileSync(
+        join(temporaryDirectory, "deno.json"),
+        JSON.stringify({ imports: { graphql: "./node_modules/graphql/index.mjs" } }),
+        { mode: 0o600 },
+      );
+    }
     const process = Bun.spawnSync({
       cmd: [
         resolvedOptions.denoExecutable,
         "run",
         "--no-prompt",
         "--no-config",
-        "--no-lock",
         "--cached-only",
         "--frozen",
+        ...(materializer.dependencies
+          ? [
+              "--node-modules-dir=none",
+              `--lock=${join(temporaryDirectory, "deno.lock")}`,
+              `--import-map=${join(temporaryDirectory, "deno.json")}`,
+              `--allow-read=${temporaryDirectory}`,
+            ]
+          : ["--no-lock"]),
         ...denoPermissionFlags(materializer.permissions, workingDirectory, requestResource),
         artifact,
       ],

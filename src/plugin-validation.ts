@@ -1,4 +1,5 @@
 import { access, readFile, readdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { z } from "zod";
@@ -216,6 +217,23 @@ async function validateMaterializer(
 ): Promise<void> {
   const file = resolveInsideRoot(root, materializer.file);
   verifyMaterializerIntegrity(materializer, await readFile(file, "utf8"));
+  if (!materializer.dependencies) return;
+  const dependencyDirectory = resolveInsideRoot(root, materializer.dependencies.directory);
+  for (const [fileName, integrity] of [
+    [materializer.dependencies.packageJson, materializer.dependencies.packageJsonIntegrity],
+    [materializer.dependencies.denoLock, materializer.dependencies.denoLockIntegrity],
+  ] as const) {
+    const dependency = resolveInsideRoot(dependencyDirectory, fileName);
+    let contents: Buffer;
+    try {
+      contents = await readFile(dependency);
+    } catch {
+      throw new Error(`materializer dependency is missing: ${dependency}`);
+    }
+    if (createHash("sha256").update(contents).digest("hex") !== integrity) {
+      throw new Error(`materializer dependency integrity mismatch: ${dependency}`);
+    }
+  }
 }
 
 async function validateProfileTemplates(root: string): Promise<void> {
