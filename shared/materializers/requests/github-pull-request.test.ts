@@ -141,6 +141,26 @@ describe("GitHub pull request request materializer", () => {
     } finally {
       restoreMalformedLookup();
     }
+    const restoreFailedLookup = mockDenoCommand("", false);
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate([
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            `query=${resolveReviewThreadMutation}`,
+            "-F",
+            "threadId=PRRT_current",
+            "-f",
+            "clientMutationTag=untrusted",
+          ]),
+        ),
+      ).toBeUndefined();
+    } finally {
+      restoreFailedLookup();
+    }
   });
 
   test("materializes the fixed read-only review-thread query", () => {
@@ -289,6 +309,23 @@ describe("GitHub pull request request materializer", () => {
         () => "github:pull-request:acme/example#42",
       ),
     ).toEqual(expect.objectContaining({ operation: "github.review-thread.comments" }));
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "graphql",
+          "-f",
+          `query=${reviewThreadCommentsQuery}`,
+          "-F",
+          "id=PRRT_other",
+          "--paginate",
+          "--slurp",
+        ]),
+        undefined,
+        () => undefined,
+      ),
+    ).toBeUndefined();
     expect(
       materializeGitHubPullRequest(
         candidate([
