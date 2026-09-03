@@ -42,6 +42,20 @@ export function evaluateCedarGrouping(
   }
 }
 
+/** Reject malformed Cedar at proposal time instead of silently turning it into abstention later. */
+export function validateCedarGrouping(grouping: CedarGrouping): void {
+  const answer = isAuthorized({
+    action: entity("Action", "proposal-validation"),
+    context: { arguments: {} },
+    entities: [],
+    policies: { staticPolicies: cedarPolicies(grouping.policies) },
+    principal: entity("AgentThread", "proposal-validation"),
+    resource: entity("Target", "proposal-validation"),
+    validateRequest: false,
+  });
+  if (answer.type !== "success") throw new Error(`invalid Cedar policy grouping ${grouping.id}`);
+}
+
 function cedarPolicies(policies: CedarGrouping["policies"]): Record<string, string> {
   return Object.fromEntries(
     Object.entries(policies).map(([id, source]) => [
