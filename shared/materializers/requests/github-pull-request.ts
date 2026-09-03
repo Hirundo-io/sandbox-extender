@@ -55,7 +55,14 @@ function gitMutationOperation(
 ): PullRequestOperation | undefined {
   if (words[0] !== "git") return undefined;
   const currentPullRequest = pullRequestLookup();
-  if (!currentPullRequest || repetition === "potentially-unbounded") return undefined;
+  if (
+    !currentPullRequest ||
+    (repetition !== undefined &&
+      repetition !== "finite" &&
+      repetition !== "potentially-unbounded") ||
+    repetition === "potentially-unbounded"
+  )
+    return undefined;
 
   let operation: string | undefined;
   if (
@@ -288,7 +295,7 @@ function liveSafePushTarget(
   const upstream = optionalGitConfig(`branch.${branch}.merge`);
   const configuredPush = optionalGitConfig(`remote.${remote}.push`);
   const pushUrl = optionalGitConfig(`remote.${remote}.pushurl`);
-  const remoteUrl = optionalGitConfig(`remote.${remote}.url`);
+  const remoteUrl = gitOutput("remote", "get-url", "--push", "--all", remote);
   if (
     (pushDefault !== undefined && pushDefault !== "simple") ||
     upstream !== `refs/heads/${branch}` ||
@@ -306,8 +313,10 @@ function liveRegularWorkspaceFile(path: string): boolean {
   try {
     const workingDirectory = Deno.realPathSync(Deno.cwd());
     const resolvedPath = Deno.realPathSync(path);
+    const separator = Deno.build.os === "windows" ? "\\" : "/";
     return (
-      (resolvedPath === workingDirectory || resolvedPath.startsWith(`${workingDirectory}/`)) &&
+      (resolvedPath === workingDirectory ||
+        resolvedPath.startsWith(`${workingDirectory}${separator}`)) &&
       Deno.statSync(resolvedPath).isFile
     );
   } catch {
@@ -520,13 +529,13 @@ function pullRequestOperation(
   words: readonly string[],
   pullRequestLookup: PullRequestLookup,
 ): PullRequestOperation | undefined {
-  const [gh, pr, subcommand, pullRequestNumber, ...arguments_] = words;
+  const [gh, pr, subcommand, pullRequestNumber, ...commandArguments] = words;
   if (gh !== "gh" || pr !== "pr" || !subcommand || !pullRequestNumber) return undefined;
-  const hasRepository = arguments_[0] === "--repo";
-  const repository = hasRepository ? arguments_[1] : undefined;
+  const hasRepository = commandArguments[0] === "--repo";
+  const repository = hasRepository ? commandArguments[1] : undefined;
   if (hasRepository && !repository) return undefined;
   if (!repository && subcommand !== "diff") return undefined;
-  const remainingArguments = arguments_.slice(hasRepository ? 2 : 0);
+  const remainingArguments = commandArguments.slice(hasRepository ? 2 : 0);
   const resource = targetFromPullRequestSpecifier(pullRequestNumber, repository, pullRequestLookup);
   if (!resource) return undefined;
   const bodyIndex = remainingArguments.indexOf("--body");

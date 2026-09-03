@@ -99,17 +99,26 @@ function mockDenoCommandSequence(outputs: readonly string[], observed: string[][
   };
 }
 
-function mockDenoFiles(): () => void {
+function mockDenoFiles(os: "linux" | "windows" = "linux"): () => void {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+  const root = os === "windows" ? "C:\\workspace" : "/workspace";
   Object.defineProperty(globalThis, "Deno", {
     configurable: true,
     value: {
-      cwd: () => "/workspace",
+      build: { os },
+      cwd: () => root,
       realPathSync: (path: string) => {
         if (path === "missing-file.ts") throw new Error("missing");
-        return path.startsWith("/") ? path : `/workspace/${path}`;
+        if (path === root) return root;
+        return os === "windows" ? `${root}\\${path.replaceAll("/", "\\")}` : `${root}/${path}`;
       },
-      statSync: (path: string) => ({ isFile: path === "/workspace/package.json" }),
+      statSync: (path: string) => ({
+        isFile:
+          path === `${root}${os === "windows" ? "\\" : "/"}package.json` ||
+          path.endsWith(
+            `${os === "windows" ? "\\" : "/"}src${os === "windows" ? "\\" : "/"}file.ts`,
+          ),
+      }),
     },
   });
   return () => {
@@ -244,6 +253,50 @@ describe("GitHub pull request request materializer", () => {
         () => false,
       ),
     ).toBeUndefined();
+
+    for (const repetition of ["unexpected", null, 1, {}]) {
+      expect(
+        materializeGitHubPullRequest(
+          { command: { repetition, words: ["git", "push"] } },
+          undefined,
+          undefined,
+          undefined,
+          () => currentPullRequest(),
+          undefined,
+          undefined,
+          () => true,
+          () => true,
+        ),
+      ).toBeUndefined();
+    }
+  });
+
+  test("rejects a push URL rewritten away from the PR repository", () => {
+    const restore = mockDenoCommandSequence(
+      [
+        JSON.stringify({
+          headRefName: "feature",
+          headRefOid: "a".repeat(40),
+          number: 513,
+          url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+        }),
+        "feature",
+        "",
+        "",
+        "origin",
+        "",
+        "refs/heads/feature",
+        "",
+        "",
+        "ssh://attacker.example/acme/example.git",
+      ],
+      [],
+    );
+    try {
+      expect(materializeGitHubPullRequest(candidate(["git", "push"]))).toBeUndefined();
+    } finally {
+      restore();
+    }
   });
 
   test("allows git add only for existing regular workspace files", () => {
@@ -263,6 +316,23 @@ describe("GitHub pull request request materializer", () => {
       );
       expect(materialize("shared")).toBeUndefined();
       expect(materialize("missing-file.ts")).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  test("recognizes nested workspace files with Windows path separators", () => {
+    const restore = mockDenoFiles("windows");
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["git", "add", "src/file.ts"]),
+          undefined,
+          undefined,
+          undefined,
+          () => currentPullRequest(),
+        ),
+      ).toEqual(expect.objectContaining({ operation: "git.add" }));
     } finally {
       restore();
     }
