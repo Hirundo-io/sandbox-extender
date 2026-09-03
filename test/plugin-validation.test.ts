@@ -232,7 +232,7 @@ describe("plugin validation", () => {
       await writeFile(join(dependencyDirectory, "package.json"), packageJson);
       await writeFile(join(dependencyDirectory, "deno.lock"), denoLock);
       await writeFile(
-        join(root, "shared", "profile-templates", "scout.json"),
+        join(root, "shared", "profile-templates", "scout.jsonc"),
         JSON.stringify({
           requestMaterializer: dependencyRequestMaterializerReference(packageJson, denoLock),
         }),
