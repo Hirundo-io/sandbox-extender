@@ -69,10 +69,19 @@ describe("repository request materializer", () => {
 
   test("materializes allowlisted local Git inspection", () => {
     for (const words of [
-      ["git", "status"],
-      ["git", "status", "--short"],
-      ["git", "diff"],
-      ["git", "diff", "--check", "--name-only"],
+      ["git", "-c", "core.fsmonitor=false", "status"],
+      ["git", "-c", "core.fsmonitor=false", "status", "--short"],
+      ["git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv"],
+      [
+        "git",
+        "-c",
+        "core.fsmonitor=false",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--check",
+        "--name-only",
+      ],
       ["git", "log", "HEAD"],
       ["git", "show", "HEAD"],
       ["git", "rev-parse", "HEAD"],
@@ -89,12 +98,22 @@ describe("repository request materializer", () => {
         }),
       );
     }
+
+    for (const words of [
+      ["git", "status"],
+      ["git", "diff", "--check"],
+      ["git", "-c", "core.fsmonitor=false", "diff", "--check"],
+    ]) {
+      expect(materializeRepository(candidate(words))).toBeUndefined();
+    }
   });
 
   test("does not bind local inspection from another directory", () => {
-    expect(materializeRepository(candidate(["git", "status"], "/work", "/work/nested"))).toEqual(
-      expect.objectContaining({ localSafe: false }),
-    );
+    expect(
+      materializeRepository(
+        candidate(["git", "-c", "core.fsmonitor=false", "status"], "/work", "/work/nested"),
+      ),
+    ).toEqual(expect.objectContaining({ localSafe: false }));
   });
 
   test("uses git to resolve a remote by default", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,17 @@ describe("target set activation materializer", () => {
       expect(materializeTargetSetActivation({ workspace })).toEqual([realpathSync(workspace)]);
     } finally {
       rmSync(workspace, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects a regular file as a workspace", () => {
+    const directory = mkdtempSync(join(tmpdir(), "sandbox-extender-scout-file-"));
+    const file = join(directory, "workspace.txt");
+    try {
+      writeFileSync(file, "not a directory");
+      expect(materializeTargetSetActivation({ workspace: file })).toBeUndefined();
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
     }
   });
 

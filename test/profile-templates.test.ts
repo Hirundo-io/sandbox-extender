@@ -89,7 +89,10 @@ describe("shipped Profile templates", () => {
       ...emptyPermissions,
       read: ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
     });
-    expect(scout.activationMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(scout.activationMaterializer?.permissions).toEqual({
+      ...emptyPermissions,
+      read: ["$WORKING_DIRECTORY"],
+    });
     expect(scout.requestMaterializer?.permissions).toEqual({
       ...emptyPermissions,
       read: ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
@@ -288,10 +291,10 @@ describe("shipped Profile templates", () => {
       core.activate({ ...scout, allowedTargets: new Set([workspace]) }, "thread-1");
 
       for (const command of [
-        "git status",
-        "git status --short",
-        "git diff --check",
-        "git diff --name-only",
+        "git -c core.fsmonitor=false status",
+        "git -c core.fsmonitor=false status --short",
+        "git -c core.fsmonitor=false diff --no-ext-diff --no-textconv --check",
+        "git -c core.fsmonitor=false diff --no-ext-diff --no-textconv --name-only",
         "git log",
         "git show HEAD",
         "git rev-parse HEAD",
@@ -312,6 +315,10 @@ describe("shipped Profile templates", () => {
 
       for (const command of [
         "git add .",
+        "git status",
+        "git diff --check",
+        "git -c core.fsmonitor=true status",
+        "git -c core.fsmonitor=false diff --check",
         "git status --porcelain",
         "git -C ../outside status",
         "git diff --output=/tmp/diff",

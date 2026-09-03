@@ -93,18 +93,25 @@ function gitRemoteArgument(
 }
 
 function localGitOperation(words: readonly string[]): string | undefined {
-  const command = words[1];
-  const arguments_ = words.slice(2);
+  const disablesFsmonitor = words[1] === "-c" && words[2] === "core.fsmonitor=false";
+  const commandIndex = disablesFsmonitor ? 3 : 1;
+  const command = words[commandIndex];
+  const arguments_ = words.slice(commandIndex + 1);
   if (
+    disablesFsmonitor &&
     command === "status" &&
     (arguments_.length === 0 || arguments_.every((value) => value === "--short"))
   ) {
     return "git.status";
   }
   if (
+    disablesFsmonitor &&
     command === "diff" &&
-    (arguments_.length === 0 ||
-      arguments_.every((value) => value === "--check" || value === "--name-only"))
+    arguments_.includes("--no-ext-diff") &&
+    arguments_.includes("--no-textconv") &&
+    arguments_.every((value) =>
+      ["--check", "--name-only", "--no-ext-diff", "--no-textconv"].includes(value),
+    )
   ) {
     return "git.diff";
   }

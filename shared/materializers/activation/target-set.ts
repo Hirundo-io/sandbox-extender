@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 export function materializeTargetSetActivation(candidate: unknown): readonly string[] | undefined {
@@ -7,7 +7,8 @@ export function materializeTargetSetActivation(candidate: unknown): readonly str
     if (typeof candidate.workspace !== "string" || !isAbsolute(candidate.workspace))
       return undefined;
     try {
-      return [realpathSync(resolve(candidate.workspace))];
+      const workspace = realpathSync(resolve(candidate.workspace));
+      return statSync(workspace).isDirectory() ? [workspace] : undefined;
     } catch {
       return undefined;
     }

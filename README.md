@@ -135,7 +135,9 @@ The disabled `shared/profile-templates/scout.jsonc`,
 `shared/profile-templates/maker.jsonc`, and
 `shared/profile-templates/babysitter.jsonc` files are Profile templates. They
 use JSONC so the reviewed policy and permission rationale can sit beside the
-declarations as inline comments. Their
+declarations as inline comments. These paths replace the former `.json`
+template paths, which are no longer published or validated. Rename retained
+template copies to `.jsonc` before validation. Their
 `pending-review` revision prevents activation until you copy, scope, review,
 and promote them. A Profile template is not itself a Cedar policy or an active
 Profile. It contains the Profile's target scope, ordered groupings, Cedar
@@ -148,7 +150,9 @@ Profiles deliberately apply their rules to the agent's working directory. When
 you activate a Profile with a working-directory argument, expect its reviewed
 materializer to access that folder with the permissions declared in the Profile;
 activate it only for a workspace you intend the Profile to inspect.
-Maker accepts an absolute workspace, and Scout accepts an explicit target set.
+Maker accepts an absolute workspace. Scout accepts either a non-empty explicit
+target set or an absolute workspace. Scout resolves a workspace to its real
+path and verifies that it is a directory before activation.
 The Activation Materializer validates those arguments and freezes its targets
 into the thread binding. Promotion reviews reusable rules and materializer
 code; it does not choose a target.
