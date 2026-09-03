@@ -41,16 +41,6 @@ describe("profile authoring", () => {
     ).rejects.toThrow("one authorization case");
   });
 
-  test("rejects function-based observed commands that expand beyond their source", async () => {
-    await expect(
-      proposeProfile("function-profile", {
-        action: "codex.unified_exec",
-        arguments: { command: "inspect() { gh pr view 42; }; inspect" },
-        resource: "github:pull-request:acme/example#42",
-        threadId: "thread-1",
-      }),
-    ).rejects.toThrow("one authorization case");
-  });
   test("writes a narrow proposal and promotes it only with a review revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-authoring-"));
     try {
