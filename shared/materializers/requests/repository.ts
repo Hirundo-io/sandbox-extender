@@ -92,12 +92,32 @@ function gitRemoteArgument(
     : undefined;
 }
 
+function hasSafeDiffInspectionArguments(
+  arguments_: readonly string[],
+  allowedOptions: readonly string[],
+): boolean {
+  return (
+    arguments_[0] === "--no-ext-diff" &&
+    arguments_[1] === "--no-textconv" &&
+    arguments_.every((value) => allowedOptions.includes(value))
+  );
+}
+
+function hasSafePatchInspectionArguments(arguments_: readonly string[]): boolean {
+  return (
+    arguments_[0] === "--no-ext-diff" &&
+    arguments_[1] === "--no-textconv" &&
+    arguments_.slice(2).every((value) => !value.startsWith("-"))
+  );
+}
+
 function localGitOperation(words: readonly string[]): string | undefined {
-  const disablesOptionalLocks = words[1] === "--no-optional-locks";
-  const configIndex = disablesOptionalLocks ? 2 : 1;
+  if (words[1] !== "--no-pager") return undefined;
+  const disablesOptionalLocks = words[2] === "--no-optional-locks";
+  const configIndex = disablesOptionalLocks ? 3 : 2;
   const disablesFsmonitor =
     words[configIndex] === "-c" && words[configIndex + 1] === "core.fsmonitor=false";
-  const commandIndex = disablesFsmonitor ? configIndex + 2 : 1;
+  const commandIndex = disablesFsmonitor ? configIndex + 2 : 2;
   const command = words[commandIndex];
   const arguments_ = words.slice(commandIndex + 1);
   if (
@@ -111,13 +131,17 @@ function localGitOperation(words: readonly string[]): string | undefined {
   if (
     disablesFsmonitor &&
     command === "diff" &&
-    arguments_.includes("--no-ext-diff") &&
-    arguments_.includes("--no-textconv") &&
-    arguments_.every((value) =>
-      ["--check", "--name-only", "--no-ext-diff", "--no-textconv"].includes(value),
-    )
+    hasSafeDiffInspectionArguments(arguments_, [
+      "--check",
+      "--name-only",
+      "--no-ext-diff",
+      "--no-textconv",
+    ])
   ) {
     return "git.diff";
+  }
+  if ((command === "log" || command === "show") && hasSafePatchInspectionArguments(arguments_)) {
+    return `git.${command}`;
   }
   if (command === "branch" && arguments_.length === 1 && arguments_[0] === "--show-current") {
     return "git.branch";
@@ -130,10 +154,7 @@ function localGitOperation(words: readonly string[]): string | undefined {
   ) {
     return "git.config";
   }
-  if (
-    ["log", "show", "rev-parse"].includes(command ?? "") &&
-    arguments_.every((value) => !value.startsWith("-"))
-  ) {
+  if (command === "rev-parse" && arguments_.every((value) => !value.startsWith("-"))) {
     return `git.${command}`;
   }
   return undefined;

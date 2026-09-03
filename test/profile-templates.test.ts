@@ -291,15 +291,15 @@ describe("shipped Profile templates", () => {
       core.activate({ ...scout, allowedTargets: new Set([workspace]) }, "thread-1");
 
       for (const command of [
-        "git --no-optional-locks -c core.fsmonitor=false status",
-        "git --no-optional-locks -c core.fsmonitor=false status --short",
-        "git -c core.fsmonitor=false diff --no-ext-diff --no-textconv --check",
-        "git -c core.fsmonitor=false diff --no-ext-diff --no-textconv --name-only",
-        "git log",
-        "git show HEAD",
-        "git rev-parse HEAD",
-        "git branch --show-current",
-        "git config --get core.hooksPath",
+        "git --no-pager --no-optional-locks -c core.fsmonitor=false status",
+        "git --no-pager --no-optional-locks -c core.fsmonitor=false status --short",
+        "git --no-pager -c core.fsmonitor=false diff --no-ext-diff --no-textconv --check",
+        "git --no-pager -c core.fsmonitor=false diff --no-ext-diff --no-textconv --name-only",
+        "git --no-pager log --no-ext-diff --no-textconv",
+        "git --no-pager show --no-ext-diff --no-textconv HEAD",
+        "git --no-pager rev-parse HEAD",
+        "git --no-pager branch --show-current",
+        "git --no-pager config --get core.hooksPath",
       ]) {
         expect(
           (
@@ -317,6 +317,9 @@ describe("shipped Profile templates", () => {
         "git add .",
         "git status",
         "git diff --check",
+        "git --no-pager log HEAD",
+        "git --no-pager show HEAD",
+        "git --no-pager -c core.pager=cat log HEAD",
         "git -c core.fsmonitor=true status",
         "git -c core.fsmonitor=false diff --check",
         "git status --porcelain",

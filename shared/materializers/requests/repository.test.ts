@@ -69,11 +69,20 @@ describe("repository request materializer", () => {
 
   test("materializes allowlisted local Git inspection", () => {
     for (const words of [
-      ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status"],
-      ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--short"],
-      ["git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv"],
+      ["git", "--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "status"],
       [
         "git",
+        "--no-pager",
+        "--no-optional-locks",
+        "-c",
+        "core.fsmonitor=false",
+        "status",
+        "--short",
+      ],
+      ["git", "--no-pager", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv"],
+      [
+        "git",
+        "--no-pager",
         "-c",
         "core.fsmonitor=false",
         "diff",
@@ -82,11 +91,11 @@ describe("repository request materializer", () => {
         "--check",
         "--name-only",
       ],
-      ["git", "log", "HEAD"],
-      ["git", "show", "HEAD"],
-      ["git", "rev-parse", "HEAD"],
-      ["git", "branch", "--show-current"],
-      ["git", "config", "--get", "core.hooksPath"],
+      ["git", "--no-pager", "log", "--no-ext-diff", "--no-textconv", "HEAD"],
+      ["git", "--no-pager", "show", "--no-ext-diff", "--no-textconv", "HEAD"],
+      ["git", "--no-pager", "rev-parse", "HEAD"],
+      ["git", "--no-pager", "branch", "--show-current"],
+      ["git", "--no-pager", "config", "--get", "core.hooksPath"],
     ]) {
       expect(materializeRepository(candidate(words))).toEqual(
         expect.objectContaining({
@@ -104,6 +113,11 @@ describe("repository request materializer", () => {
       ["git", "-c", "core.fsmonitor=false", "status"],
       ["git", "diff", "--check"],
       ["git", "-c", "core.fsmonitor=false", "diff", "--check"],
+      ["git", "log", "HEAD"],
+      ["git", "--no-pager", "log", "HEAD"],
+      ["git", "show", "HEAD"],
+      ["git", "--no-pager", "show", "HEAD"],
+      ["git", "--no-pager", "-c", "core.pager=cat", "log", "HEAD"],
     ]) {
       expect(materializeRepository(candidate(words))).toBeUndefined();
     }
@@ -113,7 +127,7 @@ describe("repository request materializer", () => {
     expect(
       materializeRepository(
         candidate(
-          ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status"],
+          ["git", "--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false", "status"],
           "/work",
           "/work/nested",
         ),

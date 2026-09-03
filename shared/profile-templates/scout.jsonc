@@ -22,7 +22,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/repository.ts",
-    "integrity": "297ecb5b4e1a32eef992b8cc688d734db049a470f942b17f1e0d9aaebdc07327",
+    "integrity": "e1d0bb66312153a5b28fc6ba1e6eca2a539b621030c9bbe9f725359c1bd1e4d3",
     "language": "typescript",
     "permissions": {
       // Policy Core substitutes canonical request paths and verifies containment.
