@@ -1,5 +1,5 @@
 import { parse as parseTypedShell } from "unbash";
-import type { AndOr, Command, Node, ParsedScript, Word, WordPart } from "unbash";
+import type { AndOr, Command, Function, Node, ParsedScript, Word, WordPart } from "unbash";
 
 const defaultMaxIterations = 64;
 const defaultMaxSegments = 256;
@@ -15,6 +15,7 @@ const shellStateMutations = new Set([
   "local",
   "read",
   "readonly",
+  "return",
   "set",
   "shift",
   "source",
@@ -45,6 +46,9 @@ export type ShellCompileOptions = {
 type ControlFlowFacts = Omit<ExecutableSegment, "source" | "words">;
 
 type CompilerState = {
+  readonly activeFunctions: Set<string>;
+  readonly declaredFunctionNames: Set<string>;
+  readonly functions: Map<string, Function>;
   readonly maxIterations: number;
   readonly maxSegments: number;
   readonly segments: ExecutableSegment[];
@@ -58,7 +62,9 @@ function validLimit(value: number): boolean {
 }
 
 function simpleVariable(text: string): string | undefined {
-  const match = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(text);
+  const match = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*|[1-9])\}|([A-Za-z_][A-Za-z0-9_]*|[1-9]))$/.exec(
+    text,
+  );
   return match?.[1] ?? match?.[2];
 }
 
@@ -157,10 +163,14 @@ function addCommand(
   variables: Variables,
   facts: ControlFlowFacts,
   allowDirectoryChange: boolean,
+  expandFunction: (definition: Function, arguments_: readonly string[]) => boolean,
 ): boolean {
   const words = commandWords(command, variables);
   if (!words || shellStateMutations.has(words[0]!) || (words[0] === "cd" && !allowDirectoryChange))
     return false;
+  const definition = state.functions.get(words[0]!);
+  if (definition) return expandFunction(definition, words.slice(1));
+  if (state.declaredFunctionNames.has(words[0]!)) return false;
   if (state.segments.length >= state.maxSegments) return false;
   state.segments.push({ ...facts, source: state.source.slice(command.pos, command.end), words });
   return true;
@@ -189,13 +199,62 @@ function compileNode(
   facts: ControlFlowFacts,
   allowDirectoryChange: boolean,
   terminal: boolean,
+  allowFunctionDefinition: boolean,
 ): boolean {
   if (node.type === "Statement") {
     if (node.background || node.redirects.length > 0) return false;
-    return compileNode(node.command, state, variables, facts, allowDirectoryChange, terminal);
+    return compileNode(
+      node.command,
+      state,
+      variables,
+      facts,
+      allowDirectoryChange,
+      terminal,
+      allowFunctionDefinition,
+    );
   }
-  if (node.type === "Command")
-    return addCommand(node, state, variables, facts, allowDirectoryChange);
+  if (node.type === "Command") {
+    return addCommand(
+      node,
+      state,
+      variables,
+      facts,
+      allowDirectoryChange,
+      (definition, arguments_) => {
+        const name = resolveWord(definition.name, new Map());
+        if (!name || arguments_.length > 9 || state.activeFunctions.has(name)) return false;
+        const functionVariables = new Map(variables);
+        for (let index = 1; index <= 9; index += 1) functionVariables.delete(String(index));
+        arguments_.forEach((argument, index) => functionVariables.set(String(index + 1), argument));
+        state.activeFunctions.add(name);
+        const compiled = compileNode(
+          definition.body,
+          state,
+          functionVariables,
+          facts,
+          allowDirectoryChange,
+          terminal,
+          false,
+        );
+        state.activeFunctions.delete(name);
+        return compiled;
+      },
+    );
+  }
+  if (node.type === "Function") {
+    const name = resolveWord(node.name, new Map());
+    if (
+      !allowFunctionDefinition ||
+      !name ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ||
+      node.redirects.length > 0 ||
+      node.body.type !== "BraceGroup" ||
+      state.functions.has(name)
+    )
+      return false;
+    state.functions.set(name, node);
+    return true;
+  }
   if (node.type === "Pipeline") {
     if (
       node.negated ||
@@ -205,13 +264,13 @@ function compileNode(
       return false;
     }
     return node.commands.every((command) =>
-      compileNode(command, state, variables, facts, false, false),
+      compileNode(command, state, variables, facts, false, false, false),
     );
   }
   if (node.type === "AndOr") {
     if (!validConditionalDirectoryChange(node, variables, terminal)) return false;
     return node.commands.every((command, index) =>
-      compileNode(command, state, variables, facts, index === 0, false),
+      compileNode(command, state, variables, facts, index === 0, false, false),
     );
   }
   if (node.type === "For") {
@@ -242,6 +301,7 @@ function compileNode(
           loopFacts,
           false,
           index === node.body.commands.length - 1,
+          false,
         ),
       );
     });
@@ -262,6 +322,7 @@ function compileNode(
           { ...loopFacts, role: "condition" },
           false,
           index === node.clause.commands.length - 1,
+          false,
         ),
       ) &&
       node.body.commands.every((statement, index) =>
@@ -272,6 +333,7 @@ function compileNode(
           { ...loopFacts, role: "body" },
           false,
           index === node.body.commands.length - 1,
+          false,
         ),
       )
     );
@@ -285,6 +347,7 @@ function compileNode(
         facts,
         allowDirectoryChange,
         index === node.body.commands.length - 1,
+        false,
       ),
     );
   }
@@ -300,6 +363,7 @@ function compileNode(
         facts,
         false,
         index === node.body.commands.length - 1,
+        false,
       ),
     );
   }
@@ -312,14 +376,24 @@ function compileTypedAst(
   options: Required<ShellCompileOptions>,
 ): ExecutableSegment[] | undefined {
   if (parsed.errors?.length) return undefined;
+  const declaredFunctionNames = new Set(
+    parsed.commands.flatMap((statement) => {
+      if (statement.command.type !== "Function") return [];
+      const name = resolveWord(statement.command.name, new Map());
+      return name ? [name] : [];
+    }),
+  );
   const state = {
+    activeFunctions: new Set<string>(),
+    declaredFunctionNames,
+    functions: new Map<string, Function>(),
     maxIterations: options.maxIterations,
     maxSegments: options.maxSegments,
     segments: [],
     source: script,
   } satisfies CompilerState;
   return parsed.commands.every((statement, index) =>
-    compileNode(statement, state, new Map(), {}, true, index === parsed.commands.length - 1),
+    compileNode(statement, state, new Map(), {}, true, index === parsed.commands.length - 1, true),
   ) && state.segments.length > 0
     ? state.segments
     : undefined;
