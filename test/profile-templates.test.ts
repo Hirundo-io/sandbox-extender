@@ -16,6 +16,9 @@ const sharedDirectory = join(process.cwd(), "shared");
 const profileTemplateDirectory = join(sharedDirectory, "profile-templates");
 const workspaceTarget = process.cwd();
 const emptyPermissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] };
+const watcherPullRequestFields =
+  "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
+const watcherChecksFields = "name,state,bucket,link,workflow,event,startedAt,completedAt";
 
 function runGit(workspace: string, ...arguments_: string[]): void {
   const result = runFixtureGit(workspace, arguments_);
@@ -26,7 +29,7 @@ function runGit(workspace: string, ...arguments_: string[]): void {
 
 function reviewThreadsCommand(repository = "acme/example", pullRequest = 42): string {
   const [owner, name] = repository.split("/");
-  return `gh api graphql --paginate --slurp -f 'query=${reviewThreadsQuery}' -f owner=${owner} -f repo=${name} -F pr=${pullRequest}`;
+  return `gh api graphql --paginate --slurp -f owner=${owner} -f repo=${name} -F pr=${pullRequest} -f 'query=${reviewThreadsQuery}'`;
 }
 
 async function profileTemplate(name: string): Promise<Profile> {
@@ -400,19 +403,24 @@ describe("shipped Profile templates", () => {
       "gh pr diff 42 --repo acme/example",
       "gh pr checks 42 --repo acme/example",
       "gh pr checks 42 --repo acme/example --watch",
+      `gh -R acme/example pr view 42 --json ${watcherPullRequestFields}`,
+      `gh -R acme/example pr checks 42 --json ${watcherChecksFields}`,
       'gh pr comment 42 --repo acme/example --body "Reviewed."',
+      'gh api --method POST repos/acme/example/issues/42/comments -f body="_Replying as Codex. Reviewed."',
+      "gh api 'repos/acme/example/issues/42/comments?per_page=100&page=1'",
+      "gh api 'repos/acme/example/pulls/42/reviews?per_page=100&page=1'",
       reviewThreadsCommand(),
     ]) {
-      expect(
-        (
-          await core.evaluate({
-            action: "codex.unified_exec",
-            arguments: { command },
-            resource: workspaceTarget,
-            threadId: "thread-1",
-          })
-        ).decision,
-      ).toBe("allow");
+      const result = await core.evaluate({
+        action: "codex.unified_exec",
+        arguments: { command },
+        resource: workspaceTarget,
+        threadId: "thread-1",
+      });
+      expect({ command, decision: result.decision }).toEqual({
+        command,
+        decision: "allow",
+      });
     }
 
     expect(
@@ -458,6 +466,16 @@ describe("shipped Profile templates", () => {
       'gh api --method POST repos/acme/example/pulls/42/comments/987/replies/extra -f body="Alternate endpoint."',
       'gh api --method POST /repos/acme/example/pulls/42/comments/987/replies -f body="Alternate endpoint."',
       'gh api --method POST repos/acme/example/issues/42/comments -f body="Unrelated write."',
+      'gh api --method POST repos/acme/example/issues/43/comments -f body="_Replying as Codex. Wrong pull request."',
+      'gh api --method POST repos/acme/other/issues/42/comments -f body="_Replying as Codex. Wrong repository."',
+      'gh api --method POST repos/acme/example/issues/42/comments -f body=""',
+      'gh api --method POST repos/acme/example/issues/42/comments -F body="_Replying as Codex. Unsafe field form."',
+      "gh auth status",
+      "gh auth token",
+      "gh api user",
+      "gh api user --jq .login",
+      "gh api rate_limit",
+      "gh api repos/acme/example/actions/secrets",
       'gh api --method PATCH repos/acme/example/pulls/42/comments/987/replies -f body="Wrong method."',
       'gh api graphql -f query="mutation { addPullRequestReviewThreadReply(input: {}) { clientMutationId } }"',
       reviewThreadsCommand("acme/other"),
@@ -547,6 +565,55 @@ describe("shipped Profile templates", () => {
           materialized: { ...context.materialized, operation: "github.pull-request.merge" },
         }),
       ).toBe("abstain");
+    }
+
+    const checksRequest = {
+      action: "codex.unified_exec",
+      arguments: { command: "gh pr checks 42 --json name,state,bucket,link,workflow" },
+      resource: workspaceTarget,
+      threadId: "thread-1",
+    };
+    const checksContext = {
+      materialized: {
+        bodyPresent: false,
+        operation: "github.pull-request.checks",
+        trailingArgumentCount: 2,
+        trailingArguments: ["--json", "name,state,bucket,link,workflow"],
+      },
+      policyRevision: babysitter.policyRevision,
+      profileId: babysitter.id,
+      request: checksRequest,
+      resolvedTarget: "github:pull-request:acme/example#42",
+    };
+    expect(evaluateCedarGrouping(grouping, checksContext)).toBe("allow");
+    expect(
+      evaluateCedarGrouping(grouping, {
+        ...checksContext,
+        materialized: {
+          ...checksContext.materialized,
+          trailingArguments: ["--json", "name,state,bucket,link,workflow,event"],
+        },
+      }),
+    ).toBe("abstain");
+    for (const operation of [
+      "github.pull-request.conversation-comments",
+      "github.pull-request.reviews",
+      "github.actions.runs",
+      "github.actions.jobs",
+      "github.actions.run-view",
+      "github.actions.rerun-failed",
+    ]) {
+      expect(
+        evaluateCedarGrouping(grouping, {
+          ...checksContext,
+          materialized: {
+            ...checksContext.materialized,
+            operation,
+            trailingArgumentCount: 0,
+            trailingArguments: [],
+          },
+        }),
+      ).toBe("allow");
     }
   });
 });

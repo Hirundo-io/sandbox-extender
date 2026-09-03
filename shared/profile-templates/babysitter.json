@@ -27,7 +27,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "e5e1aacce51575c3c2f72328250c83a97f77408035ce74303a342a83b6900af3",
+    "integrity": "314ce84c42d6b2057021edcdff099b83926ce3d94941645b95549038c5e5f816",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -43,8 +43,9 @@
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",
     "Read pull-request status before changing code or responding to review.",
-    "Inspect all review threads with: gh api graphql --paginate --slurp -f 'query=<ReviewThreads query>' -f owner=<owner> -f repo=<repo> -F pr=<number>. The exact ReviewThreads query is in the reviewed request materializer.",
-    "Every reply must begin with _Replying as . Run one REST reply command per comment with a body beginning with that prefix, or use the reviewed GraphQL thread-reply mutation. You may place multiple allowed commands in one ordinary shell sequence; do not use command substitution.",
+    "Inspect all review threads with: gh api graphql --paginate --slurp -f owner=<owner> -f repo=<repo> -F pr=<number> -f 'query=<ReviewThreads query>'. The reviewed request materializer validates the repository and pull-request query structure. It accepts any integer first value, any comment fields, optional pageInfo in either position, and the query field before or after the owner fields.",
+    "Every reply and pull-request conversation comment must use an agent attribution prefix: _Replying as <agent> or [from <agent>]:. Run one REST command per comment with a non-empty body, or use the reviewed GraphQL thread-reply mutation. You may place multiple allowed commands in one ordinary shell sequence; do not use command substitution.",
+    "The watcher may inspect the exact PR metadata, checks, conversation comments, reviews, review threads, workflow runs, jobs, and logs described by the babysit-pr skill. Repository flags and every endpoint must match the pull request frozen at activation. Generic gh api, gh auth, account, credential, token, configuration, and unrelated repository queries remain denied.",
     "Before replying to or resolving a thread, use the reviewed ReviewThreadComments query with gh api graphql --paginate --slurp -f 'query=<ReviewThreadComments query>' -F id=<PRRT id> to freshly fetch that specific PRRT thread and every comment. The materializer performs a fresh GitHub lookup for every reply or resolution and permits it only when the ID belongs to the activated pull request. This is not stateful and clientMutationId is not a scope check.",
     "You may reply through REST or with the reviewed addPullRequestReviewThreadReply GraphQL mutation. Every reply must contain the required attribution prefix. Resolve addressed threads with the reviewed ResolveReviewThread GraphQL mutation, singly or in a parsed batch of up to 20 thread IDs; clientMutationId values may be any string.",
     "After replying to or resolving threads, tell the user which threads were replied to or resolved and include the resulting comment or thread links. Reading threads alone does not require a user-facing report."
@@ -57,9 +58,11 @@
           "permit(principal, action, resource)",
           "when {",
           "  (context.materialized.trailingArgumentCount == 0 &&",
-          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\", \"github.pull-request.review-threads\", \"github.review-thread.comments\", \"github.review-thread.resolve\", \"github.review-thread.reply\"].contains(context.materialized.operation)) ||",
+          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\", \"github.pull-request.review-threads\", \"github.pull-request.conversation-comment\", \"github.pull-request.conversation-comments\", \"github.pull-request.reviews\", \"github.actions.runs\", \"github.actions.jobs\", \"github.actions.run-view\", \"github.actions.rerun-failed\", \"github.review-thread.comments\", \"github.review-thread.resolve\", \"github.review-thread.reply\"].contains(context.materialized.operation)) ||",
           "  (context.materialized.operation == \"github.pull-request.checks\" &&",
           "    context.materialized.trailingArgumentCount == 1 && context.materialized.trailingArguments.contains(\"--watch\")) ||",
+          "  (context.materialized.operation == \"github.pull-request.checks\" &&",
+          "    context.materialized.trailingArgumentCount == 2 && context.materialized.trailingArguments.contains(\"--json\") && (context.materialized.trailingArguments.contains(\"name,state,bucket,link,workflow\") || context.materialized.trailingArguments.contains(\"name,state,bucket,link,workflow,event,startedAt,completedAt\"))) ||",
           "  (context.materialized.operation == \"github.pull-request.comment\" &&",
           "    context.materialized.trailingArgumentCount == 2 && context.materialized.bodyPresent)",
           "};"
