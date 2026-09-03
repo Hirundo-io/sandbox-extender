@@ -220,13 +220,13 @@ function requestResult(candidate: unknown): RequestMaterialization | undefined {
 
 function canonicalActivationArguments(
   materializer: ActivationMaterializer,
-  arguments_: Readonly<Record<string, unknown>>,
+  activationArguments: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, unknown>> {
-  const workspace = arguments_.workspace;
+  const workspace = activationArguments.workspace;
   return materializer.permissions.read.includes(activationWorkspacePermission) &&
     typeof workspace === "string"
-    ? { ...arguments_, workspace: realpathSync(workspace) }
-    : arguments_;
+    ? { ...activationArguments, workspace: realpathSync(workspace) }
+    : activationArguments;
 }
 
 export function materializeActivation(
