@@ -188,11 +188,17 @@ describe("shell compiler", () => {
     "reply() { echo safe; }; reply one two three four five six seven eight nine ten",
     "reply() { echo $@; }; reply one",
     "reply() { echo $*; }; reply one",
+    'reply() { echo $1 safe; }; reply ""',
+    'run() { "$1" unsafe; }; run echo',
     "reply() { local value=safe; echo safe; }; reply",
     "reply() { return 0; }; reply",
     "reply() { echo safe; }; reply() { echo duplicate; }; reply",
     "reply; reply() { echo defined-too-late; }",
     "{ reply() { echo nested; }; reply; }",
+    "unused() { if true; then echo unsupported; fi; }; echo safe",
+    "go() { cd sub; }; go || npm install",
+    "go() { cd sub; }; go | npm install",
+    "go() { cd sub; }; while go; do echo waiting; done",
   ])("abstains on unsupported function behavior: %s", async (script) => {
     expect(await compileShell(script)).toBeUndefined();
   });
