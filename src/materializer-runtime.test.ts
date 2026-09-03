@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  activationWorkspacePermission,
   materializerIntegrity,
   requestResourcePermission,
   workingDirectoryPermission,
@@ -101,6 +102,33 @@ describe("materializer runtime", () => {
         repository: "acme/example",
       }),
     ).toEqual({ targets: ["github:pull-request:acme/example#42"] });
+  });
+
+  test("grants activation read access to the selected external workspace", () => {
+    const workingDirectory = mkdtempSync(join(tmpdir(), "materializer-activation-root-"));
+    const workspace = mkdtempSync(join(tmpdir(), "materializer-activation-workspace-"));
+    const source = [
+      'import { realpathSync, statSync } from "node:fs";',
+      "const input = await new Response(Deno.stdin.readable).json();",
+      "const target = realpathSync(input.workspace);",
+      "if (!statSync(target).isDirectory()) Deno.exit(1);",
+      "console.log(JSON.stringify({targets: [target]}));",
+    ].join("\n");
+    try {
+      expect(
+        materializeActivation(
+          activationMaterializer(source, {
+            ...noPermissions,
+            read: [activationWorkspacePermission],
+          }),
+          { workspace },
+          workingDirectory,
+        ),
+      ).toEqual({ targets: [realpathSync(workspace)] });
+    } finally {
+      rmSync(workingDirectory, { force: true, recursive: true });
+      rmSync(workspace, { force: true, recursive: true });
+    }
   });
 
   test("uses the actual request working directory", () => {

@@ -37,6 +37,7 @@ const diskProfileSchema = z
     id: profileIdSchema,
     policyRevision: z.string().min(1),
     sessionContext: z.array(z.string().min(1)).optional(),
+    singleCommand: z.literal(true).optional(),
     targetScope: z.literal("single").optional(),
     requestMaterializer: requestMaterializerSchema.optional(),
   })

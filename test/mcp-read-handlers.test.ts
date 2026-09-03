@@ -25,6 +25,7 @@ function fingerprint(value: Profile): string {
         id: value.id,
         policyRevision: value.policyRevision,
         sessionContext: value.sessionContext ?? [],
+        singleCommand: value.singleCommand,
         targetScope: value.targetScope,
         activationMaterializer: value.activationMaterializer,
         requestMaterializer: value.requestMaterializer,

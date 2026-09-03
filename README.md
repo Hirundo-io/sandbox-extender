@@ -135,9 +135,13 @@ objects match their MCP inputs with `threadId` removed. Run the command with
 `--help` to see each operation's shape. Request evaluation remains available
 without mutation Approval.
 
-The disabled `shared/profile-templates/scout.json`,
-`shared/profile-templates/maker.json`, and
-`shared/profile-templates/babysitter.json` files are Profile templates. Their
+The disabled `shared/profile-templates/scout.jsonc`,
+`shared/profile-templates/maker.jsonc`, and
+`shared/profile-templates/babysitter.jsonc` files are Profile templates. They
+use JSONC so the reviewed policy and permission rationale can sit beside the
+declarations as inline comments. These paths replace the former `.json`
+template paths, which are no longer published or validated. Rename retained
+template copies to `.jsonc` before validation. Their
 `pending-review` revision prevents activation until you copy, scope, review,
 and promote them. A Profile template is not itself a Cedar policy or an active
 Profile. It contains the Profile's target scope, ordered groupings, Cedar
@@ -150,7 +154,9 @@ Profiles deliberately apply their rules to the agent's working directory. When
 you activate a Profile with a working-directory argument, expect its reviewed
 materializer to access that folder with the permissions declared in the Profile;
 activate it only for a workspace you intend the Profile to inspect.
-Maker accepts an absolute workspace, and Scout accepts an explicit target set.
+Maker accepts an absolute workspace. Scout accepts either a non-empty explicit
+target set or an absolute workspace. Scout resolves a workspace to its real
+path and verifies that it is a directory before activation.
 The Activation Materializer validates those arguments and freezes its targets
 into the thread binding. Promotion reviews reusable rules and materializer
 code; it does not choose a target.
@@ -218,7 +224,7 @@ runs `gh pr view --json number,url` when activation receives
 repository and pull-request number. It validates the returned GitHub URL and
 number before freezing one canonical pull-request Target. Its Profile uses this
 data-only declaration in the canonical
-[`shared/profile-templates/babysitter.json`](shared/profile-templates/babysitter.json)
+[`shared/profile-templates/babysitter.jsonc`](shared/profile-templates/babysitter.jsonc)
 template. Use that file rather than copying its integrity digest into another
 profile or document.
 

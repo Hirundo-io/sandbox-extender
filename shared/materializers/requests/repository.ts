@@ -7,6 +7,7 @@ type MaterializerInput = {
 type RepositoryOperation = {
   readonly argumentsSafe: boolean;
   readonly duplicateOptionCount: number;
+  readonly localSafe: boolean;
   readonly operation: string;
   readonly remoteSafe: boolean;
   readonly resource: string;
@@ -91,6 +92,53 @@ function gitRemoteArgument(
     : undefined;
 }
 
+function localGitOperation(words: readonly string[]): string | undefined {
+  const disablesOptionalLocks = words[1] === "--no-optional-locks";
+  const configIndex = disablesOptionalLocks ? 2 : 1;
+  const disablesFsmonitor =
+    words[configIndex] === "-c" && words[configIndex + 1] === "core.fsmonitor=false";
+  const commandIndex = disablesFsmonitor ? configIndex + 2 : 1;
+  const command = words[commandIndex];
+  const arguments_ = words.slice(commandIndex + 1);
+  if (
+    disablesOptionalLocks &&
+    disablesFsmonitor &&
+    command === "status" &&
+    (arguments_.length === 0 || arguments_.every((value) => value === "--short"))
+  ) {
+    return "git.status";
+  }
+  if (
+    disablesFsmonitor &&
+    command === "diff" &&
+    arguments_.includes("--no-ext-diff") &&
+    arguments_.includes("--no-textconv") &&
+    arguments_.every((value) =>
+      ["--check", "--name-only", "--no-ext-diff", "--no-textconv"].includes(value),
+    )
+  ) {
+    return "git.diff";
+  }
+  if (command === "branch" && arguments_.length === 1 && arguments_[0] === "--show-current") {
+    return "git.branch";
+  }
+  if (
+    command === "config" &&
+    arguments_.length === 2 &&
+    arguments_[0] === "--get" &&
+    arguments_[1] === "core.hooksPath"
+  ) {
+    return "git.config";
+  }
+  if (
+    ["log", "show", "rev-parse"].includes(command ?? "") &&
+    arguments_.every((value) => !value.startsWith("-"))
+  ) {
+    return `git.${command}`;
+  }
+  return undefined;
+}
+
 export function runGit(
   arguments_: readonly string[],
   Command: DenoCommand = Deno.Command,
@@ -144,11 +192,23 @@ function gitOperation(
   words: readonly string[],
   execute: RunGit,
 ): RepositoryOperation | undefined {
+  const localOperation = localGitOperation(words);
+  if (localOperation) {
+    return {
+      argumentsSafe: true,
+      duplicateOptionCount: duplicateLongOptionCount(words),
+      localSafe: localTarget === workingDirectory,
+      operation: localOperation,
+      remoteSafe: false,
+      resource: localTarget,
+    };
+  }
   const parsed = gitRemoteArgument(words);
   if (!parsed) return undefined;
   return {
     argumentsSafe: parsed.argumentsSafe,
     duplicateOptionCount: duplicateLongOptionCount(words),
+    localSafe: false,
     operation: `git.${words[1]}`,
     remoteSafe: isSafeGitRemote(effectiveGitRemote(workingDirectory, parsed.remote, execute)),
     resource: localTarget,
@@ -170,6 +230,7 @@ function githubOperation(words: readonly string[]): RepositoryOperation | undefi
   return {
     argumentsSafe: true,
     duplicateOptionCount: duplicateLongOptionCount(words),
+    localSafe: false,
     operation: `github.${words[1] ?? "unknown"}.${words[2] ?? "unknown"}`,
     remoteSafe: true,
     resource: `github:repository:${repository.toLowerCase()}`,

@@ -2,6 +2,7 @@ import { access, readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+import { parse, type ParseError } from "jsonc-parser";
 import { z } from "zod";
 
 import { verifyMaterializerIntegrity } from "./materializer-policy.js";
@@ -178,6 +179,13 @@ async function readJson(file: string): Promise<unknown> {
   return JSON.parse(await readFile(file, "utf8"));
 }
 
+async function readJsonc(file: string): Promise<unknown> {
+  const errors: ParseError[] = [];
+  const value = parse(await readFile(file, "utf8"), errors, { allowTrailingComma: true });
+  if (errors.length > 0) throw new Error(`${file} is not valid JSONC`);
+  return value;
+}
+
 async function validateFile(file: string): Promise<void> {
   await access(file);
 }
@@ -242,10 +250,10 @@ async function validateProfileTemplates(root: string): Promise<void> {
   const entries = await readdir(profileTemplateDirectory, { withFileTypes: true });
   await Promise.all(
     entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonc"))
       .map(async (entry) => {
         const profileTemplate = profileTemplateSchema.parse(
-          await readJson(join(profileTemplateDirectory, entry.name)),
+          await readJsonc(join(profileTemplateDirectory, entry.name)),
         );
         if (profileTemplate.activationMaterializer) {
           await validateMaterializer(sharedDirectory, profileTemplate.activationMaterializer);
