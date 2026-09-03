@@ -10,15 +10,22 @@ Install or refresh Sandbox Extender from `https://github.com/Hirundo-io/sandbox-
 This skill manages the plugin only. Do not activate, alter, or remove Sandbox Extender Profiles or policy repositories.
 
 1. Set the target list to the local machine plus the explicit SSH host aliases supplied by the user. Do not infer remote hosts from agent connections, Git remotes, or SSH configuration.
-2. On each target, inspect Codex and Claude Code plugin and marketplace state before changing it. If either executable is unavailable, report that target/tool as unavailable and continue with the other requested targets.
-3. Register the Sandbox Extender marketplace when it is absent:
+2. On each target, inspect Codex and Claude Code plugin and marketplace state before changing it. The expected marketplace source is `https://github.com/Hirundo-io/sandbox-extender.git` at `main` for Codex and `Hirundo-io/sandbox-extender` for Claude Code. If either executable is unavailable, report that target/tool as unavailable and continue with the other requested targets.
+3. Register the Sandbox Extender marketplace when it is absent. Replace a local or different Git source before continuing:
 
    ```sh
    codex plugin marketplace add https://github.com/Hirundo-io/sandbox-extender.git --ref main
    claude plugin marketplace add https://github.com/Hirundo-io/sandbox-extender.git --scope user
    ```
 
-   If the marketplace already exists, refresh it instead:
+   ```sh
+   codex plugin marketplace remove sandbox-extender
+   codex plugin marketplace add https://github.com/Hirundo-io/sandbox-extender.git --ref main
+   claude plugin marketplace remove sandbox-extender
+   claude plugin marketplace add https://github.com/Hirundo-io/sandbox-extender.git --scope user
+   ```
+
+   Refresh a correctly configured Git marketplace instead:
 
    ```sh
    codex plugin marketplace upgrade sandbox-extender
@@ -33,7 +40,7 @@ This skill manages the plugin only. Do not activate, alter, or remove Sandbox Ex
    claude plugin update sandbox-extender@sandbox-extender
    ```
 
-   Run only the appropriate install or update command for the observed state. Codex refreshes installed plugin contents through its marketplace upgrade; do not remove an installed plugin merely to update it.
+   Run only the appropriate install or update command for the observed state. Codex refreshes installed plugin contents through its marketplace upgrade; if its listing shows an installed but disabled plugin, run `codex plugin add sandbox-extender@sandbox-extender` to re-enable it. Do not remove an installed plugin merely to update it.
 
 5. For an SSH target, run the same checks and commands through `ssh <host>`. Keep each command separate, avoid command substitution, and stop mutating that host when its SSH connection or a required command fails. Continue with the remaining targets.
 6. Verify each successful target with `codex plugin list` and `claude plugin list`. Confirm that `sandbox-extender@sandbox-extender` is installed and enabled for both tools. Versions can differ because Codex and Claude Code package the plugin metadata differently; enabled status and the marketplace source are the completion criteria.
