@@ -202,12 +202,19 @@ arguments. Capability Rules receive the loop kind, condition or body role,
 iteration number for finite loops, and whether repetition is finite or
 potentially unbounded.
 
-The whole request abstains on `if`, `case`, functions, arithmetic control flow,
-dynamic command names, assignments, command or process substitution, unsafe
-parameter expansion, redirection, background execution, ambiguous conditional
-`cd`, shell-state mutation that cannot be modeled, parse errors, or expansion
-limits. Zsh is not part of the contract because the repository has no Zsh
-fixtures.
+Top-level Bash functions are supported when their names and calls are literal,
+their bodies use this same supported subset, and each call passes at most nine
+arguments through `$1` to `$9`. Function calls are expanded before each concrete
+segment is authorized. Recursive calls, duplicate or nested definitions,
+redirected definitions or calls, and calls made before their declaration make
+the whole request abstain.
+
+The whole request abstains on `if`, `case`, arithmetic control flow, dynamic
+command names, assignments, command or process substitution, unsafe parameter
+expansion such as `$@` or `$*`, redirection, background execution, ambiguous
+conditional `cd`, shell-state mutation that cannot be modeled, parse errors, or
+expansion limits. Zsh is not part of the contract because the repository has no
+Zsh fixtures.
 
 ### Reviewed `gh` Context Lookup example
 
