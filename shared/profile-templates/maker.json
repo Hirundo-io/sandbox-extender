@@ -19,7 +19,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "3068b4d8b016beae1088d368a7f67f800915ce8d1d639d31f5175b528a3c7cf5",
+    "integrity": "65ff29ee45feb6b956dc7a06f093b6f91dd0832a8d9525546ed45e62af08e9f6",
     "language": "typescript",
     "permissions": {
       "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
@@ -47,8 +47,8 @@
           "when {",
           "  context.materialized.manager == \"npm\" &&",
           "  [\"install\", \"i\", \"uninstall\", \"remove\", \"update\", \"up\"].contains(context.materialized.command) &&",
-          "  [6, 7].contains(context.materialized.optionCount) && context.materialized.duplicateOptionCount == 0 &&",
-          "  context.materialized.unknownOptionCount == 0 && context.materialized.pathsWithinWorkspace &&",
+          "  [4, 5, 6, 7].contains(context.materialized.optionCount) && context.materialized.duplicateOptionCount == 0 &&",
+          "  context.materialized.unknownOptionCount == 0 && context.materialized.pathsWithinWorkspace && context.materialized.npmPrefixValid &&",
           "  context.materialized.positionalsValid && context.materialized.options.ignoreScripts &&",
           "  context.materialized.options.global == \"false\" &&",
           "  context.materialized.options.location == \"project\" && context.materialized.options.workspaces == \"false\"",

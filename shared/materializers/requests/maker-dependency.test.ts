@@ -90,6 +90,7 @@ describe("Maker dependency request materializer", () => {
       expect.objectContaining({
         duplicateOptionCount: 0,
         manager,
+        npmPrefixValid: true,
         pathsWithinWorkspace: true,
         positionalsValid: true,
         resource: root,
@@ -136,6 +137,20 @@ describe("Maker dependency request materializer", () => {
     );
   });
 
+  test.each([
+    ["install", "zod@."],
+    ["install", "zod@.."],
+    ["install", "@types/node@.."],
+    ["update", undefined],
+    ["up", undefined],
+  ])("rejects unsafe npm %s positional %#", (command, positional) => {
+    const root = workspace();
+    const words = ["npm", command, ...(positional ? [positional] : [])];
+    expect(materializeMakerDependency(candidate(root, words))).toEqual(
+      expect.objectContaining({ positionalsValid: false }),
+    );
+  });
+
   test("accepts a missing descendant of the effective workspace", () => {
     const root = workspace();
     expect(
@@ -143,6 +158,16 @@ describe("Maker dependency request materializer", () => {
         candidate(root, ["npm", "install", "zod", "--ignore-scripts", "--cache", "missing/cache"]),
       ),
     ).toEqual(expect.objectContaining({ pathsWithinWorkspace: true }));
+  });
+
+  test("allows an omitted npm prefix but only accepts dot when it is explicit", () => {
+    const root = workspace();
+    expect(materializeMakerDependency(candidate(root, ["npm", "install", "zod"]))).toEqual(
+      expect.objectContaining({ npmPrefixValid: true }),
+    );
+    expect(
+      materializeMakerDependency(candidate(root, ["npm", "install", "zod", "--prefix", "app"])),
+    ).toEqual(expect.objectContaining({ npmPrefixValid: false }));
   });
 
   test("fails closed on an unreadable ancestor", () => {

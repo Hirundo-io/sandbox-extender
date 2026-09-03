@@ -263,6 +263,7 @@ describe("shipped Profile templates", () => {
       core.activate({ ...maker, allowedTargets: new Set([workspace]) }, "thread-1");
 
       for (const command of [
+        "npm install zod --ignore-scripts --global=false --workspaces=false --location=project",
         "npm install zod --ignore-scripts --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
         "npm remove zod --ignore-scripts --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
@@ -322,6 +323,10 @@ describe("shipped Profile templates", () => {
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache /tmp/npm-cache",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces --location=project --prefix . --cache .cache/npm",
         "npm install zod --ignore-scripts --package-lock-only --global=false --workspaces=false --location=project --prefix . --cache .cache/npm --userconfig .npmrc",
+        "npm install zod --ignore-scripts --global=false --workspaces=false --location=project --prefix packages/app",
+        "npm install zod@.. --ignore-scripts --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
+        "npm update --ignore-scripts --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
+        "npm up --ignore-scripts --global=false --workspaces=false --location=project --prefix . --cache .cache/npm",
         "npm exec eslint",
         "bun add zod --ignore-scripts --lockfile-only --cwd ~/outside --cache-dir .cache/bun",
         "cd ~",
