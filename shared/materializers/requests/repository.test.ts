@@ -69,8 +69,8 @@ describe("repository request materializer", () => {
 
   test("materializes allowlisted local Git inspection", () => {
     for (const words of [
-      ["git", "-c", "core.fsmonitor=false", "status"],
-      ["git", "-c", "core.fsmonitor=false", "status", "--short"],
+      ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status"],
+      ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--short"],
       ["git", "-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv"],
       [
         "git",
@@ -101,6 +101,7 @@ describe("repository request materializer", () => {
 
     for (const words of [
       ["git", "status"],
+      ["git", "-c", "core.fsmonitor=false", "status"],
       ["git", "diff", "--check"],
       ["git", "-c", "core.fsmonitor=false", "diff", "--check"],
     ]) {
@@ -111,7 +112,11 @@ describe("repository request materializer", () => {
   test("does not bind local inspection from another directory", () => {
     expect(
       materializeRepository(
-        candidate(["git", "-c", "core.fsmonitor=false", "status"], "/work", "/work/nested"),
+        candidate(
+          ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "status"],
+          "/work",
+          "/work/nested",
+        ),
       ),
     ).toEqual(expect.objectContaining({ localSafe: false }));
   });

@@ -418,7 +418,6 @@ export class PolicyCore {
     const resolvedTargets: string[] = [];
     const rootDirectory = request.resource;
     let workingDirectory = rootDirectory;
-    let authorizedExecutableCount = 0;
     for (const segment of segments) {
       const words = isShellAction(request.action) ? segment.words : undefined;
       if (words && words[0] === "cd") {
@@ -481,12 +480,11 @@ export class PolicyCore {
         materializedRequest.context,
       );
       if (result.decision !== "allow") return result;
-      authorizedExecutableCount += 1;
       if (result.matchedGroupingId !== undefined) matchedGroupingIds.push(result.matchedGroupingId);
       resolvedTargets.push(resolvedRequest.resource);
     }
 
-    if (profile.singleCommand && authorizedExecutableCount !== 1) {
+    if (profile.singleCommand && resolvedTargets.length !== 1) {
       return { decision: "abstain", reason: "profile requires one authorized executable command" };
     }
 

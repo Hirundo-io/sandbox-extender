@@ -91,7 +91,7 @@ describe("shipped Profile templates", () => {
     });
     expect(scout.activationMaterializer?.permissions).toEqual({
       ...emptyPermissions,
-      read: ["$WORKING_DIRECTORY"],
+      read: ["$ACTIVATION_WORKSPACE"],
     });
     expect(scout.requestMaterializer?.permissions).toEqual({
       ...emptyPermissions,
@@ -291,8 +291,8 @@ describe("shipped Profile templates", () => {
       core.activate({ ...scout, allowedTargets: new Set([workspace]) }, "thread-1");
 
       for (const command of [
-        "git -c core.fsmonitor=false status",
-        "git -c core.fsmonitor=false status --short",
+        "git --no-optional-locks -c core.fsmonitor=false status",
+        "git --no-optional-locks -c core.fsmonitor=false status --short",
         "git -c core.fsmonitor=false diff --no-ext-diff --no-textconv --check",
         "git -c core.fsmonitor=false diff --no-ext-diff --no-textconv --name-only",
         "git log",

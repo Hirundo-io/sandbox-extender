@@ -10,6 +10,7 @@ import type {
 
 export const workingDirectoryPermission = "$WORKING_DIRECTORY";
 export const requestResourcePermission = "$REQUEST_RESOURCE";
+export const activationWorkspacePermission = "$ACTIVATION_WORKSPACE";
 
 const permissionNames = ["read", "write", "env", "net", "sys", "run", "ffi"] as const;
 
@@ -40,9 +41,14 @@ function resolvedPermissions(
   value: string,
   workingDirectory: string,
   requestResource: string | undefined,
+  activationArguments: Readonly<Record<string, unknown>> | undefined,
 ): readonly string[] {
   if (value === workingDirectoryPermission) return pathForms(workingDirectory);
   if (value === requestResourcePermission) return requestResource ? pathForms(requestResource) : [];
+  if (value === activationWorkspacePermission) {
+    const workspace = activationArguments?.workspace;
+    return typeof workspace === "string" && isAbsolute(workspace) ? pathForms(workspace) : [];
+  }
   return [value];
 }
 
@@ -103,6 +109,7 @@ export function denoPermissionFlags(
   permissions: MaterializerPermissionManifest,
   workingDirectory: string,
   requestResource?: string,
+  activationArguments?: Readonly<Record<string, unknown>>,
 ): string[] {
   const usesRequestResource = permissionNames.some((name) =>
     permissions[name].includes(requestResourcePermission),
@@ -119,7 +126,7 @@ export function denoPermissionFlags(
   }
   return permissionNames.flatMap((name) =>
     permissions[name].flatMap((value) =>
-      resolvedPermissions(value, workingDirectory, requestResource).map(
+      resolvedPermissions(value, workingDirectory, requestResource, activationArguments).map(
         (resolved) => `--allow-${name}=${resolved}`,
       ),
     ),

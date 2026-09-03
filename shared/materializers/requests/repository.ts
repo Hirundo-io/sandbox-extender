@@ -93,11 +93,15 @@ function gitRemoteArgument(
 }
 
 function localGitOperation(words: readonly string[]): string | undefined {
-  const disablesFsmonitor = words[1] === "-c" && words[2] === "core.fsmonitor=false";
-  const commandIndex = disablesFsmonitor ? 3 : 1;
+  const disablesOptionalLocks = words[1] === "--no-optional-locks";
+  const configIndex = disablesOptionalLocks ? 2 : 1;
+  const disablesFsmonitor =
+    words[configIndex] === "-c" && words[configIndex + 1] === "core.fsmonitor=false";
+  const commandIndex = disablesFsmonitor ? configIndex + 2 : 1;
   const command = words[commandIndex];
   const arguments_ = words.slice(commandIndex + 1);
   if (
+    disablesOptionalLocks &&
     disablesFsmonitor &&
     command === "status" &&
     (arguments_.length === 0 || arguments_.every((value) => value === "--short"))

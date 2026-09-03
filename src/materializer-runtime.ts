@@ -1,10 +1,22 @@
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { denoPermissionFlags, verifyMaterializerIntegrity } from "./materializer-policy.js";
+import {
+  activationWorkspacePermission,
+  denoPermissionFlags,
+  verifyMaterializerIntegrity,
+} from "./materializer-policy.js";
 import type {
   ActivationMaterializer,
   NormalizedRequest,
@@ -148,7 +160,12 @@ function executeMaterializer(
               `--allow-read=${temporaryDirectory}`,
             ]
           : ["--no-lock"]),
-        ...denoPermissionFlags(materializer.permissions, workingDirectory, requestResource),
+        ...denoPermissionFlags(
+          materializer.permissions,
+          workingDirectory,
+          requestResource,
+          requestResource === undefined ? (input as Readonly<Record<string, unknown>>) : undefined,
+        ),
         artifact,
       ],
       cwd: workingDirectory,
@@ -201,6 +218,17 @@ function requestResult(candidate: unknown): RequestMaterialization | undefined {
   };
 }
 
+function canonicalActivationArguments(
+  materializer: ActivationMaterializer,
+  arguments_: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  const workspace = arguments_.workspace;
+  return materializer.permissions.read.includes(activationWorkspacePermission) &&
+    typeof workspace === "string"
+    ? { ...arguments_, workspace: realpathSync(workspace) }
+    : arguments_;
+}
+
 export function materializeActivation(
   materializer: ActivationMaterializer,
   arguments_: Readonly<Record<string, unknown>>,
@@ -209,8 +237,9 @@ export function materializeActivation(
 ): ActivationResult | undefined {
   assertSupportedPlatform();
   try {
+    const canonicalArguments = canonicalActivationArguments(materializer, arguments_);
     return activationResult(
-      executeMaterializer(materializer, arguments_, workingDirectory, undefined, options),
+      executeMaterializer(materializer, canonicalArguments, workingDirectory, undefined, options),
     );
   } catch {
     return undefined;

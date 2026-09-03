@@ -6,11 +6,11 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/target-set.ts",
-    "integrity": "6f5e53d113204d4a6530b66420c5eb81b6883fe8328877d91f971da584a3c00c",
+    "integrity": "1022b6fe6b02b92da9e1edccc9b078d40cdb743b742ec7f7957c4ae49fadd0f1",
     "language": "typescript",
     "permissions": {
       // Workspace activation resolves and verifies the selected directory.
-      "read": ["$WORKING_DIRECTORY"],
+      "read": ["$ACTIVATION_WORKSPACE"],
       "write": [],
       "env": [],
       "net": [],
@@ -22,7 +22,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/repository.ts",
-    "integrity": "f2f5c5fd5cdc8270a06952cd9a55f8176a95d7f0f65ed8c8a8e9e82be00c8168",
+    "integrity": "297ecb5b4e1a32eef992b8cc688d734db049a470f942b17f1e0d9aaebdc07327",
     "language": "typescript",
     "permissions": {
       // Policy Core substitutes canonical request paths and verifies containment.
