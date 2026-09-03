@@ -166,6 +166,29 @@ describe("GitHub pull request request materializer", () => {
     ).toEqual(
       expect.objectContaining({ bodyPresent: true, operation: "github.pull-request.comment" }),
     );
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "pr", "diff", "42"]),
+        undefined,
+        undefined,
+        undefined,
+        () => ({ headSha: "a".repeat(40), resource: "github:pull-request:acme/example#42" }),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        operation: "github.pull-request.diff",
+        resource: "github:pull-request:acme/example#42",
+      }),
+    );
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "pr", "diff", "42"]),
+        undefined,
+        undefined,
+        undefined,
+        () => ({ headSha: "a".repeat(40), resource: "github:pull-request:acme/example#7" }),
+      ),
+    ).toBeUndefined();
   });
 
   test("materializes an attributed pull-request conversation comment", () => {
@@ -242,6 +265,14 @@ describe("GitHub pull request request materializer", () => {
   test("materializes the watcher's PR metadata and checks commands", () => {
     for (const words of [
       ["gh", "pr", "view", "--json", watcherPullRequestFields],
+      [
+        "gh",
+        "pr",
+        "view",
+        "513",
+        "--json",
+        "number,url,title,body,state,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,files,reviews,comments",
+      ],
       [
         "gh",
         "-R",
