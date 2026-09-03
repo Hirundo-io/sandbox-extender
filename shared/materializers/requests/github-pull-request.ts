@@ -66,6 +66,8 @@ function gitMutationOperation(
 const replyPrefix = "_Replying as ";
 const watcherPullRequestFields =
   "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
+const detailedPullRequestFields =
+  "number,url,title,body,state,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,files,reviews,comments";
 const watcherChecksFields = "name,state,bucket,link,workflow,event,startedAt,completedAt";
 const reviewedChecksFields = "name,state,bucket,link,workflow";
 type ReadTextFile = (path: string) => string;
@@ -384,7 +386,8 @@ function watcherPullRequestViewOperation(
   const jsonIndex = hasSpecifier ? 1 : 0;
   if (
     arguments_[jsonIndex] !== "--json" ||
-    arguments_[jsonIndex + 1] !== watcherPullRequestFields ||
+    (arguments_[jsonIndex + 1] !== watcherPullRequestFields &&
+      arguments_[jsonIndex + 1] !== detailedPullRequestFields) ||
     arguments_.length !== jsonIndex + 2
   )
     return undefined;
@@ -428,19 +431,18 @@ function pullRequestChecksOperation(
     : undefined;
 }
 
-function pullRequestOperation(words: readonly string[]): PullRequestOperation | undefined {
-  const [gh, pr, subcommand, number, repoFlag, repository, ...rest] = words;
-  if (
-    gh !== "gh" ||
-    pr !== "pr" ||
-    !subcommand ||
-    !number ||
-    repoFlag !== "--repo" ||
-    !repository
-  ) {
-    return undefined;
-  }
-  const resource = canonicalTarget(repository, number);
+function pullRequestOperation(
+  words: readonly string[],
+  pullRequestLookup: PullRequestLookup,
+): PullRequestOperation | undefined {
+  const [gh, pr, subcommand, number, ...arguments_] = words;
+  if (gh !== "gh" || pr !== "pr" || !subcommand || !number) return undefined;
+  const hasRepository = arguments_[0] === "--repo";
+  const repository = hasRepository ? arguments_[1] : undefined;
+  if (hasRepository && !repository) return undefined;
+  if (!repository && subcommand !== "diff") return undefined;
+  const rest = arguments_.slice(hasRepository ? 2 : 0);
+  const resource = targetFromPullRequestSpecifier(number, repository, pullRequestLookup);
   if (!resource) return undefined;
   const bodyIndex = rest.indexOf("--body");
   return {
@@ -1070,7 +1072,7 @@ export function materializeGitHubPullRequest(
     reviewThreadCommentsOperation(words, reviewThreadLookup) ??
     reviewThreadsOperation(words) ??
     reviewReplyOperation(words, readTextFile, reviewCommentLookup) ??
-    pullRequestOperation(words)
+    pullRequestOperation(words, pullRequestLookup)
   );
 }
 
