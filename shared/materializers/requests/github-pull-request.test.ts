@@ -95,6 +95,58 @@ function mockDenoCommandSequence(outputs: readonly string[], observed: string[][
 }
 
 describe("GitHub pull request request materializer", () => {
+  test("materializes narrow Git mutations for the current pull request", () => {
+    const pullRequestLookup = () => currentPullRequest();
+    for (const [words, operation] of [
+      [["git", "add", "mvp/utils/customer.py"], "git.add"],
+      [["git", "commit", "-m", "fix(ci): format customer validation"], "git.commit"],
+      [["git", "push"], "git.push"],
+    ] as const) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(words),
+          undefined,
+          undefined,
+          undefined,
+          pullRequestLookup,
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          operation,
+          resource: "github:pull-request:hirundo-io/hirundo-platform#513",
+        }),
+      );
+    }
+
+    for (const words of [
+      ["git", "add", "."],
+      ["git", "add", "src/*.ts"],
+      ["git", "commit", "--amend", "-m", "rewrite"],
+      ["git", "commit", "--no-verify", "-m", "skip hooks"],
+      ["git", "push", "--force"],
+      ["git", "push", "origin", "HEAD:main"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(words),
+          undefined,
+          undefined,
+          undefined,
+          pullRequestLookup,
+        ),
+      ).toBeUndefined();
+    }
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["git", "push"]),
+        undefined,
+        undefined,
+        undefined,
+        () => undefined,
+      ),
+    ).toBeUndefined();
+  });
+
   test("materializes pull request operations", () => {
     expect(
       materializeGitHubPullRequest(

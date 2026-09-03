@@ -12,6 +12,57 @@ type PullRequestOperation = {
   readonly trailingArgumentCount: number;
 };
 
+function explicitRepositoryPath(path: string): boolean {
+  if (
+    path.length === 0 ||
+    path.startsWith("-") ||
+    path.startsWith(":") ||
+    path.startsWith("/") ||
+    path.includes("\\")
+  )
+    return false;
+  const segments = path.split("/");
+  return segments.every(
+    (segment) =>
+      /^[A-Za-z0-9._ -]+$/.test(segment) &&
+      segment !== "." &&
+      segment !== ".." &&
+      segment !== ".git",
+  );
+}
+
+function gitMutationOperation(
+  words: readonly string[],
+  pullRequestLookup: PullRequestLookup,
+): PullRequestOperation | undefined {
+  if (words[0] !== "git") return undefined;
+  const currentPullRequest = pullRequestLookup();
+  if (!currentPullRequest) return undefined;
+
+  let operation: string | undefined;
+  if (words[1] === "add" && words.length > 2 && words.slice(2).every(explicitRepositoryPath)) {
+    operation = "git.add";
+  } else if (
+    words[1] === "commit" &&
+    words[2] === "-m" &&
+    words.length === 4 &&
+    words[3]!.trim().length > 0
+  ) {
+    operation = "git.commit";
+  } else if (words[1] === "push" && words.length === 2) {
+    operation = "git.push";
+  }
+  return operation
+    ? {
+        bodyPresent: false,
+        operation,
+        resource: currentPullRequest.resource,
+        trailingArguments: [],
+        trailingArgumentCount: 0,
+      }
+    : undefined;
+}
+
 const replyPrefix = "_Replying as ";
 const watcherPullRequestFields =
   "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
@@ -1007,6 +1058,7 @@ export function materializeGitHubPullRequest(
   const words = input(candidate).command?.words;
   if (!Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
   return (
+    gitMutationOperation(words, pullRequestLookup) ??
     watcherPullRequestViewOperation(words, pullRequestLookup) ??
     conversationCommentOperation(words) ??
     pullRequestRestReadOperation(words) ??
