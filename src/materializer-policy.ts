@@ -117,11 +117,10 @@ export function denoPermissionFlags(
       throw new Error("materializer working directory is outside the approved request resource");
     }
   }
-  return permissionNames.flatMap((name) =>
-    permissions[name].flatMap((value) =>
-      resolvedPermissions(value, workingDirectory, requestResource).map(
-        (resolved) => `--allow-${name}=${resolved}`,
-      ),
-    ),
-  );
+  return permissionNames.flatMap((name) => {
+    const resolved = permissions[name].flatMap((value) =>
+      resolvedPermissions(value, workingDirectory, requestResource),
+    );
+    return resolved.length === 0 ? [] : [`--allow-${name}=${resolved.join(",")}`];
+  });
 }

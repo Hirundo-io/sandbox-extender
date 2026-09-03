@@ -79,7 +79,7 @@ describe("shipped Profile templates", () => {
       ...emptyPermissions,
       env: ["NODE_ENV"],
       read: ["$WORKING_DIRECTORY"],
-      run: ["gh"],
+      run: ["gh", "git"],
     });
     expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(maker.requestMaterializer?.permissions).toEqual({
@@ -490,6 +490,7 @@ describe("shipped Profile templates", () => {
       "git push origin HEAD:main",
       "git push --force",
       "git push --force-with-lease",
+      "while true; do git push; done",
       'gh api --method PATCH repos/acme/example/pulls/42/comments/987/replies -f body="Wrong method."',
       'gh api graphql -f query="mutation { addPullRequestReviewThreadReply(input: {}) { clientMutationId } }"',
       reviewThreadsCommand("acme/other"),
