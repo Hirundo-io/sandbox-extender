@@ -40,6 +40,7 @@ describe("profile authoring", () => {
       }),
     ).rejects.toThrow("one authorization case");
   });
+
   test("writes a narrow proposal and promotes it only with a review revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-authoring-"));
     try {

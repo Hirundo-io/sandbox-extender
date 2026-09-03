@@ -145,6 +145,70 @@ describe("shell compiler", () => {
     ]);
   });
 
+  test("expands literal function calls with positional arguments", async () => {
+    const script = [
+      'reply() { gh api "$1" -f "body=$2"; }',
+      'reply "repos/acme/example/pulls/42/comments/987/replies" "Reviewed by Codex."',
+    ].join("\n");
+
+    expect(await compileShell(script)).toEqual([
+      {
+        source: 'gh api "$1" -f "body=$2"',
+        words: [
+          "gh",
+          "api",
+          "repos/acme/example/pulls/42/comments/987/replies",
+          "-f",
+          "body=Reviewed by Codex.",
+        ],
+      },
+    ]);
+  });
+
+  test("supports declared nested functions and keeps call arguments isolated", async () => {
+    const script = [
+      'reply() { send "$1"; }',
+      'send() { printf "%s\\n" "$1"; }',
+      'reply "first reply"',
+      'reply "second reply"',
+    ].join("\n");
+
+    expect((await compileShell(script))?.map((segment) => segment.words)).toEqual([
+      ["printf", "%s\\n", "first reply"],
+      ["printf", "%s\\n", "second reply"],
+    ]);
+  });
+
+  test.each([
+    "reply() { reply; }; reply",
+    "first() { second; }; second() { first; }; first",
+    "reply() { echo safe; }; reply > output",
+    "reply() ( echo unsupported ); reply",
+    "reply() { echo safe; } > output; reply",
+    "reply() { echo safe; }; reply one two three four five six seven eight nine ten",
+    "reply() { echo $@; }; reply one",
+    "reply() { echo $*; }; reply one",
+    'reply() { echo $1 safe; }; reply ""',
+    'run() { "$1" unsafe; }; run echo',
+    "reply() { local value=safe; echo safe; }; reply",
+    "reply() { return 0; }; reply",
+    "reply() { echo safe; }; reply() { echo duplicate; }; reply",
+    "reply; reply() { echo defined-too-late; }",
+    "{ reply() { echo nested; }; reply; }",
+    "unused() { if true; then echo unsupported; fi; }; echo safe",
+    "go() { cd sub; }; go || npm install",
+    "go() { cd sub; }; go | npm install",
+    "go() { cd sub; }; while go; do echo waiting; done",
+  ])("abstains on unsupported function behavior: %s", async (script) => {
+    expect(await compileShell(script)).toBeUndefined();
+  });
+
+  test("applies the expanded segment limit to function bodies", async () => {
+    expect(
+      await compileShell("reply() { echo one; echo two; }; reply", { maxSegments: 1 }),
+    ).toBeUndefined();
+  });
+
   test.each([
     "if true; then echo unsafe; fi",
     "case x in x) echo unsafe;; esac",
