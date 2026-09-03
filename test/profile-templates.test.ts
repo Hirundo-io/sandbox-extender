@@ -79,7 +79,7 @@ describe("shipped Profile templates", () => {
       ...emptyPermissions,
       env: ["NODE_ENV"],
       read: ["$WORKING_DIRECTORY"],
-      run: ["gh"],
+      run: ["gh", "git"],
     });
     expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(maker.requestMaterializer?.permissions).toEqual({
@@ -479,6 +479,18 @@ describe("shipped Profile templates", () => {
       "gh api rate_limit",
       "gh api repos/acme/example/actions/secrets",
       "show_token() { gh auth token; }\nshow_token",
+      "git add -A",
+      "git add .",
+      "git add --all",
+      "git add ../outside",
+      "git add :/",
+      "git commit --amend -m 'rewrite history'",
+      "git commit --no-verify -m 'skip hooks'",
+      "git commit -m ''",
+      "git push origin HEAD:main",
+      "git push --force",
+      "git push --force-with-lease",
+      "while true; do git push; done",
       'gh api --method PATCH repos/acme/example/pulls/42/comments/987/replies -f body="Wrong method."',
       'gh api graphql -f query="mutation { addPullRequestReviewThreadReply(input: {}) { clientMutationId } }"',
       reviewThreadsCommand("acme/other"),
@@ -599,6 +611,9 @@ describe("shipped Profile templates", () => {
       }),
     ).toBe("abstain");
     for (const operation of [
+      "git.add",
+      "git.commit",
+      "git.push",
       "github.pull-request.conversation-comments",
       "github.pull-request.reviews",
       "github.actions.runs",
