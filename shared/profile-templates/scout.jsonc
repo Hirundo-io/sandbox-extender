@@ -36,7 +36,13 @@
     },
     "runtimeVersion": "2.8.1",
   },
-  "sessionContext": ["Use this profile only for inspection. Do not alter files or remote state."],
+  "sessionContext": [
+    "Use this profile only for inspection. Do not alter files or remote state.",
+    "For local Git inspection, always put --no-pager immediately after git.",
+    "Run status as git --no-pager --no-optional-locks -c core.fsmonitor=false status, optionally followed by --short.",
+    "Run diff as git --no-pager -c core.fsmonitor=false diff --no-ext-diff --no-textconv, optionally followed by --check or --name-only.",
+    "Run log and show with --no-ext-diff --no-textconv immediately after the subcommand. Run branch, config, and rev-parse with the required --no-pager prefix.",
+  ],
   // Local inspection is limited to the listed read-only Git operations. The
   // materializer rejects mutations, unsafe options, path escapes, and helpers.
   "groupings": [
