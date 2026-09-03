@@ -205,9 +205,10 @@ potentially unbounded.
 Top-level Bash functions are supported when their names and calls are literal,
 their bodies use this same supported subset, and each call passes at most nine
 arguments through `$1` to `$9`. Function calls are expanded before each concrete
-segment is authorized. Recursive calls, duplicate or nested definitions,
-redirected definitions or calls, and calls made before their declaration make
-the whole request abstain.
+segment is authorized. Recursive calls, calls in pipelines or conditional loop
+and short-circuit contexts, duplicate or nested definitions, redirected
+definitions or calls, and calls made before their declaration make the whole
+request abstain.
 
 The whole request abstains on `if`, `case`, arithmetic control flow, dynamic
 command names, assignments, command or process substitution, unsafe parameter
