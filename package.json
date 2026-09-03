@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
+    "format:json": "prettier --write '**/*.json'",
     "format:check": "prettier --check .",
     "check:commit": "bun run precommit",
     "prepare": "husky",
