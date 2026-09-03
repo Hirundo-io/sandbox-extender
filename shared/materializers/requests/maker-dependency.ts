@@ -95,12 +95,15 @@ function validPositionals(
   positionals: readonly string[],
   pattern: RegExp,
 ): boolean {
-  const minimum =
+  const minimumPositionalCount =
     ["add", "remove", "uninstall"].includes(command) ||
     (manager === "npm" && ["update", "up"].includes(command))
       ? 1
       : 0;
-  return positionals.length >= minimum && positionals.every((value) => pattern.test(value));
+  return (
+    positionals.length >= minimumPositionalCount &&
+    positionals.every((value) => pattern.test(value))
+  );
 }
 
 function materializeOptions(
