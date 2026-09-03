@@ -27,7 +27,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "1b9b6519522dfa4ff4c94fdd23642ec2b4f19d56b5e8de4594993eed389f77d7",
+    "integrity": "76dc0af8d81ea49b62407c7947cdef752f574afab9c19857cafec1839928caf9",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -35,7 +35,7 @@
       "env": ["NODE_ENV"],
       "net": [],
       "sys": [],
-      "run": ["gh"],
+      "run": ["gh", "git"],
       "ffi": []
     },
     "runtimeVersion": "2.8.1"
