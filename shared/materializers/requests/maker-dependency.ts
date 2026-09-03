@@ -16,6 +16,7 @@ type DependencyOperation = {
   readonly command: string;
   readonly duplicateOptionCount: number;
   readonly manager: string;
+  readonly npmPrefixValid: boolean;
   readonly optionCount: number;
   readonly options: Readonly<Record<string, OptionValue>>;
   readonly pathsWithinWorkspace: boolean;
@@ -35,7 +36,7 @@ type DependencyManagerSettings = {
 
 const packageNamePattern = /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const registryPackagePattern =
-  /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*(?:@[^\s\/:]+)?$/;
+  /^(?:@[A-Za-z0-9][A-Za-z0-9._-]*\/)?[A-Za-z0-9][A-Za-z0-9._-]*(?:@(?!\.{1,2}$)[^\s\x5c/:]+)?$/;
 const pythonRequirementPattern =
   /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?(?:(?:===|==|~=|!=|<=|>=|<|>)[^\s\/@:]+)?$/;
 const pixiRequirementPattern = /^(?:[A-Za-z0-9._-]+::)?[A-Za-z0-9][A-Za-z0-9._-]*(?:[=<>!~].*)?$/;
@@ -89,12 +90,20 @@ function resolvesWithinWorkspace(
 }
 
 function validPositionals(
+  manager: DependencyManager,
   command: string,
   positionals: readonly string[],
   pattern: RegExp,
 ): boolean {
-  const minimum = ["add", "remove", "uninstall"].includes(command) ? 1 : 0;
-  return positionals.length >= minimum && positionals.every((value) => pattern.test(value));
+  const minimumPositionalCount =
+    ["add", "remove", "uninstall"].includes(command) ||
+    (manager === "npm" && ["update", "up"].includes(command))
+      ? 1
+      : 0;
+  return (
+    positionals.length >= minimumPositionalCount &&
+    positionals.every((value) => pattern.test(value))
+  );
 }
 
 function materializeOptions(
@@ -156,6 +165,8 @@ function operationFacts(
     command,
     duplicateOptionCount: parsed.duplicateOptionCount,
     manager,
+    npmPrefixValid:
+      manager !== "npm" || parsed.options.prefix === undefined || parsed.options.prefix === ".",
     optionCount: parsed.optionCount,
     options: parsed.options,
     pathsWithinWorkspace,
@@ -194,7 +205,7 @@ function materializeDependency(
     manager,
     command,
     parsed,
-    validPositionals(command, parsed.positionals, settings.positionalPattern(command)),
+    validPositionals(manager, command, parsed.positionals, settings.positionalPattern(command)),
     optionPaths.every((path) => resolvesWithinWorkspace(workspace, workingDirectory, path)),
     workspace,
   );
