@@ -19,7 +19,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "65ff29ee45feb6b956dc7a06f093b6f91dd0832a8d9525546ed45e62af08e9f6",
+    "integrity": "e70ea543febbb41a2d5aac5dfc36f05dd7e74487a4f7938919df25f304ded54a",
     "language": "typescript",
     "permissions": {
       "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],

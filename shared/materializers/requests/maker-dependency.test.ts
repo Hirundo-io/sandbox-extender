@@ -151,6 +151,17 @@ describe("Maker dependency request materializer", () => {
     );
   });
 
+  test.each([
+    ["bun", "install"],
+    ["bun", "update"],
+    ["pixi", "update"],
+  ])("allows bulk %s %s positionals", (manager, command) => {
+    const root = workspace();
+    expect(materializeMakerDependency(candidate(root, [manager, command]))).toEqual(
+      expect.objectContaining({ positionalsValid: true }),
+    );
+  });
+
   test("accepts a missing descendant of the effective workspace", () => {
     const root = workspace();
     expect(

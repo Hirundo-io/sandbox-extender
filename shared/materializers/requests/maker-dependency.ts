@@ -90,11 +90,16 @@ function resolvesWithinWorkspace(
 }
 
 function validPositionals(
+  manager: DependencyManager,
   command: string,
   positionals: readonly string[],
   pattern: RegExp,
 ): boolean {
-  const minimum = ["add", "remove", "uninstall", "update", "up"].includes(command) ? 1 : 0;
+  const minimum =
+    ["add", "remove", "uninstall"].includes(command) ||
+    (manager === "npm" && ["update", "up"].includes(command))
+      ? 1
+      : 0;
   return positionals.length >= minimum && positionals.every((value) => pattern.test(value));
 }
 
@@ -197,7 +202,7 @@ function materializeDependency(
     manager,
     command,
     parsed,
-    validPositionals(command, parsed.positionals, settings.positionalPattern(command)),
+    validPositionals(manager, command, parsed.positionals, settings.positionalPattern(command)),
     optionPaths.every((path) => resolvesWithinWorkspace(workspace, workingDirectory, path)),
     workspace,
   );
