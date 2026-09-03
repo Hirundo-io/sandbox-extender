@@ -46,10 +46,15 @@ function resolvedPermissions(
   return [value];
 }
 
-export function assertSelfContainedMaterializer(source: string): void {
+export function assertSelfContainedMaterializer(
+  source: string,
+  _dependencies?: ActivationMaterializer["dependencies"],
+): void {
   const imports = new Bun.Transpiler({ loader: "ts" }).scan(source).imports;
   const unsupported = imports.find(
-    (entry) => entry.kind !== "import-statement" || !entry.path.startsWith("node:"),
+    (entry) =>
+      entry.kind !== "import-statement" ||
+      (!entry.path.startsWith("node:") && entry.path !== "graphql"),
   );
   if (unsupported)
     throw new Error(`materializer import is not self-contained: ${unsupported.path}`);
@@ -59,6 +64,7 @@ export function materializerIntegrity(
   source: string,
   permissions: MaterializerPermissionManifest,
   runtimeVersion: string,
+  dependencies?: ActivationMaterializer["dependencies"],
 ): string {
   return createHash("sha256")
     .update(
@@ -66,6 +72,13 @@ export function materializerIntegrity(
         permissions: canonicalPermissions(permissions),
         runtimeVersion,
         source,
+        dependencies: dependencies && {
+          denoLock: dependencies.denoLock,
+          denoLockIntegrity: dependencies.denoLockIntegrity,
+          directory: dependencies.directory,
+          packageJson: dependencies.packageJson,
+          packageJsonIntegrity: dependencies.packageJsonIntegrity,
+        },
       }),
     )
     .digest("hex");
@@ -75,11 +88,12 @@ export function verifyMaterializerIntegrity(
   materializer: ActivationMaterializer | RequestMaterializer,
   source: string,
 ): void {
-  assertSelfContainedMaterializer(source);
+  assertSelfContainedMaterializer(source, materializer.dependencies);
   const actual = materializerIntegrity(
     source,
     materializer.permissions,
     materializer.runtimeVersion,
+    materializer.dependencies,
   );
   if (actual !== materializer.integrity)
     throw new Error(`materializer integrity mismatch for ${materializer.file}`);

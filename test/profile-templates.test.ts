@@ -7,7 +7,10 @@ import { parse, type ParseError } from "jsonc-parser";
 
 import { PolicyCore, type CedarGrouping, type Profile } from "../src/index.js";
 import { evaluateCedarGrouping } from "../src/cedar.js";
-import { materializeGitHubPullRequest } from "../shared/materializers/requests/github-pull-request.js";
+import {
+  materializeGitHubPullRequest,
+  reviewThreadsQuery,
+} from "../shared/materializers/requests/github-pull-request.js";
 import { materializeMakerDependency } from "../shared/materializers/requests/maker-dependency.js";
 import { runFixtureGit } from "./git-fixture.js";
 
@@ -21,6 +24,11 @@ function runGit(workspace: string, ...arguments_: string[]): void {
   if (result.exitCode !== 0) {
     throw new Error(new TextDecoder().decode(result.stderr));
   }
+}
+
+function reviewThreadsCommand(repository = "acme/example", pullRequest = 42): string {
+  const [owner, name] = repository.split("/");
+  return `gh api graphql --paginate --slurp -f 'query=${reviewThreadsQuery}' -f owner=${owner} -f repo=${name} -F pr=${pullRequest}`;
 }
 
 async function profileTemplate(name: string): Promise<Profile> {
@@ -70,7 +78,12 @@ describe("shipped Profile templates", () => {
       ...emptyPermissions,
       run: ["gh"],
     });
-    expect(babysitter.requestMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(babysitter.requestMaterializer?.permissions).toEqual({
+      ...emptyPermissions,
+      env: ["NODE_ENV"],
+      read: ["$WORKING_DIRECTORY"],
+      run: ["gh"],
+    });
     expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(maker.requestMaterializer?.permissions).toEqual({
       ...emptyPermissions,
@@ -451,7 +464,7 @@ describe("shipped Profile templates", () => {
       "gh pr checks 42 --repo acme/example",
       "gh pr checks 42 --repo acme/example --watch",
       'gh pr comment 42 --repo acme/example --body "Reviewed."',
-      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Fixed in the latest revision."',
+      reviewThreadsCommand(),
     ]) {
       expect(
         (
@@ -464,6 +477,20 @@ describe("shipped Profile templates", () => {
         ).decision,
       ).toBe("allow");
     }
+
+    expect(
+      (
+        await core.evaluate({
+          action: "codex.unified_exec",
+          arguments: {
+            command:
+              'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="_Replying as Codex. Fixed in the latest revision."',
+          },
+          resource: workspaceTarget,
+          threadId: "thread-1",
+        })
+      ).decision,
+    ).toBe("abstain");
 
     for (const command of [
       'gh pr comment 43 --repo acme/example --body "Reviewed."',
@@ -496,6 +523,10 @@ describe("shipped Profile templates", () => {
       'gh api --method POST repos/acme/example/issues/42/comments -f body="Unrelated write."',
       'gh api --method PATCH repos/acme/example/pulls/42/comments/987/replies -f body="Wrong method."',
       'gh api graphql -f query="mutation { addPullRequestReviewThreadReply(input: {}) { clientMutationId } }"',
+      reviewThreadsCommand("acme/other"),
+      reviewThreadsCommand("acme/example", 43),
+      `${reviewThreadsCommand()} --paginate`,
+      "gh api graphql -f 'query=query { viewer { login } }' -F owner=acme -F name=example -F number=42",
       'gh api --method POST repos/acme/example/pulls/42/comments/0/replies -f body="Invalid comment ID."',
       'gh api --method POST repos/acme/example/pulls/42/comments/0987/replies -f body="Ambiguous comment ID."',
       'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Reviewed." --input payload.json',
@@ -545,7 +576,8 @@ describe("shipped Profile templates", () => {
 
     for (const command of [
       "gh pr view 42 --repo acme/example",
-      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="Reviewed."',
+      'gh api --method POST repos/acme/example/pulls/42/comments/987/replies -f body="_Replying as Codex. Reviewed."',
+      reviewThreadsCommand(),
     ]) {
       const request = {
         action: "codex.unified_exec",
@@ -556,9 +588,12 @@ describe("shipped Profile templates", () => {
       const context = {
         materialized: {
           bodyPresent: true,
-          operation: command.startsWith("gh api")
-            ? "github.review-comment.reply"
-            : "github.pull-request.view",
+          operation:
+            command === reviewThreadsCommand()
+              ? "github.pull-request.review-threads"
+              : command.startsWith("gh api")
+                ? "github.review-comment.reply"
+                : "github.pull-request.view",
           trailingArgumentCount: 0,
           trailingArguments: [],
         },

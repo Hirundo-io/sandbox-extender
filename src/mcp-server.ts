@@ -13,7 +13,6 @@ import {
 } from "./profile-mutation-approval.js";
 import { prepareProfileMutation } from "./profile-mutations.js";
 import type { PreparedProfileMutation } from "./profile-mutations.js";
-import { evaluateForThread } from "./policy-service.js";
 import { getPolicyRoot } from "./policy-root.js";
 import {
   nonEmptyStringSchema,
@@ -202,30 +201,6 @@ export function buildServer(): McpServer {
     },
     ({ threadId }, serverContext) =>
       runMutation(threadId, { arguments: {}, operation: "disable_profile" }, serverContext),
-  );
-
-  server.registerTool(
-    "evaluate_request",
-    {
-      description: "Evaluate a normalized request against the active profile without executing it.",
-      inputSchema: {
-        action: nonEmptyStringSchema,
-        arguments: requestArgumentsSchema,
-        resource: nonEmptyStringSchema,
-        threadId: nonEmptyStringSchema,
-      },
-    },
-    async ({ action, arguments: requestArguments, resource, threadId }) =>
-      text(
-        JSON.stringify(
-          await evaluateForThread(repository, {
-            action,
-            arguments: requestArguments,
-            resource,
-            threadId,
-          }),
-        ),
-      ),
   );
 
   return server;

@@ -273,7 +273,12 @@ function materializeProfileRequest(
     permissions.write.length > 0 ||
     permissions.ffi.length > 0 ||
     (executable !== undefined && permissions.run.includes(executable));
-  if (materializerCanInspectResource && !profile.allowedTargets.has(request.resource))
+  const bindsFilesystemTarget = [...profile.allowedTargets].some((target) => isAbsolute(target));
+  if (
+    materializerCanInspectResource &&
+    bindsFilesystemTarget &&
+    !profile.allowedTargets.has(request.resource)
+  )
     return undefined;
   const materialized = materializeRequest(
     profile.requestMaterializer,

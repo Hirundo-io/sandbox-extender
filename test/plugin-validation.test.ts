@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +21,28 @@ function requestMaterializerReference(file = "materializers/requests/repository.
   return {
     file,
     integrity: materializerIntegrity("", emptyPermissions, "2.8.1"),
+    language: "typescript",
+    permissions: emptyPermissions,
+    runtimeVersion: "2.8.1",
+  } as const;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function dependencyRequestMaterializerReference(packageJson: string, denoLock: string) {
+  const dependencies = {
+    denoLock: "deno.lock",
+    denoLockIntegrity: sha256(denoLock),
+    directory: "materializers/dependencies/graphql",
+    packageJson: "package.json",
+    packageJsonIntegrity: sha256(packageJson),
+  } as const;
+  return {
+    dependencies,
+    file: "materializers/requests/repository.ts",
+    integrity: materializerIntegrity("", emptyPermissions, "2.8.1", dependencies),
     language: "typescript",
     permissions: emptyPermissions,
     runtimeVersion: "2.8.1",
@@ -193,6 +216,34 @@ describe("plugin validation", () => {
         }),
       );
       await expect(validatePlugin(root)).rejects.toThrow("escapes its root");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  test("validates declared materializer dependency files and their hashes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sandbox-extender-plugin-"));
+    const packageJson = '{"name":"graphql"}\n';
+    const denoLock = "{}\n";
+    try {
+      await writePlugin(root);
+      const dependencyDirectory = join(root, "shared", "materializers", "dependencies", "graphql");
+      await mkdir(dependencyDirectory, { recursive: true });
+      await writeFile(join(dependencyDirectory, "package.json"), packageJson);
+      await writeFile(join(dependencyDirectory, "deno.lock"), denoLock);
+      await writeFile(
+        join(root, "shared", "profile-templates", "scout.json"),
+        JSON.stringify({
+          requestMaterializer: dependencyRequestMaterializerReference(packageJson, denoLock),
+        }),
+      );
+      await expect(validatePlugin(root)).resolves.toBeUndefined();
+      await rm(join(dependencyDirectory, "package.json"));
+      await expect(validatePlugin(root)).rejects.toThrow("materializer dependency is missing");
+      await writeFile(join(dependencyDirectory, "package.json"), "tampered\n");
+      await expect(validatePlugin(root)).rejects.toThrow(
+        "materializer dependency integrity mismatch",
+      );
     } finally {
       await rm(root, { force: true, recursive: true });
     }

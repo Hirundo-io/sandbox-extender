@@ -13,31 +13,41 @@
       "net": [],
       "sys": [],
       "run": ["gh"],
-      "ffi": [],
+      "ffi": []
     },
-    "runtimeVersion": "2.8.1",
+    "runtimeVersion": "2.8.1"
   },
   "targetScope": "single",
   "requestMaterializer": {
+    "dependencies": {
+      "directory": "materializers/dependencies/graphql",
+      "packageJson": "package.json",
+      "denoLock": "deno.lock",
+      "denoLockIntegrity": "aca6e0be73c277546f14128673fcf485919e507ca8e5a55bfde76d348bdf5670",
+      "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
+    },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "6c6eef1d1cbdaf5af86728bc33324b9e1c47ee5e94f252b3252ff9226c4eeeac",
+    "integrity": "e5e1aacce51575c3c2f72328250c83a97f77408035ce74303a342a83b6900af3",
     "language": "typescript",
     "permissions": {
-      "read": [],
+      "read": ["$WORKING_DIRECTORY"],
       "write": [],
-      "env": [],
+      "env": ["NODE_ENV"],
       "net": [],
       "sys": [],
-      "run": [],
-      "ffi": [],
+      "run": ["gh"],
+      "ffi": []
     },
-    "runtimeVersion": "2.8.1",
+    "runtimeVersion": "2.8.1"
   },
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",
     "Read pull-request status before changing code or responding to review.",
-    "Write only user-requested inline-body comments to that pull request.",
-    "Reply to review threads only through the pull request's explicit REST reply endpoint.",
+    "Inspect all review threads with: gh api graphql --paginate --slurp -f 'query=<ReviewThreads query>' -f owner=<owner> -f repo=<repo> -F pr=<number>. The exact ReviewThreads query is in the reviewed request materializer.",
+    "Every reply must begin with _Replying as . Run one REST reply command per comment with a body beginning with that prefix, or use the reviewed GraphQL thread-reply mutation. You may place multiple allowed commands in one ordinary shell sequence; do not use command substitution.",
+    "Before replying to or resolving a thread, use the reviewed ReviewThreadComments query with gh api graphql --paginate --slurp -f 'query=<ReviewThreadComments query>' -F id=<PRRT id> to freshly fetch that specific PRRT thread and every comment. The materializer performs a fresh GitHub lookup for every reply or resolution and permits it only when the ID belongs to the activated pull request. This is not stateful and clientMutationId is not a scope check.",
+    "You may reply through REST or with the reviewed addPullRequestReviewThreadReply GraphQL mutation. Every reply must contain the required attribution prefix. Resolve addressed threads with the reviewed ResolveReviewThread GraphQL mutation, singly or in a parsed batch of up to 20 thread IDs; clientMutationId values may be any string.",
+    "After replying to or resolving threads, tell the user which threads were replied to or resolved and include the resulting comment or thread links. Reading threads alone does not require a user-facing report."
   ],
   "groupings": [
     {
@@ -47,20 +57,20 @@
           "permit(principal, action, resource)",
           "when {",
           "  (context.materialized.trailingArgumentCount == 0 &&",
-          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\"].contains(context.materialized.operation)) ||",
+          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\", \"github.pull-request.review-threads\", \"github.review-thread.comments\", \"github.review-thread.resolve\", \"github.review-thread.reply\"].contains(context.materialized.operation)) ||",
           "  (context.materialized.operation == \"github.pull-request.checks\" &&",
           "    context.materialized.trailingArgumentCount == 1 && context.materialized.trailingArguments.contains(\"--watch\")) ||",
           "  (context.materialized.operation == \"github.pull-request.comment\" &&",
           "    context.materialized.trailingArgumentCount == 2 && context.materialized.bodyPresent)",
-          "};",
+          "};"
         ],
         "allowReviewThreadReplies": [
           "permit(principal, action, resource)",
           "when {",
           "  context.materialized.operation == \"github.review-comment.reply\" && context.materialized.bodyPresent",
-          "};",
-        ],
-      },
-    },
-  ],
+          "};"
+        ]
+      }
+    }
+  ]
 }
