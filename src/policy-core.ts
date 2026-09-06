@@ -410,6 +410,9 @@ export class PolicyCore {
     if (!segments) {
       return { decision: "abstain", reason: "shell syntax cannot be authorized safely" };
     }
+    if (profile.singleCommand && segments.length !== 1) {
+      return { decision: "abstain", reason: "profile requires one shell command" };
+    }
 
     const matchedGroupingIds: string[] = [];
     const resolvedTargets: string[] = [];
@@ -479,6 +482,10 @@ export class PolicyCore {
       if (result.decision !== "allow") return result;
       if (result.matchedGroupingId !== undefined) matchedGroupingIds.push(result.matchedGroupingId);
       resolvedTargets.push(resolvedRequest.resource);
+    }
+
+    if (profile.singleCommand && resolvedTargets.length !== 1) {
+      return { decision: "abstain", reason: "profile requires one authorized executable command" };
     }
 
     const targets = resolvedTargets.length > 0 ? resolvedTargets : [request.resource];

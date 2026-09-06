@@ -162,6 +162,21 @@ describe("PolicyCore", () => {
     ).toBe("abstain");
   });
 
+  test("requires an executable command for single-command profiles", async () => {
+    const core = new PolicyCore();
+    core.activate(profile({ singleCommand: true }), request.threadId);
+
+    expect(
+      (
+        await core.evaluate({
+          ...request,
+          action: "codex.unified_exec",
+          arguments: { command: "cd packages/app" },
+        })
+      ).decision,
+    ).toBe("abstain");
+  });
+
   test("automatically allows non-mutating shell builtins", async () => {
     const core = new PolicyCore();
     core.activate(profile(), request.threadId);

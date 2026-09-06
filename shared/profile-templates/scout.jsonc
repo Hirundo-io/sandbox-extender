@@ -1,0 +1,80 @@
+{
+  "id": "scout",
+  "policyRevision": "pending-review",
+  // Every Scout shell request must contain exactly one executable command.
+  "singleCommand": true,
+  "allowedTargets": [],
+  "activationMaterializer": {
+    "file": "materializers/activation/target-set.ts",
+    "integrity": "1022b6fe6b02b92da9e1edccc9b078d40cdb743b742ec7f7957c4ae49fadd0f1",
+    "language": "typescript",
+    "permissions": {
+      // Workspace activation resolves and verifies the selected directory.
+      "read": ["$ACTIVATION_WORKSPACE"],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": [],
+      "ffi": [],
+    },
+    "runtimeVersion": "2.8.1",
+  },
+  "requestMaterializer": {
+    "file": "materializers/requests/repository.ts",
+    "integrity": "e1d0bb66312153a5b28fc6ba1e6eca2a539b621030c9bbe9f725359c1bd1e4d3",
+    "language": "typescript",
+    "permissions": {
+      // Policy Core substitutes canonical request paths and verifies containment.
+      "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
+      "write": [],
+      "env": [],
+      "net": [],
+      "sys": [],
+      "run": ["git"],
+      "ffi": [],
+    },
+    "runtimeVersion": "2.8.1",
+  },
+  "sessionContext": [
+    "Use this profile only for inspection. Do not alter files or remote state.",
+    "For local Git inspection, always put --no-pager immediately after git.",
+    "Run status as git --no-pager --no-optional-locks -c core.fsmonitor=false status, optionally followed by --short.",
+    "Run diff as git --no-pager -c core.fsmonitor=false diff --no-ext-diff --no-textconv, optionally followed by --check or --name-only.",
+    "Run log and show with --no-ext-diff --no-textconv immediately after the subcommand. Run branch, config, and rev-parse with the required --no-pager prefix.",
+  ],
+  // Local inspection is limited to the listed read-only Git operations. The
+  // materializer rejects mutations, unsafe options, path escapes, and helpers.
+  "groupings": [
+    {
+      "id": "read-only-inspection",
+      "policies": {
+        "allowRemoteInspection": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.materialized.argumentsSafe && context.materialized.duplicateOptionCount == 0 &&",
+          "  context.materialized.remoteSafe &&",
+          "  [",
+          "    \"github.issue.list\", \"github.issue.view\", \"github.label.list\",",
+          "    \"github.pr.checks\", \"github.pr.diff\", \"github.pr.list\", \"github.pr.view\",",
+          "    \"github.release.list\", \"github.release.view\", \"github.repo.list\", \"github.repo.view\",",
+          "    \"github.run.list\", \"github.run.view\", \"github.workflow.list\", \"github.workflow.view\",",
+          "    \"git.fetch\", \"git.ls-remote\"",
+          "  ].contains(context.materialized.operation)",
+          "};",
+        ],
+        "allowLocalInspection": [
+          "permit(principal, action, resource)",
+          "when {",
+          "  context.materialized.argumentsSafe && context.materialized.duplicateOptionCount == 0 &&",
+          "  context.materialized.localSafe &&",
+          "  [",
+          "    \"git.branch\", \"git.config\", \"git.diff\", \"git.log\", \"git.rev-parse\",",
+          "    \"git.show\", \"git.status\"",
+          "  ].contains(context.materialized.operation)",
+          "};",
+        ],
+      },
+    },
+  ],
+}

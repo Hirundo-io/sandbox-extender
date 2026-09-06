@@ -270,6 +270,7 @@ function fingerprint(profile: import("./types.js").Profile): string {
         id: profile.id,
         policyRevision: profile.policyRevision,
         sessionContext: profile.sessionContext ?? [],
+        singleCommand: profile.singleCommand,
         targetScope: profile.targetScope,
         activationMaterializer: profile.activationMaterializer,
         requestMaterializer: profile.requestMaterializer,
