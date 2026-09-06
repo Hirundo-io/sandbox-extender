@@ -1,5 +1,5 @@
 import { parse as parseTypedShell } from "unbash";
-import type { AndOr, Command, Node, ParsedScript, Word, WordPart } from "unbash";
+import type { AndOr, Command, Function, Node, ParsedScript, Word, WordPart } from "unbash";
 
 const defaultMaxIterations = 64;
 const defaultMaxSegments = 256;
@@ -15,6 +15,7 @@ const shellStateMutations = new Set([
   "local",
   "read",
   "readonly",
+  "return",
   "set",
   "shift",
   "source",
@@ -45,6 +46,9 @@ export type ShellCompileOptions = {
 type ControlFlowFacts = Omit<ExecutableSegment, "source" | "words">;
 
 type CompilerState = {
+  readonly activeFunctions: Set<string>;
+  readonly availableFunctions: Set<string>;
+  readonly functions: Map<string, Function>;
   readonly maxIterations: number;
   readonly maxSegments: number;
   readonly segments: ExecutableSegment[];
@@ -58,7 +62,9 @@ function validLimit(value: number): boolean {
 }
 
 function simpleVariable(text: string): string | undefined {
-  const match = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(text);
+  const match = /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*|[1-9])\}|([A-Za-z_][A-Za-z0-9_]*|[1-9]))$/.exec(
+    text,
+  );
   return match?.[1] ?? match?.[2];
 }
 
@@ -119,7 +125,8 @@ function resolveParts(
           : undefined;
     if (!name) return undefined;
     const value = variables.get(name);
-    if (value === undefined || (!quoted && unsafeExpandedValue(value))) return undefined;
+    if (value === undefined || (!quoted && (value.length === 0 || unsafeExpandedValue(value))))
+      return undefined;
     parsedValue += value;
     if (!quoted) unquotedSafetyScan += "\0";
   }
@@ -133,7 +140,10 @@ function resolveWord(word: Word, variables: Variables): string | undefined {
 
 function commandWords(command: Command, variables: Variables): string[] | undefined {
   if (!command.name || command.prefix.length > 0 || command.redirects.length > 0) return undefined;
-  const words = [command.name, ...command.suffix].map((word) => resolveWord(word, variables));
+  const words = [
+    resolveWord(command.name, new Map()),
+    ...command.suffix.map((word) => resolveWord(word, variables)),
+  ];
   return words.every((word): word is string => word !== undefined) && words.length > 0
     ? words
     : undefined;
@@ -157,10 +167,16 @@ function addCommand(
   variables: Variables,
   facts: ControlFlowFacts,
   allowDirectoryChange: boolean,
+  expandFunction: (definition: Function, arguments_: readonly string[]) => boolean,
 ): boolean {
   const words = commandWords(command, variables);
   if (!words || shellStateMutations.has(words[0]!) || (words[0] === "cd" && !allowDirectoryChange))
     return false;
+  const definition = state.availableFunctions.has(words[0]!)
+    ? state.functions.get(words[0]!)
+    : undefined;
+  if (definition) return expandFunction(definition, words.slice(1));
+  if (state.functions.has(words[0]!)) return false;
   if (state.segments.length >= state.maxSegments) return false;
   state.segments.push({ ...facts, source: state.source.slice(command.pos, command.end), words });
   return true;
@@ -182,6 +198,18 @@ function validConditionalDirectoryChange(
   );
 }
 
+function callsFunction(node: Node, state: CompilerState, variables: Variables): boolean {
+  if (node.type === "Statement") return callsFunction(node.command, state, variables);
+  if (node.type === "Command") {
+    const words = commandWords(node, variables);
+    return words !== undefined && state.functions.has(words[0]!);
+  }
+  if (node.type === "Pipeline" || node.type === "AndOr") {
+    return node.commands.some((command) => callsFunction(command, state, variables));
+  }
+  return false;
+}
+
 function compileNode(
   node: Node,
   state: CompilerState,
@@ -189,29 +217,83 @@ function compileNode(
   facts: ControlFlowFacts,
   allowDirectoryChange: boolean,
   terminal: boolean,
+  allowFunctionDefinition: boolean,
 ): boolean {
   if (node.type === "Statement") {
     if (node.background || node.redirects.length > 0) return false;
-    return compileNode(node.command, state, variables, facts, allowDirectoryChange, terminal);
+    return compileNode(
+      node.command,
+      state,
+      variables,
+      facts,
+      allowDirectoryChange,
+      terminal,
+      allowFunctionDefinition,
+    );
   }
-  if (node.type === "Command")
-    return addCommand(node, state, variables, facts, allowDirectoryChange);
+  if (node.type === "Command") {
+    return addCommand(
+      node,
+      state,
+      variables,
+      facts,
+      allowDirectoryChange,
+      (definition, arguments_) => {
+        const name = resolveWord(definition.name, new Map());
+        if (!name || arguments_.length > 9 || state.activeFunctions.has(name)) return false;
+        const functionVariables = new Map(variables);
+        for (let index = 1; index <= 9; index += 1) functionVariables.delete(String(index));
+        arguments_.forEach((argument, index) => functionVariables.set(String(index + 1), argument));
+        state.activeFunctions.add(name);
+        const compiled = compileNode(
+          definition.body,
+          state,
+          functionVariables,
+          facts,
+          allowDirectoryChange,
+          terminal,
+          false,
+        );
+        state.activeFunctions.delete(name);
+        return compiled;
+      },
+    );
+  }
+  if (node.type === "Function") {
+    const name = resolveWord(node.name, new Map());
+    if (
+      !allowFunctionDefinition ||
+      !name ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ||
+      node.redirects.length > 0 ||
+      node.body.type !== "BraceGroup" ||
+      state.availableFunctions.has(name)
+    )
+      return false;
+    state.availableFunctions.add(name);
+    return true;
+  }
   if (node.type === "Pipeline") {
     if (
       node.negated ||
       node.time ||
+      node.commands.some((command) => callsFunction(command, state, variables)) ||
       node.commands.some((command) => commandMutation(command, variables))
     ) {
       return false;
     }
     return node.commands.every((command) =>
-      compileNode(command, state, variables, facts, false, false),
+      compileNode(command, state, variables, facts, false, false, false),
     );
   }
   if (node.type === "AndOr") {
-    if (!validConditionalDirectoryChange(node, variables, terminal)) return false;
+    if (
+      node.commands.some((command) => callsFunction(command, state, variables)) ||
+      !validConditionalDirectoryChange(node, variables, terminal)
+    )
+      return false;
     return node.commands.every((command, index) =>
-      compileNode(command, state, variables, facts, index === 0, false),
+      compileNode(command, state, variables, facts, index === 0, false, false),
     );
   }
   if (node.type === "For") {
@@ -242,12 +324,15 @@ function compileNode(
           loopFacts,
           false,
           index === node.body.commands.length - 1,
+          false,
         ),
       );
     });
   }
   if (node.type === "While") {
     if (
+      node.clause.commands.some((statement) => callsFunction(statement, state, variables)) ||
+      node.body.commands.some((statement) => callsFunction(statement, state, variables)) ||
       node.clause.commands.some((statement) => commandMutation(statement, variables)) ||
       node.body.commands.some((statement) => commandMutation(statement, variables))
     )
@@ -262,6 +347,7 @@ function compileNode(
           { ...loopFacts, role: "condition" },
           false,
           index === node.clause.commands.length - 1,
+          false,
         ),
       ) &&
       node.body.commands.every((statement, index) =>
@@ -272,6 +358,7 @@ function compileNode(
           { ...loopFacts, role: "body" },
           false,
           index === node.body.commands.length - 1,
+          false,
         ),
       )
     );
@@ -285,6 +372,7 @@ function compileNode(
         facts,
         allowDirectoryChange,
         index === node.body.commands.length - 1,
+        false,
       ),
     );
   }
@@ -300,10 +388,45 @@ function compileNode(
         facts,
         false,
         index === node.body.commands.length - 1,
+        false,
       ),
     );
   }
   return false;
+}
+
+function functionDefinitions(parsed: ParsedScript): Map<string, Function> | undefined {
+  const definitions = new Map<string, Function>();
+  for (const statement of parsed.commands) {
+    if (statement.command.type !== "Function") continue;
+    const definition = statement.command;
+    const name = resolveWord(definition.name, new Map());
+    if (
+      !name ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ||
+      definition.redirects.length > 0 ||
+      definition.body.type !== "BraceGroup" ||
+      definitions.has(name)
+    )
+      return undefined;
+    definitions.set(name, definition);
+  }
+  return definitions;
+}
+
+function validateFunctionBodies(state: CompilerState): boolean {
+  const validationVariables = new Map(
+    Array.from({ length: 9 }, (_, index) => [String(index + 1), `argument-${index + 1}`]),
+  );
+  for (const [name, definition] of state.functions) {
+    state.segments.length = 0;
+    state.activeFunctions.add(name);
+    const valid = compileNode(definition.body, state, validationVariables, {}, true, true, false);
+    state.activeFunctions.delete(name);
+    if (!valid) return false;
+  }
+  state.segments.length = 0;
+  return true;
 }
 
 function compileTypedAst(
@@ -312,14 +435,21 @@ function compileTypedAst(
   options: Required<ShellCompileOptions>,
 ): ExecutableSegment[] | undefined {
   if (parsed.errors?.length) return undefined;
+  const functions = functionDefinitions(parsed);
+  if (!functions) return undefined;
   const state = {
+    activeFunctions: new Set<string>(),
+    availableFunctions: new Set(functions.keys()),
+    functions,
     maxIterations: options.maxIterations,
     maxSegments: options.maxSegments,
     segments: [],
     source: script,
   } satisfies CompilerState;
+  if (!validateFunctionBodies(state)) return undefined;
+  state.availableFunctions.clear();
   return parsed.commands.every((statement, index) =>
-    compileNode(statement, state, new Map(), {}, true, index === parsed.commands.length - 1),
+    compileNode(statement, state, new Map(), {}, true, index === parsed.commands.length - 1, true),
   ) && state.segments.length > 0
     ? state.segments
     : undefined;
