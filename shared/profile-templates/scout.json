@@ -32,7 +32,9 @@
     },
     "runtimeVersion": "2.8.1"
   },
-  "sessionContext": ["Use this profile only for inspection. Do not alter files or remote state."],
+  "sessionContext": [
+    "Use this profile only for inspection. Do not alter files or remote state."
+  ],
   "groupings": [
     {
       "id": "read-only-inspection",
