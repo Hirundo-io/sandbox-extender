@@ -63,6 +63,7 @@ function gitMutationOperation(
     repetition === "potentially-unbounded"
   )
     return undefined;
+  if (repetition === "finite" && words[1] !== "add") return undefined;
 
   let operation: string | undefined;
   if (
@@ -74,8 +75,10 @@ function gitMutationOperation(
   } else if (
     words[1] === "commit" &&
     words[2] === "-m" &&
-    words.length === 4 &&
-    words[3]!.trim().length > 0
+    words[3]?.trim().length > 0 &&
+    words[4] === "--" &&
+    words.length > 5 &&
+    words.slice(5).every((path) => explicitRepositoryPath(path, fileLookup))
   ) {
     operation = "git.commit";
   } else if (words[1] === "push" && words.length === 2 && pushTargetLookup(currentPullRequest)) {
@@ -468,6 +471,14 @@ function targetFromPullRequestSpecifier(
   return !specifier || current.resource.endsWith(`#${specifier}`) ? current.resource : undefined;
 }
 
+function isPullRequestSpecifier(value: string | undefined): boolean {
+  return Boolean(
+    value &&
+    (/^[1-9][0-9]*$/.test(value) ||
+      /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9][0-9]*$/.test(value)),
+  );
+}
+
 function watcherPullRequestViewOperation(
   words: readonly string[],
   pullRequestLookup: PullRequestLookup,
@@ -503,17 +514,25 @@ function pullRequestChecksOperation(
 ): PullRequestOperation | undefined {
   const scoped = scopedGhCommand(words);
   if (!scoped) return undefined;
-  const [pr, checks, number, jsonFlag, jsonFields] = scoped.command;
+  const [pr, checks, selectorOrJsonFlag, ...commandArguments] = scoped.command;
+  const hasSelector = isPullRequestSpecifier(selectorOrJsonFlag);
+  const pullRequestNumber = hasSelector ? selectorOrJsonFlag : undefined;
+  const [jsonFlag, jsonFields] = hasSelector
+    ? commandArguments
+    : [selectorOrJsonFlag, ...commandArguments];
   if (
     pr !== "pr" ||
     checks !== "checks" ||
-    !number ||
     jsonFlag !== "--json" ||
     (jsonFields !== reviewedChecksFields && jsonFields !== watcherChecksFields) ||
-    scoped.command.length !== 5
+    commandArguments.length !== (hasSelector ? 2 : 1)
   )
     return undefined;
-  const resource = targetFromPullRequestSpecifier(number, scoped.repository, pullRequestLookup);
+  const resource = targetFromPullRequestSpecifier(
+    pullRequestNumber,
+    scoped.repository,
+    pullRequestLookup,
+  );
   return resource
     ? {
         bodyPresent: false,
@@ -529,8 +548,15 @@ function pullRequestOperation(
   words: readonly string[],
   pullRequestLookup: PullRequestLookup,
 ): PullRequestOperation | undefined {
-  const [gh, pr, subcommand, pullRequestNumber, ...commandArguments] = words;
-  if (gh !== "gh" || pr !== "pr" || !subcommand || !pullRequestNumber) return undefined;
+  const [gh, pr, subcommand, selectorOrArgument, ...remainingWords] = words;
+  if (gh !== "gh" || pr !== "pr" || !subcommand) return undefined;
+  const hasSelector = isPullRequestSpecifier(selectorOrArgument);
+  const pullRequestNumber = hasSelector ? selectorOrArgument : undefined;
+  const commandArguments = hasSelector
+    ? remainingWords
+    : selectorOrArgument === undefined
+      ? []
+      : [selectorOrArgument, ...remainingWords];
   const hasRepository = commandArguments[0] === "--repo";
   const repository = hasRepository ? commandArguments[1] : undefined;
   if (hasRepository && !repository) return undefined;

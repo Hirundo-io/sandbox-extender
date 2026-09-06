@@ -487,6 +487,8 @@ describe("shipped Profile templates", () => {
       "git commit --amend -m 'rewrite history'",
       "git commit --no-verify -m 'skip hooks'",
       "git commit -m ''",
+      "git commit -m 'captures unrelated staged files'",
+      'for path in package.json; do git commit -m repeated -- "$path"; done',
       "git push origin HEAD:main",
       "git push --force",
       "git push --force-with-lease",

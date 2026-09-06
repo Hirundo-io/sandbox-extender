@@ -16,6 +16,10 @@ function repeatedCandidate(words: unknown): unknown {
   return { command: { repetition: "potentially-unbounded", words } };
 }
 
+function finiteCandidate(words: unknown): unknown {
+  return { command: { repetition: "finite", words } };
+}
+
 function currentPullRequest(repository = "Hirundo-io/hirundo-platform", number = 513) {
   return {
     headBranch: "feature",
@@ -132,7 +136,17 @@ describe("GitHub pull request request materializer", () => {
     const pullRequestLookup = () => currentPullRequest();
     for (const [words, operation] of [
       [["git", "add", "mvp/utils/customer.py"], "git.add"],
-      [["git", "commit", "-m", "fix(ci): format customer validation"], "git.commit"],
+      [
+        [
+          "git",
+          "commit",
+          "-m",
+          "fix(ci): format customer validation",
+          "--",
+          "mvp/utils/customer.py",
+        ],
+        "git.commit",
+      ],
       [["git", "push"], "git.push"],
     ] as const) {
       expect(
@@ -161,6 +175,7 @@ describe("GitHub pull request request materializer", () => {
       ["git", "add", "src/*.ts"],
       ["git", "commit", "--amend", "-m", "rewrite"],
       ["git", "commit", "--no-verify", "-m", "skip hooks"],
+      ["git", "commit", "-m", "captures unrelated staged files"],
       ["git", "push", "--force"],
       ["git", "push", "origin", "HEAD:main"],
     ]) {
@@ -191,6 +206,24 @@ describe("GitHub pull request request materializer", () => {
         () => true,
       ),
     ).toBeUndefined();
+    for (const words of [
+      ["git", "commit", "-m", "repeated", "--", "src/file.ts"],
+      ["git", "push"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(
+          finiteCandidate(words),
+          undefined,
+          undefined,
+          undefined,
+          pullRequestLookup,
+          undefined,
+          undefined,
+          () => true,
+          () => true,
+        ),
+      ).toBeUndefined();
+    }
     expect(
       materializeGitHubPullRequest(
         repeatedCandidate(["git", "push"]),
@@ -444,21 +477,34 @@ describe("GitHub pull request request materializer", () => {
   });
 
   test("materializes only the reviewed repo-local checks JSON selection", () => {
+    for (const words of [
+      ["gh", "pr", "checks", "513", "--json", "name,state,bucket,link,workflow"],
+      ["gh", "pr", "checks", "--json", "name,state,bucket,link,workflow"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+          currentPullRequest(),
+        ),
+      ).toEqual({
+        bodyPresent: false,
+        operation: "github.pull-request.checks",
+        resource: "github:pull-request:hirundo-io/hirundo-platform#513",
+        trailingArgumentCount: 2,
+        trailingArguments: ["--json", "name,state,bucket,link,workflow"],
+      });
+    }
+  });
+
+  test("materializes an implicit diff for the active pull request", () => {
     expect(
       materializeGitHubPullRequest(
-        candidate(["gh", "pr", "checks", "513", "--json", "name,state,bucket,link,workflow"]),
+        candidate(["gh", "pr", "diff"]),
         undefined,
         undefined,
         undefined,
         () => currentPullRequest(),
       ),
-    ).toEqual({
-      bodyPresent: false,
-      operation: "github.pull-request.checks",
-      resource: "github:pull-request:hirundo-io/hirundo-platform#513",
-      trailingArgumentCount: 2,
-      trailingArguments: ["--json", "name,state,bucket,link,workflow"],
-    });
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.diff" }));
   });
 
   test("materializes the watcher's PR metadata and checks commands", () => {
