@@ -448,8 +448,11 @@ function compileTypedAst(
   } satisfies CompilerState;
   if (!validateFunctionBodies(state)) return undefined;
   state.availableFunctions.clear();
+  const terminalIndex = parsed.commands.findLastIndex(
+    (statement) => statement.command.type !== "Function",
+  );
   return parsed.commands.every((statement, index) =>
-    compileNode(statement, state, new Map(), {}, true, index === parsed.commands.length - 1, true),
+    compileNode(statement, state, new Map(), {}, true, index === terminalIndex, true),
   ) && state.segments.length > 0
     ? state.segments
     : undefined;
