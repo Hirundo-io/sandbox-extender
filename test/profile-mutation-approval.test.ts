@@ -55,6 +55,57 @@ describe("profile mutation approval", () => {
     expect(message).toContain('Targets: "github:pull-request:acme/example#42"');
   });
 
+  test("makes complete proposal files, materializers, integrity, and tests reviewable", async () => {
+    const completeIntent = {
+      arguments: { profile: { id: "maker", policyRevision: "pending-review" }, tests: [] },
+      operation: "propose_complete_profile",
+    } as unknown as ProfileMutationIntent;
+    const completeDetails = {
+      affectedFiles: [
+        "proposals/maker.json",
+        "materializers/activation/maker.ts",
+        "tests/maker.json",
+      ],
+      materializers: [
+        {
+          file: "materializers/activation/maker.ts",
+          integrity: "a".repeat(64),
+          language: "typescript" as const,
+          permissions: { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] },
+          runtimeVersion: "2.8.1",
+        },
+      ],
+      profileId: "maker",
+      tests: [
+        {
+          expected: "allow" as const,
+          name: "allows workspace",
+          request: {
+            action: "codex.unified_exec",
+            arguments: {},
+            resource: "/workspace",
+            threadId: "proposal-test",
+          },
+        },
+      ],
+    };
+    const result = await requestProfileMutationApproval(
+      "thread-1",
+      completeIntent,
+      completeDetails,
+      context(),
+    );
+    const message = (
+      result.approval?.inputRequests?.approval?.params as { message?: string } | undefined
+    )?.message;
+    expect(message).toContain(
+      "Affected Files: proposals/maker.json, materializers/activation/maker.ts, tests/maker.json",
+    );
+    expect(message).toContain("Materializers:");
+    expect(message).toContain("Authorization Tests:");
+    expect(message).toContain('"integrity":"' + "a".repeat(64) + '"');
+  });
+
   test("redacts credentials from approval messages and continuation state", async () => {
     const sensitiveIntent = {
       arguments: {

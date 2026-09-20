@@ -1,5 +1,5 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { dirname, join, relative, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { parse, stringify } from "yaml";
@@ -352,6 +352,8 @@ export class PolicyRepository {
   }
 
   async writeProposal(proposal: ProfileProposal): Promise<void> {
+    parseProposal(proposal.profile, `proposals/${proposal.profile.id}.json`);
+    authorizationTestsSchema.parse(proposal.tests);
     await this.initialize();
     const id = proposal.profile.id;
     await writeFile(
@@ -364,6 +366,45 @@ export class PolicyRepository {
       `${JSON.stringify(proposal.tests, null, 2)}\n`,
       "utf8",
     );
+  }
+
+  async writeCompleteProposal(
+    proposal: ProfileProposal,
+    sources: { readonly activation?: string; readonly request?: string },
+  ): Promise<void> {
+    const id = proposal.profile.id;
+    profileIdSchema.parse(id);
+    const files = [
+      ...(proposal.profile.activationMaterializer
+        ? [[proposal.profile.activationMaterializer.file, sources.activation] as const]
+        : []),
+      ...(proposal.profile.requestMaterializer
+        ? [[proposal.profile.requestMaterializer.file, sources.request] as const]
+        : []),
+    ];
+    if (files.some(([, source]) => source === undefined))
+      throw new Error("materializer source is missing");
+    for (const [file] of files) {
+      if (!file.endsWith(`/${id}.ts`))
+        throw new Error("materializer file must be derived from the profile ID");
+      const destination = join(this.root, file);
+      try {
+        await lstat(destination);
+        throw new Error(`refusing to overwrite existing materializer ${file}`);
+      } catch (error) {
+        if (!isMissingFile(error)) throw error;
+      }
+      await mkdir(dirname(destination), { recursive: true });
+      let directory = this.root;
+      for (const segment of dirname(file).split(sep)) {
+        directory = join(directory, segment);
+        if ((await lstat(directory)).isSymbolicLink())
+          throw new Error("materializer directory must not be a symlink");
+      }
+    }
+    for (const [file, source] of files)
+      await writeFile(join(this.root, file), `${source}\n`, { encoding: "utf8", mode: 0o600 });
+    await this.writeProposal(proposal);
   }
 
   async promoteProposal(profileId: string, policyRevision: string): Promise<void> {

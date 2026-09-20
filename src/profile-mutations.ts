@@ -1,6 +1,6 @@
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
 import { PolicyRepository } from "./policy-repository.js";
-import { proposeProfile } from "./profile-authoring.js";
+import { proposeCompleteProfile, proposeProfile } from "./profile-authoring.js";
 import {
   activatePreparedProfile,
   disablePreparedProfile,
@@ -42,6 +42,40 @@ export async function prepareProfileMutation(
           return `Wrote proposal ${intent.arguments.profileId}. Review proposals/${intent.arguments.profileId}.json and tests/${intent.arguments.profileId}.json before promoting it to profiles/.`;
         },
       };
+    case "propose_complete_profile": {
+      const proposal = proposeCompleteProfile(intent.arguments.profile, intent.arguments.tests);
+      return {
+        approvalDetails: {
+          affectedFiles: [
+            `proposals/${proposal.profile.id}.json`,
+            `tests/${proposal.profile.id}.json`,
+            ...(proposal.profile.activationMaterializer
+              ? [proposal.profile.activationMaterializer.file]
+              : []),
+            ...(proposal.profile.requestMaterializer
+              ? [proposal.profile.requestMaterializer.file]
+              : []),
+          ],
+          materializers: [
+            proposal.profile.activationMaterializer,
+            proposal.profile.requestMaterializer,
+          ].filter(
+            (materializer): materializer is NonNullable<typeof materializer> =>
+              materializer !== undefined,
+          ),
+          profileId: proposal.profile.id,
+          targets: proposal.profile.allowedTargets,
+          tests: proposal.tests,
+        },
+        execute: async () => {
+          await repository.writeCompleteProposal(proposal, {
+            activation: intent.arguments.profile.activationMaterializer?.source,
+            request: intent.arguments.profile.requestMaterializer?.source,
+          });
+          return `Wrote pending proposal ${proposal.profile.id}. Review proposals/${proposal.profile.id}.json, tests/${proposal.profile.id}.json, and its materializers before promoting it.`;
+        },
+      };
+    }
     case "promote_profile":
       return {
         approvalDetails: {

@@ -145,6 +145,7 @@ describe("MCP launcher", () => {
       const toolsResponse = requireSuccessfulResponse(responses[1]!);
       expect(initializeResponse.result.serverInfo?.version).toBe(packageManifest.version);
       expect(toolsResponse.result.tools?.map(({ name }) => name)).toEqual([
+        "propose_complete_profile",
         "initialize_policy_repository",
         "list_profiles",
         "get_active_profile",

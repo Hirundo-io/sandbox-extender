@@ -119,12 +119,29 @@ export type ProfileProposal = {
     readonly activationMaterializer?: Omit<ActivationMaterializer, "reviewedSource">;
     readonly groupings: readonly CedarGrouping[];
     readonly id: string;
-    readonly policyRevision: string;
+    readonly policyRevision: "pending-review";
     readonly sessionContext?: readonly string[];
     readonly targetScope?: "single";
     readonly requestMaterializer?: Omit<RequestMaterializer, "reviewedSource">;
   };
   readonly tests: readonly AuthorizationTest[];
+};
+
+/** Complete pending-review definition supplied through the MCP authoring operation. */
+export type CompleteProfileDefinition = Omit<
+  ProfileProposal["profile"],
+  "activationMaterializer" | "requestMaterializer"
+> & {
+  readonly activationMaterializer?: {
+    readonly permissions: MaterializerPermissionManifest;
+    readonly runtimeVersion: string;
+    readonly source: string;
+  };
+  readonly requestMaterializer?: {
+    readonly permissions: MaterializerPermissionManifest;
+    readonly runtimeVersion: string;
+    readonly source: string;
+  };
 };
 
 export type AuthorizationTest = {

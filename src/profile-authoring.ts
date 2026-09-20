@@ -1,6 +1,96 @@
 import { profileIdSchema } from "./schemas.js";
+import { completeProfileSchema } from "./mutation-authorization.js";
+import {
+  activationMaterializerSchema,
+  authorizationTestSchema,
+  cedarGroupingSchema,
+  materializerPermissionManifestSchema,
+  requestMaterializerSchema,
+} from "./schemas.js";
 import { compileShell } from "./shell-parser.js";
-import type { NormalizedRequest, ProfileProposal } from "./types.js";
+import { assertSelfContainedMaterializer, materializerIntegrity } from "./materializer-policy.js";
+import { validateCedarGrouping } from "./cedar.js";
+import type { CompleteProfileDefinition, NormalizedRequest, ProfileProposal } from "./types.js";
+
+const supportedDenoVersion = "2.8.1";
+
+type AuthoredMaterializer = NonNullable<CompleteProfileDefinition["activationMaterializer"]>;
+type CompleteAuthorizationTest = Omit<ProfileProposal["tests"][number], "request"> & {
+  readonly request: Omit<NormalizedRequest, "threadId">;
+};
+
+function authoredMaterializer(
+  materializerKind: "activation" | "requests",
+  profileId: string,
+  materializerDefinition: AuthoredMaterializer,
+): NonNullable<ProfileProposal["profile"]["activationMaterializer"]> {
+  if (!materializerDefinition) throw new Error("missing materializer");
+  materializerPermissionManifestSchema.parse(materializerDefinition.permissions);
+  if (materializerDefinition.runtimeVersion !== supportedDenoVersion)
+    throw new Error(`unsupported Deno runtime version ${materializerDefinition.runtimeVersion}`);
+  assertSelfContainedMaterializer(materializerDefinition.source);
+  const materializer = {
+    file: `materializers/${materializerKind}/${profileId}.ts`,
+    integrity: materializerIntegrity(
+      materializerDefinition.source,
+      materializerDefinition.permissions,
+      materializerDefinition.runtimeVersion,
+    ),
+    language: "typescript" as const,
+    permissions: materializerDefinition.permissions,
+    runtimeVersion: materializerDefinition.runtimeVersion,
+  };
+  (materializerKind === "activation"
+    ? activationMaterializerSchema
+    : requestMaterializerSchema
+  ).parse(materializer);
+  return materializer;
+}
+
+/** Builds a complete proposal while deriving all executable file names and integrity values. */
+export function proposeCompleteProfile(
+  profile: CompleteProfileDefinition,
+  tests: readonly CompleteAuthorizationTest[],
+): ProfileProposal {
+  profile = completeProfileSchema.parse(profile);
+  if (tests.length === 0) throw new Error("complete proposals require at least one test");
+  for (const grouping of profile.groupings) {
+    cedarGroupingSchema.parse(grouping);
+    validateCedarGrouping(grouping);
+  }
+  const activationMaterializer =
+    profile.activationMaterializer &&
+    authoredMaterializer("activation", profile.id, profile.activationMaterializer);
+  const requestMaterializer =
+    profile.requestMaterializer &&
+    authoredMaterializer("requests", profile.id, profile.requestMaterializer);
+  const {
+    activationMaterializer: _activation,
+    requestMaterializer: _request,
+    ...profileDefinition
+  } = profile;
+  const proposal: ProfileProposal = {
+    profile: {
+      ...profileDefinition,
+      ...(activationMaterializer ? { activationMaterializer } : {}),
+      ...(requestMaterializer ? { requestMaterializer } : {}),
+    },
+    tests: tests.map((test) => ({
+      ...test,
+      request: { ...test.request, threadId: "proposal-test" },
+    })),
+  };
+  for (const test of proposal.tests)
+    authorizationTestSchema.parse({
+      ...test,
+      request: {
+        action: test.request.action,
+        arguments: test.request.arguments,
+        resource: test.request.resource,
+      },
+    });
+  return proposal;
+}
 
 function cedarLiteral(value: unknown): string {
   if (typeof value === "number" && !Number.isFinite(value)) {
