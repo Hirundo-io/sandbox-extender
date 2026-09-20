@@ -3,6 +3,19 @@ import { describe, expect, test } from "bun:test";
 import { compileShell } from "../src/shell-parser.js";
 
 describe("shell compiler", () => {
+  test("ignores trailing definitions when identifying terminal directory changes", async () => {
+    expect(await compileShell("cd safe && npm install; unused() { echo safe; }")).toEqual([
+      { source: "cd safe", words: ["cd", "safe"] },
+      { source: "npm install", words: ["npm", "install"] },
+    ]);
+  });
+
+  test("preserves quoted empty arguments and abstains on unquoted empty expansions", async () => {
+    const segments = await compileShell('for item in ""; do echo "$item"; done');
+    expect(segments?.[0]?.words).toEqual(["echo", ""]);
+    expect(await compileShell('for item in ""; do echo $item; done')).toBeUndefined();
+  });
+
   test("compiles concurrent requests independently", async () => {
     const scripts = Array.from({ length: 32 }, (_, index) => `echo concurrent-${index}`);
 

@@ -471,11 +471,11 @@ function targetFromPullRequestSpecifier(
   return !specifier || current.resource.endsWith(`#${specifier}`) ? current.resource : undefined;
 }
 
-function isPullRequestSpecifier(value: string | undefined): boolean {
+function isPullRequestSpecifier(pullRequestSpecifier: string | undefined): boolean {
   return Boolean(
-    value &&
-    (/^[1-9][0-9]*$/.test(value) ||
-      /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9][0-9]*$/.test(value)),
+    pullRequestSpecifier &&
+    (/^[1-9][0-9]*$/.test(pullRequestSpecifier) ||
+      /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9][0-9]*$/.test(pullRequestSpecifier)),
   );
 }
 
@@ -516,7 +516,7 @@ function pullRequestChecksOperation(
   if (!scoped) return undefined;
   const [pr, checks, selectorOrJsonFlag, ...commandArguments] = scoped.command;
   const hasSelector = isPullRequestSpecifier(selectorOrJsonFlag);
-  const pullRequestNumber = hasSelector ? selectorOrJsonFlag : undefined;
+  const pullRequestSpecifier = hasSelector ? selectorOrJsonFlag : undefined;
   const [jsonFlag, jsonFields] = hasSelector
     ? commandArguments
     : [selectorOrJsonFlag, ...commandArguments];
@@ -529,7 +529,7 @@ function pullRequestChecksOperation(
   )
     return undefined;
   const resource = targetFromPullRequestSpecifier(
-    pullRequestNumber,
+    pullRequestSpecifier,
     scoped.repository,
     pullRequestLookup,
   );
@@ -551,18 +551,18 @@ function pullRequestOperation(
   const [gh, pr, subcommand, selectorOrArgument, ...remainingWords] = words;
   if (gh !== "gh" || pr !== "pr" || !subcommand) return undefined;
   const hasSelector = isPullRequestSpecifier(selectorOrArgument);
-  const pullRequestNumber = hasSelector ? selectorOrArgument : undefined;
-  const commandArguments = hasSelector
-    ? remainingWords
-    : selectorOrArgument === undefined
-      ? []
-      : [selectorOrArgument, ...remainingWords];
+  const pullRequestSpecifier = hasSelector ? selectorOrArgument : undefined;
+  const commandArguments = hasSelector ? remainingWords : words.slice(3);
   const hasRepository = commandArguments[0] === "--repo";
   const repository = hasRepository ? commandArguments[1] : undefined;
   if (hasRepository && !repository) return undefined;
   if (!repository && subcommand !== "diff") return undefined;
   const remainingArguments = commandArguments.slice(hasRepository ? 2 : 0);
-  const resource = targetFromPullRequestSpecifier(pullRequestNumber, repository, pullRequestLookup);
+  const resource = targetFromPullRequestSpecifier(
+    pullRequestSpecifier,
+    repository,
+    pullRequestLookup,
+  );
   if (!resource) return undefined;
   const bodyIndex = remainingArguments.indexOf("--body");
   return {
