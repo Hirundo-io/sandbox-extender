@@ -35,6 +35,24 @@ const tests = [
 ];
 
 describe("complete profile authoring", () => {
+  test("rejects empty tests at the authoring boundary", () => {
+    expect(() => proposeCompleteProfile(definition(), [])).toThrow("at least one test");
+  });
+
+  test.each([
+    { unexpected: true },
+    { allowedTargets: [42] },
+    { policyRevision: "unreviewed" },
+    { sessionContext: [""] },
+  ])("rejects malformed complete definitions before persistence", (change) => {
+    expect(() =>
+      proposeCompleteProfile(
+        { ...definition(), ...change } as unknown as ReturnType<typeof definition>,
+        tests,
+      ),
+    ).toThrow();
+  });
+
   test("derives a dedicated materializer path and reviewable integrity", () => {
     const proposal = proposeCompleteProfile(definition(), tests);
     expect(proposal.profile.activationMaterializer).toMatchObject({

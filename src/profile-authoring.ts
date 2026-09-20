@@ -1,4 +1,5 @@
 import { profileIdSchema } from "./schemas.js";
+import { completeProfileSchema } from "./mutation-authorization.js";
 import {
   activationMaterializerSchema,
   authorizationTestSchema,
@@ -19,25 +20,30 @@ type CompleteAuthorizationTest = Omit<ProfileProposal["tests"][number], "request
 };
 
 function authoredMaterializer(
-  kind: "activation" | "requests",
+  materializerKind: "activation" | "requests",
   profileId: string,
-  value: AuthoredMaterializer,
+  materializerDefinition: AuthoredMaterializer,
 ): NonNullable<ProfileProposal["profile"]["activationMaterializer"]> {
-  if (!value) throw new Error("missing materializer");
-  materializerPermissionManifestSchema.parse(value.permissions);
-  if (value.runtimeVersion !== supportedDenoVersion)
-    throw new Error(`unsupported Deno runtime version ${value.runtimeVersion}`);
-  assertSelfContainedMaterializer(value.source);
+  if (!materializerDefinition) throw new Error("missing materializer");
+  materializerPermissionManifestSchema.parse(materializerDefinition.permissions);
+  if (materializerDefinition.runtimeVersion !== supportedDenoVersion)
+    throw new Error(`unsupported Deno runtime version ${materializerDefinition.runtimeVersion}`);
+  assertSelfContainedMaterializer(materializerDefinition.source);
   const materializer = {
-    file: `materializers/${kind}/${profileId}.ts`,
-    integrity: materializerIntegrity(value.source, value.permissions, value.runtimeVersion),
+    file: `materializers/${materializerKind}/${profileId}.ts`,
+    integrity: materializerIntegrity(
+      materializerDefinition.source,
+      materializerDefinition.permissions,
+      materializerDefinition.runtimeVersion,
+    ),
     language: "typescript" as const,
-    permissions: value.permissions,
-    runtimeVersion: value.runtimeVersion,
+    permissions: materializerDefinition.permissions,
+    runtimeVersion: materializerDefinition.runtimeVersion,
   };
-  (kind === "activation" ? activationMaterializerSchema : requestMaterializerSchema).parse(
-    materializer,
-  );
+  (materializerKind === "activation"
+    ? activationMaterializerSchema
+    : requestMaterializerSchema
+  ).parse(materializer);
   return materializer;
 }
 
@@ -46,10 +52,8 @@ export function proposeCompleteProfile(
   profile: CompleteProfileDefinition,
   tests: readonly CompleteAuthorizationTest[],
 ): ProfileProposal {
-  profileIdSchema.parse(profile.id);
-  if (profile.policyRevision !== "pending-review")
-    throw new Error("complete proposals must remain pending-review");
-  if (!profile.groupings.length) throw new Error("profile must contain at least one grouping");
+  profile = completeProfileSchema.parse(profile);
+  if (tests.length === 0) throw new Error("complete proposals require at least one test");
   for (const grouping of profile.groupings) {
     cedarGroupingSchema.parse(grouping);
     validateCedarGrouping(grouping);

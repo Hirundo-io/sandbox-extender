@@ -112,7 +112,7 @@ export type ProfileProposal = {
     readonly activationMaterializer?: Omit<ActivationMaterializer, "reviewedSource">;
     readonly groupings: readonly CedarGrouping[];
     readonly id: string;
-    readonly policyRevision: string;
+    readonly policyRevision: "pending-review";
     readonly sessionContext?: readonly string[];
     readonly targetScope?: "single";
     readonly requestMaterializer?: Omit<RequestMaterializer, "reviewedSource">;
