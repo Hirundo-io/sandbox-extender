@@ -410,6 +410,8 @@ describe("shipped Profile templates", () => {
       "gh api 'repos/acme/example/issues/42/comments?per_page=100&page=1'",
       "gh api 'repos/acme/example/pulls/42/reviews?per_page=100&page=1'",
       reviewThreadsCommand(),
+      'view_pr() { gh pr view "$1" --repo "$2"; }\nview_pr 42 acme/example',
+      'comment() { gh api --method POST repos/acme/example/issues/42/comments -f "body=$1"; }\ncomment "_Replying as Codex. Reviewed."',
     ]) {
       const result = await core.evaluate({
         action: "codex.unified_exec",
@@ -476,6 +478,7 @@ describe("shipped Profile templates", () => {
       "gh api user --jq .login",
       "gh api rate_limit",
       "gh api repos/acme/example/actions/secrets",
+      "show_token() { gh auth token; }\nshow_token",
       'gh api --method PATCH repos/acme/example/pulls/42/comments/987/replies -f body="Wrong method."',
       'gh api graphql -f query="mutation { addPullRequestReviewThreadReply(input: {}) { clientMutationId } }"',
       reviewThreadsCommand("acme/other"),
