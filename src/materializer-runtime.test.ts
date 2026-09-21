@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  denoPermissionFlags,
   materializerIntegrity,
   requestResourcePermission,
   workingDirectoryPermission,
@@ -40,6 +41,12 @@ const requestSource = [
   "const input = await new Response(Deno.stdin.readable).json();",
   "console.log(JSON.stringify({resource: input.resource, context: {cwd: Deno.cwd(), operation: input.command.executable}}));",
 ].join("\n");
+
+test("combines multiple values into one Deno permission flag", () => {
+  expect(denoPermissionFlags({ ...noPermissions, run: ["gh", "git"] }, process.cwd())).toEqual([
+    "--allow-run=gh,git",
+  ]);
+});
 
 function activationMaterializer(
   source: string,
