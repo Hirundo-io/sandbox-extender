@@ -262,6 +262,7 @@ function materializeProfileRequest(
   request: NormalizedRequest,
   workingDirectory = request.resource,
   command?: ShellCommandContext,
+  originalCommand?: string,
 ):
   | { readonly context?: Readonly<Record<string, unknown>>; readonly request: NormalizedRequest }
   | undefined {
@@ -280,6 +281,8 @@ function materializeProfileRequest(
     request,
     workingDirectory,
     command,
+    {},
+    originalCommand,
   );
   return materialized
     ? { context: materialized.context, request: { ...request, resource: materialized.resource } }
@@ -454,6 +457,7 @@ export class PolicyCore {
         commandRequest,
         workingDirectory,
         commandContext,
+        typeof request.arguments.command === "string" ? request.arguments.command : undefined,
       );
       if (!materializedRequest) {
         return { decision: "abstain", reason: "profile could not materialize the request" };
