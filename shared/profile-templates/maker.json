@@ -4,7 +4,7 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/local-workspace.ts",
-    "integrity": "01121fc3fa30380f7af79f36779428c6cc7d64620e43e549d42e17dfbf4beb35",
+    "integrity": "c9298f8b117ea02192365e1fb54e2c262b401222783d685196935f3d7d694bcc",
     "language": "typescript",
     "permissions": {
       "read": [],
@@ -15,11 +15,11 @@
       "run": [],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.9.6"
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "b94919c42b39d1d98d58533f9bc61b53ceb8385e2f8c048efca1d013ebc66e47",
+    "integrity": "c498898801dde09db8606260a8661919340957098cdd6af1436360c875633210",
     "language": "typescript",
     "permissions": {
       "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
@@ -30,7 +30,7 @@
       "run": [],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.9.6"
   },
   "sessionContext": [
     "Prefer established packages with multiple maintainers and recent updates.",

@@ -509,11 +509,11 @@ describe("PolicyCore", () => {
         ],
         requestMaterializer: {
           file,
-          integrity: materializerIntegrity(reviewedSource, emptyPermissions, "2.8.1"),
+          integrity: materializerIntegrity(reviewedSource, emptyPermissions, "2.9.6"),
           language: "typescript",
           permissions: emptyPermissions,
           reviewedSource,
-          runtimeVersion: "2.8.1",
+          runtimeVersion: "2.9.6",
         },
       }),
       request.threadId,

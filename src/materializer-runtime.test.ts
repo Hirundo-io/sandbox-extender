@@ -44,7 +44,7 @@ const requestSource = [
 function activationMaterializer(
   source: string,
   permissions: MaterializerPermissionManifest = noPermissions,
-  runtimeVersion = "2.8.1",
+  runtimeVersion = "2.9.6",
 ): ActivationMaterializer {
   return {
     file: "materializers/activation/test.ts",
@@ -59,7 +59,7 @@ function activationMaterializer(
 function requestMaterializer(
   source: string,
   permissions: MaterializerPermissionManifest = noPermissions,
-  runtimeVersion = "2.8.1",
+  runtimeVersion = "2.9.6",
 ): RequestMaterializer {
   return {
     file: "materializers/requests/test.ts",

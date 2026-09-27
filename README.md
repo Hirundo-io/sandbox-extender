@@ -164,7 +164,7 @@ the only authorization language. The bundled implementations live under
 Materializers are Profile-owned, engineer-reviewed executable code. Approving
 their Policy Revision approves the exact source artifact, Deno runtime version,
 and data-only permission manifest. Sandbox Extender runs them with the
-repository-local Deno 2.8.1 binary, `--no-prompt`, frozen and cached-only
+repository-local Deno 2.9.6 binary, `--no-prompt`, frozen and cached-only
 dependency settings, the actual request working directory, a five-second
 timeout, and 64 KiB stdout and stderr limits. It rejects relative, package, and
 dynamic imports, so the integrity digest covers the complete self-contained

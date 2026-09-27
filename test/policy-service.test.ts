@@ -45,10 +45,10 @@ function materializerReference(file: string, source: string) {
   return {
     ...(dependencies ? { dependencies } : {}),
     file,
-    integrity: materializerIntegrity(source, permissions, "2.8.1", dependencies),
+    integrity: materializerIntegrity(source, permissions, "2.9.6", dependencies),
     language: "typescript" as const,
     permissions,
-    runtimeVersion: "2.8.1",
+    runtimeVersion: "2.9.6",
   };
 }
 

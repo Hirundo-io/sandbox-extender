@@ -42,10 +42,10 @@ async function materializerReference(
   return {
     ...(dependencies ? { dependencies } : {}),
     file: `materializers/${kind}/${name}`,
-    integrity: materializerIntegrity(source, materializerPermissions, "2.8.1", dependencies),
+    integrity: materializerIntegrity(source, materializerPermissions, "2.9.6", dependencies),
     language: "typescript" as const,
     permissions: materializerPermissions,
-    runtimeVersion: "2.8.1",
+    runtimeVersion: "2.9.6",
   };
 }
 
