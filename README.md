@@ -53,6 +53,16 @@ The bundled templates are a starting point, not active policy:
 - `Babysitter` scopes pull-request and CI inspection to one pull request.
 - `Scout` supports read-only repository inspection for explicit targets.
 - `Maker` scopes lockfile-oriented dependency work to one workspace.
+  Pixi operations require an explicit `--manifest-path pixi.toml` or
+  `--manifest-path pyproject.toml`, alongside `--no-install --offline --no-config`.
+  Set `no-build = true` in `[pypi-options]` or `[tool.pixi.pypi-options]`, respectively.
+  Every environment excluding the default feature must include a feature with its
+  own blanket `no-build = true`. Maker parses the selected manifest and rejects
+  missing, false, per-package, malformed, or out-of-workspace settings.
+  For uv, persist `[tool.uv] no-build = true` in `pyproject.toml` and retain the
+  required `--no-build` flag: Maker's `--no-config` means configuration alone is
+  insufficient. Offline resolution can still build cached sources; disabling
+  builds is a separate restriction. This does not enable online Pixi operations.
 
 ## Policy repository
 

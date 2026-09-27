@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -268,6 +268,7 @@ describe("shipped Profile templates", () => {
   test("Maker permits script-free npm installs inside the effective workspace", async () => {
     const workspace = await realpath(await mkdtemp(join(tmpdir(), "sandbox-extender-maker-")));
     try {
+      await writeFile(join(workspace, "pixi.toml"), "[pypi-options]\nno-build = true\n");
       const nested = join(workspace, "packages", "app");
       await mkdir(nested, { recursive: true });
       await mkdir(join(workspace, "~", "literal"), { recursive: true });
@@ -285,9 +286,9 @@ describe("shipped Profile templates", () => {
         "uv add requests --no-sync --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
         "uv remove requests --no-sync --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
         "uv lock --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
-        "pixi add python=3.12 --no-install --offline --no-config --manifest-path .",
-        "pixi remove python --no-install --offline --no-config --manifest-path .",
-        "pixi lock --no-install --offline --no-config --manifest-path .",
+        "pixi add python=3.12 --no-install --offline --no-config --manifest-path pixi.toml",
+        "pixi remove python --no-install --offline --no-config --manifest-path pixi.toml",
+        "pixi lock --no-install --offline --no-config --manifest-path pixi.toml",
         "cd packages/app && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         'cd "~/literal" && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun',
       ]) {
@@ -313,6 +314,46 @@ describe("shipped Profile templates", () => {
       expect(maker.sessionContext).toContain(
         "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
       );
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+    }
+  }, 20_000);
+
+  test("Maker requires effective PyPI no-build in the selected manifest", async () => {
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "maker-no-build-")));
+    try {
+      const core = new PolicyCore();
+      core.activate(
+        { ...(await profileTemplate("maker")), allowedTargets: new Set([workspace]) },
+        "thread-1",
+      );
+      for (const [manifest, decision] of [
+        ["[pypi-options]\nno-build = true\n", "allow"],
+        ["[pypi-options]\nno-build = false\n", "abstain"],
+        ["[pypi-options]\nno-build = ['requests']\n", "abstain"],
+        [
+          "[pypi-options]\nno-build = true\n[environments.ci]\nno-default-feature = true\nfeatures = ['ci']\n",
+          "abstain",
+        ],
+        [
+          "[pypi-options]\nno-build = true\n[feature.ci.pypi-options]\nno-build = true\n[environments.ci]\nno-default-feature = true\nfeatures = ['ci']\n",
+          "allow",
+        ],
+      ] as const) {
+        await writeFile(join(workspace, "pixi.toml"), manifest);
+        expect(
+          (
+            await core.evaluate({
+              action: "codex.unified_exec",
+              arguments: {
+                command: "pixi lock --no-install --offline --no-config --manifest-path pixi.toml",
+              },
+              resource: workspace,
+              threadId: "thread-1",
+            })
+          ).decision,
+        ).toBe(decision);
+      }
     } finally {
       await rm(workspace, { force: true, recursive: true });
     }

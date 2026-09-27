@@ -8,6 +8,11 @@ import type {
   RequestMaterializer,
 } from "./types.js";
 
+export const materializerDependencyEntrypoints: Readonly<Record<string, string>> = {
+  graphql: "index.mjs",
+  "smol-toml": "index.js",
+};
+
 export const workingDirectoryPermission = "$WORKING_DIRECTORY";
 export const requestResourcePermission = "$REQUEST_RESOURCE";
 
@@ -54,7 +59,8 @@ export function assertSelfContainedMaterializer(
   const unsupported = imports.find(
     (entry) =>
       entry.kind !== "import-statement" ||
-      (!entry.path.startsWith("node:") && entry.path !== "graphql"),
+      (!entry.path.startsWith("node:") &&
+        !Object.hasOwn(materializerDependencyEntrypoints, entry.path)),
   );
   if (unsupported)
     throw new Error(`materializer import is not self-contained: ${unsupported.path}`);

@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { denoPermissionFlags, verifyMaterializerIntegrity } from "./materializer-policy.js";
+import {
+  denoPermissionFlags,
+  materializerDependencyEntrypoints,
+  verifyMaterializerIntegrity,
+} from "./materializer-policy.js";
 import type {
   ActivationMaterializer,
   NormalizedRequest,
@@ -121,16 +125,23 @@ function executeMaterializer(
         throw new Error("materializer dependency integrity mismatch");
       writeFileSync(join(temporaryDirectory, "package.json"), packageJson, { mode: 0o600 });
       writeFileSync(join(temporaryDirectory, "deno.lock"), denoLock, { mode: 0o600 });
-      cpSync(
-        dirname(fileURLToPath(import.meta.resolve("graphql"))),
-        join(temporaryDirectory, "node_modules", "graphql"),
-        { recursive: true },
-      );
-      writeFileSync(
-        join(temporaryDirectory, "deno.json"),
-        JSON.stringify({ imports: { graphql: "./node_modules/graphql/index.mjs" } }),
-        { mode: 0o600 },
-      );
+      const dependencyNames = Object.keys(JSON.parse(packageJson.toString()).dependencies ?? {});
+      const imports: Record<string, string> = {};
+      for (const name of dependencyNames) {
+        const entrypoint = Object.hasOwn(materializerDependencyEntrypoints, name)
+          ? materializerDependencyEntrypoints[name]
+          : undefined;
+        if (!entrypoint) throw new Error("unsupported materializer dependency");
+        cpSync(
+          dirname(fileURLToPath(import.meta.resolve(name))),
+          join(temporaryDirectory, "node_modules", name),
+          { recursive: true },
+        );
+        imports[name] = `./node_modules/${name}/${entrypoint}`;
+      }
+      writeFileSync(join(temporaryDirectory, "deno.json"), JSON.stringify({ imports }), {
+        mode: 0o600,
+      });
     }
     const process = Bun.spawnSync({
       cmd: [

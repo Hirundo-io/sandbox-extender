@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -97,6 +97,48 @@ describe("Maker dependency request materializer", () => {
         unknownOptionCount: 0,
       }),
     );
+  });
+
+  test.each([
+    ["pixi.toml", "[pypi-options]\nno-build = true", true],
+    ["pyproject.toml", "[tool.pixi.pypi-options]\nno-build = true", true],
+    ["pyproject.toml", "[tool.uv]\nno-build = true", false],
+    ["pixi.toml", "[pypi-options]\nno-build = false", false],
+    ["pixi.toml", "[pypi-options]\nno-build = ['a']", false],
+    ["pixi.toml", "# no-build = true", false],
+    ["pixi.toml", "[pypi-options]\nno-build = 'true'", false],
+    ["pixi.toml", "[pypi-options]\nno-build = true\nno-build = false", false],
+    [
+      "pixi.toml",
+      "[pypi-options]\nno-build = true\n[environments.ci]\nno-default-feature=true",
+      false,
+    ],
+    ["pixi.toml", "[pypi-options]\nno-build = true\n[environments]\nci=['test']", true],
+    ["pixi.toml", "[pypi-options]\nno-build = true\n[environments.ci]\nfeatures=['test']", true],
+  ])("checks %s no-build configuration %#", (name, manifest, expected) => {
+    const root = workspace();
+    writeFileSync(join(root, name), manifest);
+    expect(
+      materializeMakerDependency(
+        candidate(root, ["pixi", "lock", "--manifest-path", name]),
+        (path) => readFileSync(path, "utf8"),
+      )?.pypiNoBuild,
+    ).toBe(expected);
+  });
+
+  test("rejects missing, directory-discovered, and escaped manifests", () => {
+    const root = workspace();
+    const outside = workspace();
+    writeFileSync(join(outside, "pixi.toml"), "[pypi-options]\nno-build=true");
+    symlinkSync(join(outside, "pixi.toml"), join(root, "pixi.toml"));
+    for (const name of ["pixi.toml", ".", "missing/pyproject.toml", "../pixi.toml"]) {
+      expect(
+        materializeMakerDependency(
+          candidate(root, ["pixi", "lock", "--manifest-path", name]),
+          (path) => readFileSync(path, "utf8"),
+        )?.pypiNoBuild,
+      ).toBe(false);
+    }
   });
 
   test("reports policy-relevant unsafe facts instead of deciding", () => {

@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { parse } from "smol-toml";
 
 type MaterializerInput = {
   readonly command?: { readonly words?: unknown };
@@ -17,6 +18,7 @@ type DependencyOperation = {
   readonly duplicateOptionCount: number;
   readonly manager: string;
   readonly npmPrefixValid: boolean;
+  readonly pypiNoBuild: boolean;
   readonly optionCount: number;
   readonly options: Readonly<Record<string, OptionValue>>;
   readonly pathsWithinWorkspace: boolean;
@@ -153,6 +155,53 @@ function materializeOptions(
   };
 }
 
+type ReadManifest = (path: string) => string;
+
+function table(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function noBuild(options: unknown): boolean {
+  return table(options)["no-build"] === true;
+}
+
+function pixiNoBuild(
+  workspace: string,
+  workingDirectory: string,
+  manifestPath: OptionValue | undefined,
+  readManifest: ReadManifest,
+): boolean {
+  // Require an explicit manifest file: directory discovery and parent fallback must
+  // not select a different manifest than the one whose policy was checked.
+  if (typeof manifestPath !== "string") return false;
+  const path = resolve(workingDirectory, manifestPath);
+  if (!["pixi.toml", "pyproject.toml"].includes(basename(path))) return false;
+  if (!resolvesWithinWorkspace(workspace, workingDirectory, manifestPath)) return false;
+  try {
+    const parsed = parse(readManifest(path));
+    const manifest = basename(path) === "pyproject.toml" ? table(table(parsed.tool).pixi) : parsed;
+    if (!noBuild(manifest["pypi-options"])) return false;
+    const features = table(manifest.feature);
+    // Every environment excluding the default feature must include a feature
+    // that independently forbids all PyPI builds. True wins Pixi's option union.
+    return Object.values(table(manifest.environments)).every((environment) => {
+      if (Array.isArray(environment)) return true;
+      const settings = table(environment);
+      if (settings["no-default-feature"] !== true) return true;
+      return (
+        Array.isArray(settings.features) &&
+        settings.features.some(
+          (name) => typeof name === "string" && noBuild(table(features[name])["pypi-options"]),
+        )
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+
 function operationFacts(
   manager: string,
   command: string,
@@ -160,6 +209,7 @@ function operationFacts(
   positionalsValid: boolean,
   pathsWithinWorkspace: boolean,
   resource: string,
+  pypiNoBuild: boolean,
 ): DependencyOperation {
   return {
     command,
@@ -167,6 +217,7 @@ function operationFacts(
     manager,
     npmPrefixValid:
       manager !== "npm" || parsed.options.prefix === undefined || parsed.options.prefix === ".",
+    pypiNoBuild,
     optionCount: parsed.optionCount,
     options: parsed.options,
     pathsWithinWorkspace,
@@ -191,6 +242,7 @@ function materializeDependency(
   workspace: string,
   workingDirectory: string,
   words: readonly string[],
+  readManifest: ReadManifest,
 ): DependencyOperation | undefined {
   const command = words[1];
   if (!command) return undefined;
@@ -208,6 +260,8 @@ function materializeDependency(
     validPositionals(manager, command, parsed.positionals, settings.positionalPattern(command)),
     optionPaths.every((path) => resolvesWithinWorkspace(workspace, workingDirectory, path)),
     workspace,
+    manager !== "pixi" ||
+      pixiNoBuild(workspace, workingDirectory, parsed.options.manifestPath, readManifest),
   );
 }
 
@@ -241,7 +295,10 @@ const dependencyManagerSettings: Readonly<Record<DependencyManager, DependencyMa
   },
 };
 
-export function materializeMakerDependency(candidate: unknown): DependencyOperation | undefined {
+export function materializeMakerDependency(
+  candidate: unknown,
+  readManifest: ReadManifest = (path) => Deno.readTextFileSync(path),
+): DependencyOperation | undefined {
   const value = input(candidate);
   const words = value.command?.words;
   if (
@@ -263,6 +320,7 @@ export function materializeMakerDependency(candidate: unknown): DependencyOperat
     value.resource,
     value.workingDirectory,
     words,
+    readManifest,
   );
 }
 

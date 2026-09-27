@@ -19,7 +19,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "b94919c42b39d1d98d58533f9bc61b53ceb8385e2f8c048efca1d013ebc66e47",
+    "integrity": "551af5f53d7c3e169ce388103bca1ba4fb6b2cde74e7adea91272d970c15415e",
     "language": "typescript",
     "permissions": {
       "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
@@ -30,13 +30,22 @@
       "run": [],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
+    "dependencies": {
+      "directory": "materializers/dependencies/toml",
+      "packageJson": "package.json",
+      "packageJsonIntegrity": "2ba437edaac5bd45c9349e14581b5eebbeedd02cb1fa743fb50303cf97df7f27",
+      "denoLock": "deno.lock",
+      "denoLockIntegrity": "c1740658959770d0e4a6c1f4e2a9d72f5b7a3fc65e00c218ede6c5b8e87cb8b1"
+    }
   },
   "sessionContext": [
     "Prefer established packages with multiple maintainers and recent updates.",
     "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
     "Keep dependency changes narrow; explain package and lockfile changes.",
-    "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace."
+    "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace.",
+    "Before Pixi operations, persist no-build = true in [tool.pixi.pypi-options] in pyproject.toml (or [pypi-options] in pixi.toml). For every environment with no-default-feature = true, also set it on an included feature. Use an explicit --manifest-path to that file; directory discovery is not authorized.",
+    "When using uv, encourage persisting [tool.uv] no-build = true in pyproject.toml; keep --no-build on every Maker command because --no-config ignores persisted settings. Never weaken no-build to resolve an unavailable wheel; report the package requiring a source build."
   ],
   "groupings": [
     {
@@ -86,7 +95,7 @@
           "  context.materialized.optionCount == 4 && context.materialized.duplicateOptionCount == 0 &&",
           "  context.materialized.unknownOptionCount == 0 && context.materialized.pathsWithinWorkspace &&",
           "  context.materialized.positionalsValid && context.materialized.options.noConfig &&",
-          "  context.materialized.options.noInstall && context.materialized.options.offline",
+          "  context.materialized.pypiNoBuild && context.materialized.options.noInstall && context.materialized.options.offline",
           "};"
         ]
       }
