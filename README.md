@@ -51,6 +51,8 @@ The bundled templates are a starting point, not active policy:
 - `Maker` scopes lockfile-oriented dependency work to one workspace.
 - `pulumi-preview`, `pulumi-up`, and `pulumi-refresh` are local templates for one
   workspace, stack, and backend URI.
+- `kubernetes-diagnostics` scopes read-only deployment, pod, event, and node
+  diagnostics to an explicit cluster context and namespace.
 
 ## Policy repository
 
@@ -159,6 +161,17 @@ The operations are `login <backend>`, `stack history --stack <stack>`, and
 `gs://`, `s3://`, `azblob://`, `https://`, or `file://` without credentials in
 the URI. These are disabled, local templates; copy and review one in your own
 policy repository before promotion.
+Kubernetes diagnostics activation requires
+`{"cluster":"cluster-context","namespace":"workloads","allowClusterWideNodes":false}`.
+Set `allowClusterWideNodes` to `true` only when cluster-wide node inspection is
+intended. The node target is separate from the namespace target. Allowed
+commands use the exact prefix
+`kubectl --context <cluster> --namespace <namespace>` followed by one of
+`rollout status deployment/<name>`, `get deployments -o=wide`,
+`get pods -o=wide`, `describe pod <name>`, or
+`get events --field-selector=reason=FailedScheduling`. With the node grant,
+`get nodes -o=wide` and `describe node <name>` are also allowed. Secret reads,
+other resources, shell composition, and mutations abstain.
 The Activation Materializer validates those arguments and freezes its targets
 into the thread binding. Promotion reviews reusable rules and materializer
 code; it does not choose a target.
