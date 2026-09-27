@@ -126,6 +126,39 @@ describe("Maker dependency request materializer", () => {
     ).toBe(expected);
   });
 
+  test("checks no-build on features that replace the default environment", () => {
+    const root = workspace();
+    const words = ["pixi", "lock", "--manifest-path", "pixi.toml"];
+    for (const [setting, expected] of [
+      ["true", true],
+      ["false", false],
+    ] as const) {
+      writeFileSync(
+        join(root, "pixi.toml"),
+        `[pypi-options]
+no-build = true
+[feature.ci.pypi-options]
+no-build = ${setting}
+[environments.ci]
+no-default-feature = true
+features = ["ci"]
+`,
+      );
+      expect(
+        materializeMakerDependency(candidate(root, words), (path) => readFileSync(path, "utf8"))
+          ?.pypiNoBuild,
+      ).toBe(expected);
+    }
+  });
+
+  test("fails closed if the runtime manifest reader is unavailable", () => {
+    const root = workspace();
+    expect(
+      materializeMakerDependency(candidate(root, ["pixi", "lock", "--manifest-path", "pixi.toml"]))
+        ?.pypiNoBuild,
+    ).toBe(false);
+  });
+
   test("rejects missing, directory-discovered, and escaped manifests", () => {
     const root = workspace();
     const outside = workspace();
