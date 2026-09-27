@@ -36,19 +36,19 @@ function materializerReference(file: string, source: string) {
   const dependencies = isRequest
     ? {
         denoLock: "deno.lock",
-        denoLockIntegrity: "aca6e0be73c277546f14128673fcf485919e507ca8e5a55bfde76d348bdf5670",
+        denoLockIntegrity: "e82b7eac91b4a02a603131271f3f53812cfe02fd9f8f07912abfe6d5e79a98b6",
         directory: "materializers/dependencies/graphql",
         packageJson: "package.json",
-        packageJsonIntegrity: "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177",
+        packageJsonIntegrity: "7c3d48d0f143210457a15867e1fb0eca1dd70b09cc42d2c8d60518fe97338525",
       }
     : undefined;
   return {
     ...(dependencies ? { dependencies } : {}),
     file,
-    integrity: materializerIntegrity(source, permissions, "2.8.1", dependencies),
+    integrity: materializerIntegrity(source, permissions, "2.9.6", dependencies),
     language: "typescript" as const,
     permissions,
-    runtimeVersion: "2.8.1",
+    runtimeVersion: "2.9.6",
   };
 }
 

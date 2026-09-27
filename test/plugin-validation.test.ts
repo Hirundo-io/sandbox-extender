@@ -20,10 +20,10 @@ const emptyPermissions = {
 function requestMaterializerReference(file = "materializers/requests/repository.ts") {
   return {
     file,
-    integrity: materializerIntegrity("", emptyPermissions, "2.8.1"),
+    integrity: materializerIntegrity("", emptyPermissions, "2.9.6"),
     language: "typescript",
     permissions: emptyPermissions,
-    runtimeVersion: "2.8.1",
+    runtimeVersion: "2.9.6",
   } as const;
 }
 
@@ -42,10 +42,10 @@ function dependencyRequestMaterializerReference(packageJson: string, denoLock: s
   return {
     dependencies,
     file: "materializers/requests/repository.ts",
-    integrity: materializerIntegrity("", emptyPermissions, "2.8.1", dependencies),
+    integrity: materializerIntegrity("", emptyPermissions, "2.9.6", dependencies),
     language: "typescript",
     permissions: emptyPermissions,
-    runtimeVersion: "2.8.1",
+    runtimeVersion: "2.9.6",
   } as const;
 }
 

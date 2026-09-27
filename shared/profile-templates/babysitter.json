@@ -4,7 +4,7 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/github-pull-request.ts",
-    "integrity": "4587f30488e8d12835518c58ec6ea5d3877f44c7e9a5527d738b3c019a6ee160",
+    "integrity": "fca8777e3083e6e1802d88c4785c4e5d02a2dfbbd610ff10a08a6d3bb582fa44",
     "language": "typescript",
     "permissions": {
       "read": [],
@@ -15,7 +15,7 @@
       "run": ["gh"],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.9.6"
   },
   "targetScope": "single",
   "requestMaterializer": {
@@ -23,11 +23,11 @@
       "directory": "materializers/dependencies/graphql",
       "packageJson": "package.json",
       "denoLock": "deno.lock",
-      "denoLockIntegrity": "aca6e0be73c277546f14128673fcf485919e507ca8e5a55bfde76d348bdf5670",
-      "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
+      "denoLockIntegrity": "e82b7eac91b4a02a603131271f3f53812cfe02fd9f8f07912abfe6d5e79a98b6",
+      "packageJsonIntegrity": "7c3d48d0f143210457a15867e1fb0eca1dd70b09cc42d2c8d60518fe97338525"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "e5e1aacce51575c3c2f72328250c83a97f77408035ce74303a342a83b6900af3",
+    "integrity": "f7bfafe88026557d86691b1d22d088f80bded54d220527046e2f07eb89d9a93e",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -38,7 +38,7 @@
       "run": ["gh"],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.9.6"
   },
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",

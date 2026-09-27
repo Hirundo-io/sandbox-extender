@@ -1,5 +1,5 @@
 {
   "dependencies": {
-    "graphql": "npm:graphql@16.14.2"
+    "graphql": "npm:graphql@17.0.2"
   }
 }
