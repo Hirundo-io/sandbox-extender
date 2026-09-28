@@ -105,6 +105,28 @@ describe("materializer runtime", () => {
     ).toEqual({ targets: ["github:pull-request:acme/example#42"] });
   });
 
+  test("omits optional workspace reads only for activation without workspace arguments", () => {
+    const permissions = { ...noPermissions, read: [activationWorkspacePermission] };
+    const materializer = activationMaterializer(activationSource, permissions);
+    const arguments_ = { repository: "acme/example", pullRequest: 42 };
+    expect(materializeActivation(materializer, arguments_)).toEqual({
+      targets: ["github:pull-request:acme/example#42"],
+    });
+    for (const workspace of [null, 42, "relative"]) {
+      expect(materializeActivation(materializer, { ...arguments_, workspace })).toBeUndefined();
+    }
+    expect(
+      materializeActivation(materializer, {
+        ...arguments_,
+        workspace: process.cwd(),
+        workingDirectory: "/different",
+      }),
+    ).toBeUndefined();
+    expect(
+      materializeRequest(requestMaterializer(requestSource, permissions), request(), process.cwd()),
+    ).toBeUndefined();
+  });
+
   test("uses the actual request working directory", () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "materializer-cwd-"));
     try {

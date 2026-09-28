@@ -98,6 +98,7 @@ function executeMaterializer(
   requestResource: string | undefined,
   options: MaterializerRuntimeOptions,
   activationWorkspace?: unknown,
+  activationInvocation = false,
 ): unknown {
   if (!materializer.reviewedSource) throw new Error("materializer source was not reviewed");
   verifyMaterializerIntegrity(materializer, materializer.reviewedSource);
@@ -165,6 +166,7 @@ function executeMaterializer(
           workingDirectory,
           requestResource,
           activationWorkspace,
+          activationInvocation,
         ),
         artifact,
       ],
@@ -229,6 +231,7 @@ export function materializeActivation(
     arguments_.workspace !== undefined &&
     arguments_.workingDirectory !== undefined &&
     arguments_.workspace !== arguments_.workingDirectory;
+  if (conflictingWorkspace) return undefined;
   try {
     return activationResult(
       executeMaterializer(
@@ -237,7 +240,8 @@ export function materializeActivation(
         workingDirectory,
         undefined,
         options,
-        conflictingWorkspace ? undefined : (arguments_.workspace ?? arguments_.workingDirectory),
+        arguments_.workspace !== undefined ? arguments_.workspace : arguments_.workingDirectory,
+        true,
       ),
     );
   } catch {

@@ -47,8 +47,10 @@ function resolvedPermissions(
   workingDirectory: string,
   requestResource: string | undefined,
   activationWorkspace: unknown,
+  activationInvocation: boolean,
 ): readonly string[] {
   if (value === activationWorkspacePermission) {
+    if (activationWorkspace === undefined && activationInvocation) return [];
     if (typeof activationWorkspace !== "string" || !isAbsolute(activationWorkspace))
       throw new Error(
         "activation workspace read permission requires an absolute workspace argument",
@@ -126,6 +128,7 @@ export function denoPermissionFlags(
   workingDirectory: string,
   requestResource?: string,
   activationWorkspace?: unknown,
+  activationInvocation = false,
 ): string[] {
   const usesRequestResource = permissionNames.some((name) =>
     permissions[name].includes(requestResourcePermission),
@@ -144,9 +147,13 @@ export function denoPermissionFlags(
     permissions[name].flatMap((value) => {
       if (value === activationWorkspacePermission && name !== "read")
         throw new Error("activation workspace permissions are read-only");
-      return resolvedPermissions(value, workingDirectory, requestResource, activationWorkspace).map(
-        (resolved) => `--allow-${name}=${resolved}`,
-      );
+      return resolvedPermissions(
+        value,
+        workingDirectory,
+        requestResource,
+        activationWorkspace,
+        activationInvocation,
+      ).map((resolved) => `--allow-${name}=${resolved}`);
     }),
   );
 }
