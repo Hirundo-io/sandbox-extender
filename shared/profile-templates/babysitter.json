@@ -27,7 +27,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "27b33c715f2e86e69d5ff3647c7a4785de9dab084983f6b115b4c059b0fd40ea",
+    "integrity": "e8297a9ff7f1073413f59ddbeb3de6e74502ea75936bff6494a8c7ea7428602e",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],

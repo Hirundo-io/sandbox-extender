@@ -605,7 +605,8 @@ function replyBodyIsIdentified(
   bodyField: string,
   readTextFile: ReadTextFile,
 ): boolean {
-  if (bodyFlag === "-f") return identifiedReplyBody(bodyField.slice("body=".length));
+  if (bodyFlag === "-f")
+    return bodyField.startsWith("body=") && identifiedReplyBody(bodyField.slice("body=".length));
   if (bodyFlag !== "-F" || !/^body=@[^/\\]+$/.test(bodyField)) return false;
   try {
     return identifiedReplyBody(readTextFile(bodyField.slice("body=@".length)));
