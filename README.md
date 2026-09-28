@@ -53,11 +53,20 @@ The bundled templates are a starting point, not active policy:
 - `Babysitter` scopes pull-request and CI inspection to one pull request.
 - `Scout` supports read-only repository inspection for explicit targets.
 - `Maker` scopes lockfile-oriented dependency work to one workspace.
+  Activation with `{ "workspace": "/canonical/repository", "push": true }` also
+  grants `git push origin HEAD:refs/heads/<activated-branch>` from that root.
+  It freezes the effective GitHub origin URL, branch, and repository hook directory.
+  Review repository hooks before opting in: activation trusts those hooks. Global
+  or external hook directories, extra refs, force pushes, tags, and submodule pushes
+  are unsupported. Changing the remote, branch, or hook directory requires
+  reactivation. Omit `push` for dependency-only work, including non-Git workspaces.
   Pixi operations require an explicit `--manifest-path pixi.toml` or
   `--manifest-path pyproject.toml`, alongside `--no-install --offline --no-config`.
-  Set `no-build = true` in `[pypi-options]` or `[tool.pixi.pypi-options]`, respectively.
-  Every environment excluding the default feature must include a feature with its
-  own blanket `no-build = true`. Maker parses the selected manifest and rejects
+  Set `no-build = true` in `[workspace.pypi-options]` or
+  `[tool.pixi.workspace.pypi-options]`, respectively, to cover every environment.
+  The default-feature `[pypi-options]` and `[tool.pixi.pypi-options]` forms also work,
+  but environments excluding the default feature then need an included feature
+  with its own blanket `no-build = true`. Maker parses the selected manifest and rejects
   missing, false, per-package, malformed, or out-of-workspace settings.
   For uv, persist `[tool.uv] no-build = true` in `pyproject.toml` and retain the
   required `--no-build` flag: Maker's `--no-config` means configuration alone is

@@ -39,7 +39,7 @@ const materializerReferenceShape = {
 };
 export const activationMaterializerSchema = z
   .object({
-    file: z.string().regex(/^materializers\/activation\/[a-z0-9-]+\.ts$/),
+    file: z.string().regex(/^materializers\/(?:activation|requests)\/[a-z0-9-]+\.ts$/),
     ...materializerReferenceShape,
   })
   .strict();

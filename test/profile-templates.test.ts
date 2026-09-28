@@ -10,6 +10,7 @@ import {
   reviewThreadsQuery,
 } from "../shared/materializers/requests/github-pull-request.js";
 import { materializeMakerDependency } from "../shared/materializers/requests/maker-dependency.js";
+import { materializeActivation } from "../src/materializer-runtime.js";
 import { runFixtureGit } from "./git-fixture.js";
 
 const sharedDirectory = join(process.cwd(), "shared");
@@ -78,10 +79,15 @@ describe("shipped Profile templates", () => {
       read: ["$WORKING_DIRECTORY"],
       run: ["gh"],
     });
-    expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(maker.activationMaterializer?.permissions).toEqual({
+      ...emptyPermissions,
+      read: ["$WORKING_DIRECTORY"],
+      run: ["git"],
+    });
     expect(maker.requestMaterializer?.permissions).toEqual({
       ...emptyPermissions,
       read: ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
+      run: ["git"],
     });
     expect(scout.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(scout.requestMaterializer?.permissions).toEqual({ ...emptyPermissions, run: ["git"] });
@@ -319,6 +325,127 @@ describe("shipped Profile templates", () => {
     }
   }, 20_000);
 
+  test("Maker binds opt-in pushes to the activated repository, ref, and reviewed hooks", async () => {
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "maker-push-")));
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "maker-push-outside-")));
+    try {
+      runGit(workspace, "init", "--initial-branch=feature");
+      runGit(workspace, "remote", "add", "origin", "https://github.com/acme/example.git");
+      const profile = await profileTemplate("maker");
+      const activation = materializeActivation(
+        profile.activationMaterializer!,
+        { workspace, push: true },
+        workspace,
+      );
+      expect(activation?.targets).toHaveLength(2);
+      const core = new PolicyCore();
+      core.activate({ ...profile, allowedTargets: new Set(activation!.targets) }, "thread-1");
+      const decision = async (command: string, resource = workspace) =>
+        (
+          await core.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command, workdir: resource },
+            resource,
+            threadId: "thread-1",
+          })
+        ).decision;
+      const push = "git push origin HEAD:refs/heads/feature";
+      expect(await decision(push)).toBe("allow");
+      for (const command of [
+        "git push",
+        "git push origin",
+        "git push origin HEAD:refs/heads/main",
+        "git push other HEAD:refs/heads/feature",
+        "git push origin +HEAD:refs/heads/feature",
+        `${push} --force`,
+        `${push} --no-verify`,
+        `${push} --tags`,
+        "git -C . push origin HEAD:refs/heads/feature",
+      ])
+        expect(await decision(command)).toBe("abstain");
+      const dependenciesOnly = materializeActivation(
+        profile.activationMaterializer!,
+        { workspace },
+        workspace,
+      );
+      const dependencyCore = new PolicyCore();
+      dependencyCore.activate(
+        { ...profile, allowedTargets: new Set(dependenciesOnly!.targets) },
+        "thread-1",
+      );
+      expect(
+        (
+          await dependencyCore.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command: push, workdir: workspace },
+            resource: workspace,
+            threadId: "thread-1",
+          })
+        ).decision,
+      ).toBe("abstain");
+      runGit(workspace, "remote", "set-url", "origin", "https://github.com/acme/other.git");
+      expect(await decision(push)).toBe("abstain");
+      runGit(workspace, "remote", "set-url", "origin", "https://github.com/acme/example.git");
+      runGit(workspace, "symbolic-ref", "HEAD", "refs/heads/other");
+      expect(await decision("git push origin HEAD:refs/heads/other")).toBe("abstain");
+      runGit(workspace, "symbolic-ref", "HEAD", "refs/heads/feature");
+      for (const [key, value] of [
+        ["remote.origin.mirror", "true"],
+        ["push.followTags", "true"],
+        ["push.recurseSubmodules", "on-demand"],
+        ["remote.origin.receivepack", "evil"],
+        ["push.pushOption", "evil"],
+      ]) {
+        runGit(workspace, "config", key!, value!);
+        expect(await decision(push)).toBe("abstain");
+        runGit(workspace, "config", "--unset", key!);
+      }
+      await mkdir(join(workspace, ".githooks"));
+      runGit(workspace, "config", "core.hooksPath", ".githooks");
+      expect(await decision(push)).toBe("abstain");
+      const withHooks = materializeActivation(
+        profile.activationMaterializer!,
+        { workspace, push: true },
+        workspace,
+      );
+      expect(withHooks?.targets).toHaveLength(2);
+      const hooksCore = new PolicyCore();
+      hooksCore.activate({ ...profile, allowedTargets: new Set(withHooks!.targets) }, "thread-1");
+      expect(
+        (
+          await hooksCore.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command: push, workdir: workspace },
+            resource: workspace,
+            threadId: "thread-1",
+          })
+        ).decision,
+      ).toBe("allow");
+      runGit(workspace, "config", "core.hooksPath", outside);
+      expect(
+        materializeActivation(
+          profile.activationMaterializer!,
+          { workspace, push: true },
+          workspace,
+        ),
+      ).toBeUndefined();
+      runGit(workspace, "config", "core.hooksPath", ".githooks");
+      await writeFile(join(outside, "pre-push"), "#!/bin/sh\nexit 0\n");
+      await symlink(join(outside, "pre-push"), join(workspace, ".githooks", "pre-push"));
+      expect(
+        materializeActivation(
+          profile.activationMaterializer!,
+          { workspace, push: true },
+          workspace,
+        ),
+      ).toBeUndefined();
+      expect(await decision(push, outside)).toBe("abstain");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test("Maker requires effective PyPI no-build in the selected manifest", async () => {
     const workspace = await realpath(await mkdtemp(join(tmpdir(), "maker-no-build-")));
     try {
@@ -329,6 +456,15 @@ describe("shipped Profile templates", () => {
       );
       for (const [manifest, decision] of [
         ["[pypi-options]\nno-build = true\n", "allow"],
+        [
+          "[workspace.pypi-options]\nno-build=true\n[environments.ci]\nno-default-feature=true\nfeatures=[]",
+          "allow",
+        ],
+        ["environments=false\n[pypi-options]\nno-build=true", "abstain"],
+        [
+          "[pypi-options]\nno-build=true\n[environments]\nci={features=['ci'], no-default-feature='true'}",
+          "abstain",
+        ],
         ["[pypi-options]\nno-build = false\n", "abstain"],
         ["[pypi-options]\nno-build = ['requests']\n", "abstain"],
         [

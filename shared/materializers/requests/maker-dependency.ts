@@ -157,10 +157,12 @@ function materializeOptions(
 
 type ReadManifest = (path: string) => string;
 
+function isTable(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function table(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return isTable(value) ? value : {};
 }
 
 function noBuild(options: unknown): boolean {
@@ -182,19 +184,30 @@ function pixiNoBuild(
   try {
     const parsed = parse(readManifest(path));
     const manifest = basename(path) === "pyproject.toml" ? table(table(parsed.tool).pixi) : parsed;
-    if (!noBuild(manifest["pypi-options"])) return false;
+    const workspaceNoBuild = noBuild(table(manifest.workspace)["pypi-options"]);
+    const defaultNoBuild = noBuild(manifest["pypi-options"]);
+    if (!workspaceNoBuild && !defaultNoBuild) return false;
+    const environments = manifest.environments;
+    if (environments !== undefined && !isTable(environments)) return false;
     const features = table(manifest.feature);
-    // Every environment excluding the default feature must include a feature
-    // that independently forbids all PyPI builds. True wins Pixi's option union.
-    return Object.values(table(manifest.environments)).every((environment) => {
-      if (Array.isArray(environment)) return true;
+    return Object.values(table(environments)).every((environment) => {
+      if (Array.isArray(environment)) return environment.every((name) => typeof name === "string");
+      if (!isTable(environment)) return false;
       const settings = table(environment);
-      if (settings["no-default-feature"] !== true) return true;
+      const excludesDefault = settings["no-default-feature"];
+      if (excludesDefault !== undefined && typeof excludesDefault !== "boolean") return false;
+      const includedFeatures = settings.features ?? [];
+      if (
+        !Array.isArray(includedFeatures) ||
+        !includedFeatures.every((name) => typeof name === "string")
+      )
+        return false;
+      // Workspace options apply even without the default feature. Blanket true
+      // wins Pixi's no-build union when any included feature supplies it.
       return (
-        Array.isArray(settings.features) &&
-        settings.features.some(
-          (name) => typeof name === "string" && noBuild(table(features[name])["pypi-options"]),
-        )
+        workspaceNoBuild ||
+        excludesDefault !== true ||
+        includedFeatures.some((name) => noBuild(table(features[name])["pypi-options"]))
       );
     });
   } catch {
@@ -335,5 +348,159 @@ export async function runMakerDependencyMaterializer(
   return true;
 }
 
+type GitRead = (workspace: string, args: readonly string[]) => string | undefined;
+
+function readGit(workspace: string, args: readonly string[]): string | undefined {
+  const result = new Deno.Command("git", {
+    args: ["-C", workspace, ...args],
+    stdout: "piped",
+    stderr: "null",
+  }).outputSync();
+  if (!result.success && result.code !== 1) throw new Error("Git metadata lookup failed");
+  return result.success ? new TextDecoder().decode(result.stdout).trim() : undefined;
+}
+
+function repositoryHooks(workspace: string, git: GitRead): string | undefined {
+  const configured = git(workspace, ["config", "--show-scope", "--get", "core.hooksPath"]);
+  let hooks: string | undefined;
+  if (configured !== undefined) {
+    const match = /^(?:local|worktree)\t([^\n]+)$/.exec(configured);
+    if (!match) return undefined;
+    hooks = match[1];
+  } else {
+    hooks = git(workspace, ["rev-parse", "--git-path", "hooks"]);
+  }
+  if (
+    !hooks ||
+    !resolvesWithinWorkspace(workspace, workspace, hooks) ||
+    !resolvesWithinWorkspace(workspace, workspace, resolve(workspace, hooks, "pre-push"))
+  )
+    return undefined;
+  return resolve(workspace, hooks);
+}
+
+function makerPushGrant(
+  workspace: string,
+  git: GitRead,
+): { target: string; branch: string } | undefined {
+  if (git(workspace, ["rev-parse", "--show-toplevel"]) !== workspace) return undefined;
+  const branch = git(workspace, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  if (!branch || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch)) return undefined;
+  if (git(workspace, ["check-ref-format", `refs/heads/${branch}`]) !== "") return undefined;
+  const url = git(workspace, ["remote", "get-url", "--push", "--all", "origin"]);
+  if (
+    !url ||
+    !/^(?:https:\/\/github\.com\/|git@github\.com:)[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/.test(
+      url,
+    )
+  )
+    return undefined;
+  // These options can add refs, recurse into other repositories, or select
+  // executable transports despite an explicit remote and refspec.
+  for (const key of [
+    "remote.origin.mirror",
+    "push.followTags",
+    "push.recurseSubmodules",
+    "push.gpgSign",
+  ]) {
+    const value = git(workspace, ["config", "--get-all", key]);
+    if (value !== undefined && value !== "false" && value !== "no") return undefined;
+  }
+  for (const key of [
+    "remote.origin.receivepack",
+    "remote.origin.vcs",
+    "push.pushOption",
+    "core.sshCommand",
+    "core.gitProxy",
+    "remote.origin.proxy",
+  ]) {
+    if (git(workspace, ["config", "--get-all", key]) !== undefined) return undefined;
+  }
+  const hooks = repositoryHooks(workspace, git);
+  if (!hooks) return undefined;
+  return { branch, target: `maker:push:${JSON.stringify([workspace, url, branch, hooks])}` };
+}
+
+export function materializeMakerActivation(
+  candidate: unknown,
+  git: GitRead = readGit,
+): readonly string[] | undefined {
+  if (
+    !isTable(candidate) ||
+    typeof candidate.workspace !== "string" ||
+    !isAbsolute(candidate.workspace)
+  )
+    return undefined;
+  if (candidate.push !== undefined && typeof candidate.push !== "boolean") return undefined;
+  try {
+    const workspace = realpathSync(candidate.workspace);
+    if (candidate.push !== true) return [workspace];
+    const grant = makerPushGrant(workspace, git);
+    return grant ? [workspace, grant.target] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function materializeMakerPush(
+  candidate: unknown,
+  git: GitRead,
+): { operation: string; resource: string } | undefined {
+  const value = input(candidate);
+  const words = value.command?.words;
+  if (
+    typeof value.resource !== "string" ||
+    !isAbsolute(value.resource) ||
+    typeof value.workingDirectory !== "string" ||
+    !Array.isArray(words)
+  )
+    return undefined;
+  try {
+    const workspace = realpathSync(value.resource);
+    if (workspace !== value.resource || realpathSync(value.workingDirectory) !== workspace)
+      return undefined;
+    const grant = makerPushGrant(workspace, git);
+    return grant &&
+      words.length === 4 &&
+      words[0] === "git" &&
+      words[1] === "push" &&
+      words[2] === "origin" &&
+      words[3] === `HEAD:refs/heads/${grant.branch}`
+      ? { operation: "git.push", resource: grant.target }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function materializeMakerRequest(
+  candidate: unknown,
+  git: GitRead = readGit,
+  readManifest: ReadManifest = (path) => Deno.readTextFileSync(path),
+) {
+  const words = input(candidate).command?.words;
+  return Array.isArray(words) && words[0] === "git"
+    ? materializeMakerPush(candidate, git)
+    : materializeMakerDependency(candidate, readManifest);
+}
+
+export async function runMakerMaterializer(
+  candidate: Promise<unknown>,
+  write: (value: string) => void = console.log,
+): Promise<boolean> {
+  const value = await candidate;
+  if (isTable(value) && Object.hasOwn(value, "workspace")) {
+    const targets = materializeMakerActivation(value);
+    if (!targets) return false;
+    write(JSON.stringify({ targets }));
+    return true;
+  }
+  const materialized = materializeMakerRequest(value);
+  if (!materialized) return false;
+  const { resource, ...context } = materialized;
+  write(JSON.stringify({ context, resource }));
+  return true;
+}
+
 // prettier-ignore
-void (import.meta.main && Deno.exit((await runMakerDependencyMaterializer(new Response(Deno.stdin.readable).json())) ? 0 : 1));
+void (import.meta.main && Deno.exit((await runMakerMaterializer(new Response(Deno.stdin.readable).json())) ? 0 : 1));

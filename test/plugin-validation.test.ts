@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { materializerIntegrity } from "../src/materializer-policy.js";
+import { activationMaterializerSchema } from "../src/schemas.js";
 import { validatePlugin } from "../src/plugin-validation.js";
 
 const emptyPermissions = {
@@ -248,4 +249,24 @@ describe("plugin validation", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+});
+
+test("activation can reuse reviewed request sources without accepting arbitrary paths", () => {
+  for (const file of [
+    "materializers/activation/local-workspace.ts",
+    "materializers/requests/maker-dependency.ts",
+  ])
+    expect(activationMaterializerSchema.safeParse(requestMaterializerReference(file)).success).toBe(
+      true,
+    );
+  for (const file of [
+    "materializers/requests/../evil.ts",
+    "materializers/requests/nested/evil.ts",
+    "/tmp/evil.ts",
+    "materializers/requests/maker-dependency.js",
+    "materializers/dependencies/evil.ts",
+  ])
+    expect(activationMaterializerSchema.safeParse(requestMaterializerReference(file)).success).toBe(
+      false,
+    );
 });

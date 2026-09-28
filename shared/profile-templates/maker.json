@@ -3,23 +3,30 @@
   "policyRevision": "pending-review",
   "allowedTargets": [],
   "activationMaterializer": {
-    "file": "materializers/activation/local-workspace.ts",
-    "integrity": "01121fc3fa30380f7af79f36779428c6cc7d64620e43e549d42e17dfbf4beb35",
+    "file": "materializers/requests/maker-dependency.ts",
+    "integrity": "2bf6a699b14b895517662bdfe27f88ee8f9dc7220d731da547faff6248602986",
     "language": "typescript",
     "permissions": {
-      "read": [],
+      "read": ["$WORKING_DIRECTORY"],
       "write": [],
       "env": [],
       "net": [],
       "sys": [],
-      "run": [],
+      "run": ["git"],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
+    "dependencies": {
+      "directory": "materializers/dependencies/toml",
+      "packageJson": "package.json",
+      "packageJsonIntegrity": "2ba437edaac5bd45c9349e14581b5eebbeedd02cb1fa743fb50303cf97df7f27",
+      "denoLock": "deno.lock",
+      "denoLockIntegrity": "c1740658959770d0e4a6c1f4e2a9d72f5b7a3fc65e00c218ede6c5b8e87cb8b1"
+    }
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "551af5f53d7c3e169ce388103bca1ba4fb6b2cde74e7adea91272d970c15415e",
+    "integrity": "6e3feda0d2dfd93d4ee083fd64923127ab4959fe00327873ecf3e2a76f0bd2ff",
     "language": "typescript",
     "permissions": {
       "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
@@ -27,7 +34,7 @@
       "env": [],
       "net": [],
       "sys": [],
-      "run": [],
+      "run": ["git"],
       "ffi": []
     },
     "runtimeVersion": "2.8.1",
@@ -44,8 +51,9 @@
     "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
     "Keep dependency changes narrow; explain package and lockfile changes.",
     "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace.",
-    "Before Pixi operations, persist no-build = true in [tool.pixi.pypi-options] in pyproject.toml (or [pypi-options] in pixi.toml). For every environment with no-default-feature = true, also set it on an included feature. Use an explicit --manifest-path to that file; directory discovery is not authorized.",
-    "When using uv, encourage persisting [tool.uv] no-build = true in pyproject.toml; keep --no-build on every Maker command because --no-config ignores persisted settings. Never weaken no-build to resolve an unavailable wheel; report the package requiring a source build."
+    "Before Pixi operations, persist no-build = true in [tool.pixi.workspace.pypi-options] in pyproject.toml (or [workspace.pypi-options] in pixi.toml). Default-feature pypi-options also work, but every environment with no-default-feature = true then needs it on an included feature. Use an explicit --manifest-path to that file; directory discovery is not authorized.",
+    "When using uv, encourage persisting [tool.uv] no-build = true in pyproject.toml; keep --no-build on every Maker command because --no-config ignores persisted settings. Never weaken no-build to resolve an unavailable wheel; report the package requiring a source build.",
+    "Git pushes require explicit activation with push: true from the canonical repository root. This freezes the origin GitHub URL, current branch, and repository hook directory. Use only git push origin HEAD:refs/heads/<activated-branch> from that root. Activation trusts reviewed repository hooks; review them before activation. Global or external hook directories are not included in that trust. Remote, branch, or hook-directory changes require reactivation."
   ],
   "groupings": [
     {
@@ -97,6 +105,15 @@
           "  context.materialized.positionalsValid && context.materialized.options.noConfig &&",
           "  context.materialized.pypiNoBuild && context.materialized.options.noInstall && context.materialized.options.offline",
           "};"
+        ]
+      }
+    },
+    {
+      "id": "git-push",
+      "policies": {
+        "allowBoundPush": [
+          "permit(principal, action, resource)",
+          "when { context.materialized.operation == \"git.push\" };"
         ]
       }
     }
