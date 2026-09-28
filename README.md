@@ -229,6 +229,10 @@ with `gh pr view --json number,url,headRefName,headRefOid` and can additionally
 freeze a Git mutation target. The
 [`shared/profile-templates/babysitter.json`](shared/profile-templates/babysitter.json)
 template declares the permissions and integrity digest for both phases.
+Activation grants read access to the explicit canonical workspace with
+`$ACTIVATION_WORKSPACE`, even when the policy repository is elsewhere. The
+placeholder grants no workspace access for explicit repository/PR activation and
+is unavailable to request materializers.
 
 The Git target binds the canonical workspace, PR, branch, remote and URL, and
 repository-local hook directory with its recursive contents and file modes.

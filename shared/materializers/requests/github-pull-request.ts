@@ -1456,14 +1456,23 @@ export function materializeBabysitterActivation(
   }
   if (typeof value.workingDirectory !== "string" || !isAbsolute(value.workingDirectory))
     return undefined;
+  let previousDirectory: string | undefined;
   try {
-    if (realpathSync(value.workingDirectory) !== realpathSync(Deno.cwd())) return undefined;
+    const workspace = realpathSync(value.workingDirectory);
+    if (workspace !== resolve(value.workingDirectory)) return undefined;
+    const currentDirectory = Deno.cwd();
+    if (workspace !== realpathSync(currentDirectory)) {
+      Deno.chdir(workspace);
+      previousDirectory = currentDirectory;
+    }
     const pullRequest = lookup();
     if (!pullRequest) return undefined;
     const mutation = grant(pullRequest);
     return mutation ? [pullRequest.resource, mutation] : [pullRequest.resource];
   } catch {
     return undefined;
+  } finally {
+    if (previousDirectory !== undefined) Deno.chdir(previousDirectory);
   }
 }
 
