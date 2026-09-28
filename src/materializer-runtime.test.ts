@@ -133,6 +133,18 @@ describe("materializer runtime", () => {
     ).toBeUndefined();
   });
 
+  test("preserves the request discriminator when no shell command is supplied", () => {
+    const source = [
+      "const input = await new Response(Deno.stdin.readable).json();",
+      "if (!(\"command\" in input)) { new Deno.Command('printf', {args: ['activation']}).outputSync(); Deno.exit(1); }",
+      "console.log(JSON.stringify({resource: input.resource, context: {command: input.command}}));",
+    ].join("\n");
+    expect(materializeRequest(requestMaterializer(source), request(), process.cwd())).toEqual({
+      resource: "/work",
+      context: { command: null },
+    });
+  });
+
   test("uses the actual request working directory", () => {
     const workingDirectory = mkdtempSync(join(tmpdir(), "materializer-cwd-"));
     try {
@@ -281,6 +293,7 @@ describe("materializer runtime", () => {
   test("validates materialized output shape", () => {
     for (const source of [
       "console.log('{}')",
+      "console.log(JSON.stringify({resource: '/work', context: {}}))",
       "console.log(JSON.stringify({targets: []}))",
       "console.log(JSON.stringify({targets: [1]}))",
       "console.log(JSON.stringify({targets: ['same', 'same']}))",
