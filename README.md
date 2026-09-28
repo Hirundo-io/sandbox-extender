@@ -55,11 +55,12 @@ The bundled templates are a starting point, not active policy:
 - `Maker` scopes lockfile-oriented dependency work to one workspace.
   Activation with `{ "workspace": "/canonical/repository", "push": true }` also
   grants `git push origin HEAD:refs/heads/<activated-branch>` from that root.
-  It freezes the effective GitHub origin URL, branch, and repository hook directory.
+  It freezes the effective GitHub origin URL, branch, repository hook directory,
+  and a digest of hook-tree contents and modes.
   Review repository hooks before opting in: activation trusts those hooks. Global
   or external hook directories, extra refs, force pushes, tags, and submodule pushes
-  are unsupported. Changing the remote, branch, or hook directory requires
-  reactivation. Omit `push` for dependency-only work, including non-Git workspaces.
+  are unsupported. Changing the remote, branch, hook directory, hook contents, or executable bits
+  requires review and reactivation. Omit `push` for dependency-only work, including non-Git workspaces.
   Pixi operations require an explicit `--manifest-path pixi.toml` or
   `--manifest-path pyproject.toml`, alongside `--no-install --offline --no-config`.
   Set `no-build = true` in `[workspace.pypi-options]` or

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -350,6 +351,8 @@ features = ["ci"]
 });
 
 function gitFacts(root: string, overrides: Readonly<Record<string, string | undefined>> = {}) {
+  mkdirSync(join(root, ".git", "hooks"), { recursive: true });
+  mkdirSync(join(root, ".hooks"), { recursive: true });
   const facts: Readonly<Record<string, string | undefined>> = {
     "rev-parse --show-toplevel": root,
     "symbolic-ref --quiet --short HEAD": "feature",
@@ -419,6 +422,36 @@ describe("Maker push grants", () => {
       ),
     ).toBeUndefined();
   });
+  test("binds reviewed hook contents and modes, including nested helpers", () => {
+    const root = workspace();
+    const git = gitFacts(root);
+    const hooks = join(root, ".git", "hooks");
+    mkdirSync(join(hooks, "helpers"));
+    const hook = join(hooks, "pre-push");
+    writeFileSync(hook, "#!/bin/sh\nexit 0\n");
+    chmodSync(hook, 0o755);
+    writeFileSync(join(hooks, "helpers", "check"), "reviewed");
+    const grant = () => materializeMakerActivation({ workspace: root, push: true }, git)?.[1];
+    const original = grant();
+    expect(original).toBeDefined();
+    writeFileSync(hook, "#!/bin/sh\nexit 1\n");
+    expect(grant()).not.toBe(original);
+    writeFileSync(hook, "#!/bin/sh\nexit 0\n");
+    expect(grant()).toBe(original);
+    chmodSync(hook, 0o644);
+    expect(grant()).not.toBe(original);
+    chmodSync(hook, 0o755);
+    writeFileSync(join(hooks, "helpers", "check"), "modified");
+    expect(grant()).not.toBe(original);
+    rmSync(join(hooks, "helpers", "check"));
+    symlinkSync(hook, join(hooks, "helpers", "check"));
+    expect(grant()).toBeUndefined();
+    rmSync(join(hooks, "helpers", "check"));
+    const fifo = Bun.spawnSync(["/usr/bin/mkfifo", join(hooks, "fifo")]);
+    expect(fifo.exitCode).toBe(0);
+    expect(grant()).toBeUndefined();
+  });
+
   test("accepts explicit disabled extra push behavior", () => {
     const root = workspace();
     expect(

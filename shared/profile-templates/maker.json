@@ -4,7 +4,7 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "2bf6a699b14b895517662bdfe27f88ee8f9dc7220d731da547faff6248602986",
+    "integrity": "279cda0f2ca5cad3d7ecfbbf554548d390a2dd584e58684f423d86934dbe3fb0",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -26,7 +26,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "6e3feda0d2dfd93d4ee083fd64923127ab4959fe00327873ecf3e2a76f0bd2ff",
+    "integrity": "813242759e8f31be51ad5709a9b86bccc2893c43569244580f00db4f05e56c52",
     "language": "typescript",
     "permissions": {
       "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
@@ -53,7 +53,7 @@
     "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace.",
     "Before Pixi operations, persist no-build = true in [tool.pixi.workspace.pypi-options] in pyproject.toml (or [workspace.pypi-options] in pixi.toml). Default-feature pypi-options also work, but every environment with no-default-feature = true then needs it on an included feature. Use an explicit --manifest-path to that file; directory discovery is not authorized.",
     "When using uv, encourage persisting [tool.uv] no-build = true in pyproject.toml; keep --no-build on every Maker command because --no-config ignores persisted settings. Never weaken no-build to resolve an unavailable wheel; report the package requiring a source build.",
-    "Git pushes require explicit activation with push: true from the canonical repository root. This freezes the origin GitHub URL, current branch, and repository hook directory. Use only git push origin HEAD:refs/heads/<activated-branch> from that root. Activation trusts reviewed repository hooks; review them before activation. Global or external hook directories are not included in that trust. Remote, branch, or hook-directory changes require reactivation."
+    "Git pushes require explicit activation with push: true from the canonical repository root. This freezes the origin GitHub URL, current branch, repository hook directory, and hook-tree contents and modes. Use only git push origin HEAD:refs/heads/<activated-branch> from that root. Activation trusts reviewed repository hooks; review them before activation. Global or external hook directories are not included in that trust. Remote, branch, hook-directory, hook-content, and hook-mode changes require review and reactivation."
   ],
   "groupings": [
     {

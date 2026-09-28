@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -403,6 +412,9 @@ describe("shipped Profile templates", () => {
       await mkdir(join(workspace, ".githooks"));
       runGit(workspace, "config", "core.hooksPath", ".githooks");
       expect(await decision(push)).toBe("abstain");
+      const prePush = join(workspace, ".githooks", "pre-push");
+      await writeFile(prePush, "#!/bin/sh\nexit 0\n");
+      await chmod(prePush, 0o755);
       const withHooks = materializeActivation(
         profile.activationMaterializer!,
         { workspace, push: true },
@@ -421,6 +433,23 @@ describe("shipped Profile templates", () => {
           })
         ).decision,
       ).toBe("allow");
+      const hookDecision = async () =>
+        (
+          await hooksCore.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command: push, workdir: workspace },
+            resource: workspace,
+            threadId: "thread-1",
+          })
+        ).decision;
+      await writeFile(prePush, "#!/bin/sh\nexit 1\n");
+      expect(await hookDecision()).toBe("abstain");
+      await writeFile(prePush, "#!/bin/sh\nexit 0\n");
+      expect(await hookDecision()).toBe("allow");
+      await chmod(prePush, 0o644);
+      expect(await hookDecision()).toBe("abstain");
+      await rm(prePush);
+      expect(await hookDecision()).toBe("abstain");
       runGit(workspace, "config", "core.hooksPath", outside);
       expect(
         materializeActivation(

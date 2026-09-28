@@ -1,4 +1,5 @@
-import { realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { parse } from "smol-toml";
@@ -360,6 +361,26 @@ function readGit(workspace: string, args: readonly string[]): string | undefined
   return result.success ? new TextDecoder().decode(result.stdout).trim() : undefined;
 }
 
+function hookTreeDigest(directory: string): string {
+  const hash = createHash("sha256");
+  function visitDirectory(path: string): void {
+    for (const entry of readdirSync(path).sort()) {
+      const file = resolve(path, entry);
+      const stat = lstatSync(file);
+      if (stat.isSymbolicLink() || realpathSync(file) !== file)
+        throw new Error("Hook symlinks are not trusted");
+      hash.update(
+        JSON.stringify([relative(directory, file), stat.mode, stat.isFile() ? stat.size : null]),
+      );
+      if (stat.isDirectory()) visitDirectory(file);
+      else if (stat.isFile()) hash.update(readFileSync(file));
+      else throw new Error("Unsupported hook entry");
+    }
+  }
+  visitDirectory(directory);
+  return hash.digest("hex");
+}
+
 function repositoryHooks(workspace: string, git: GitRead): string | undefined {
   const configured = git(workspace, ["config", "--show-scope", "--get", "core.hooksPath"]);
   let hooks: string | undefined;
@@ -376,7 +397,10 @@ function repositoryHooks(workspace: string, git: GitRead): string | undefined {
     !resolvesWithinWorkspace(workspace, workspace, resolve(workspace, hooks, "pre-push"))
   )
     return undefined;
-  return resolve(workspace, hooks);
+  const directory = resolve(workspace, hooks);
+  if (realpathSync(directory) !== directory || !lstatSync(directory).isDirectory())
+    return undefined;
+  return directory;
 }
 
 function makerPushGrant(
@@ -418,7 +442,10 @@ function makerPushGrant(
   }
   const hooks = repositoryHooks(workspace, git);
   if (!hooks) return undefined;
-  return { branch, target: `maker:push:${JSON.stringify([workspace, url, branch, hooks])}` };
+  return {
+    branch,
+    target: `maker:push:${JSON.stringify([workspace, url, branch, hooks, hookTreeDigest(hooks)])}`,
+  };
 }
 
 export function materializeMakerActivation(
