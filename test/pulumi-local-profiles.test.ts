@@ -149,6 +149,26 @@ describe("local Pulumi profiles", () => {
           });
           expect(result, `${name}: ${operation}`).toMatchObject({ decision: "allow" });
         }
+        expect(
+          (
+            await core.evaluate({
+              action: "other.unified_exec",
+              arguments: { command: command(workspace, allowed[0]!) },
+              resource: workspace,
+              threadId: "test-thread",
+            })
+          ).decision,
+        ).toBe("abstain");
+        expect(
+          (
+            await core.evaluate({
+              action: "claude.Bash",
+              arguments: { command: command(workspace, allowed[0]!) },
+              resource: workspace,
+              threadId: "test-thread",
+            })
+          ).decision,
+        ).toBe("allow");
         for (const operation of [
           "up --stack " + stack + " --yes",
           "refresh --stack " + stack + " --yes",

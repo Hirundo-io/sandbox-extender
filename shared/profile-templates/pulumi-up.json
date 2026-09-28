@@ -40,7 +40,7 @@
     {
       "id": "scoped-pulumi",
       "policies": {
-        "allowScopedPulumi": "permit(principal, action, resource) when { [\"login\",\"history\",\"preview\",\"up\"].contains(context.materialized.operation) };"
+        "allowScopedPulumi": "permit(principal, action, resource) when { [Action::\"codex.unified_exec\", Action::\"claude.Bash\"].contains(action) && [\"login\",\"history\",\"preview\",\"up\"].contains(context.materialized.operation) };"
       }
     }
   ]
