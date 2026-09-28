@@ -3,21 +3,27 @@
   "policyRevision": "pending-review",
   "allowedTargets": [],
   "activationMaterializer": {
-    "file": "materializers/activation/github-pull-request.ts",
-    "integrity": "4587f30488e8d12835518c58ec6ea5d3877f44c7e9a5527d738b3c019a6ee160",
+    "dependencies": {
+      "directory": "materializers/dependencies/graphql",
+      "packageJson": "package.json",
+      "denoLock": "deno.lock",
+      "denoLockIntegrity": "aca6e0be73c277546f14128673fcf485919e507ca8e5a55bfde76d348bdf5670",
+      "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
+    },
+    "file": "materializers/requests/github-pull-request.ts",
+    "integrity": "171efa618d649df8d0bfb9f77a13f4f030878aac653991445a42419364da9deb",
     "language": "typescript",
     "permissions": {
-      "read": [],
+      "read": ["$WORKING_DIRECTORY"],
       "write": [],
-      "env": [],
+      "env": ["NODE_ENV"],
       "net": [],
       "sys": [],
-      "run": ["gh"],
+      "run": ["gh", "git"],
       "ffi": []
     },
     "runtimeVersion": "2.8.1"
   },
-  "targetScope": "single",
   "requestMaterializer": {
     "dependencies": {
       "directory": "materializers/dependencies/graphql",
@@ -27,7 +33,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "03edbe63945d3cbe2a75ecd9a10cffdf39f5a9afbcbf2405481dc96adc7bac6d",
+    "integrity": "171efa618d649df8d0bfb9f77a13f4f030878aac653991445a42419364da9deb",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -43,10 +49,13 @@
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",
     "Read pull-request status before changing code or responding to review.",
-    "For a CI or review fix on the activated pull request, stage only explicit regular files, commit only explicit regular files with git commit -m <message> -- <paths>, and push the current branch with plain git push. Plain commits, amend, hook bypass, force, refspec, remote override, broad pathspec, and parent-path forms remain denied.",
+    "For a CI or review fix, stage or commit only explicit regular workspace files or tracked deletions. Commit with git commit -m <message> -- <paths>. Push the current branch using plain git push or a verified remote with HEAD, the current branch, HEAD:<branch>, or HEAD:refs/heads/<branch>. Broad pathspecs, unrelated refs, force, amend, and hook bypass remain denied.",
+    "Workspace activation reviews and freezes the canonical repository, active PR branch, repository-local hook directory, and its file content and modes. Commit and push require this additional grant. Hooks run normally as trusted reviewed repository code; changed hooks require a new activation. Global or external hooks and hook symlinks are denied. Explicit repository/PR activation grants PR operations and git add only.",
     "Inspect all review threads with: gh api graphql --paginate --slurp -f owner=<owner> -f repo=<repo> -F pr=<number> -f 'query=<ReviewThreads query>'. The reviewed request materializer validates the repository and pull-request query structure. It accepts any integer first value, any comment fields, optional pageInfo in either position, and the query field before or after the owner fields.",
     "Every reply and pull-request conversation comment must use an agent attribution prefix: _Replying as <agent> or [from <agent>]:. Run one REST command per comment with a non-empty body, or use the reviewed GraphQL thread-reply mutation. You may place multiple allowed commands in one ordinary shell sequence; do not use command substitution.",
+    "Top-level comments accept gh pr comment <number> --repo <owner/repo> --body-file <path>. The attributed body must be a real file contained in the command working directory. Parent traversal, stdin, and symlink paths are not allowed. Existing REST review replies also accept -F body=@reply.md for a basename.",
     "The watcher may inspect the exact PR metadata, checks, conversation comments, reviews, review threads, workflow runs, jobs, and logs described by the babysit-pr skill. Repository flags and every endpoint must match the pull request frozen at activation. Generic gh api, gh auth, account, credential, token, configuration, and unrelated repository queries remain denied.",
+    "Run the Python babysit-pr watcher within the host sandbox. This profile recognizes its reviewed gh commands, not the outer Python process; an escalated python3 .../gh_pr_watch.py invocation still requires host permission. Child processes do not produce separate host tool permission events. Do not treat allowed gh operations as approval for arbitrary Python or blanket watcher escalation.",
     "Before replying to or resolving a thread, use the reviewed ReviewThreadComments query with gh api graphql --paginate --slurp -f 'query=<ReviewThreadComments query>' -F id=<PRRT id> to freshly fetch that specific PRRT thread and every comment. The materializer performs a fresh GitHub lookup for every reply or resolution and permits it only when the ID belongs to the activated pull request. This is not stateful and clientMutationId is not a scope check.",
     "You may reply through REST or with the reviewed addPullRequestReviewThreadReply GraphQL mutation. Every reply must contain the required attribution prefix. Resolve addressed threads with the reviewed ResolveReviewThread GraphQL mutation, singly or in a parsed batch of up to 20 thread IDs; clientMutationId values may be any string.",
     "After replying to or resolving threads, tell the user which threads were replied to or resolved and include the resulting comment or thread links. Reading threads alone does not require a user-facing report."
@@ -63,9 +72,7 @@
           "  (context.materialized.operation == \"github.pull-request.checks\" &&",
           "    context.materialized.trailingArgumentCount == 1 && context.materialized.trailingArguments.contains(\"--watch\")) ||",
           "  (context.materialized.operation == \"github.pull-request.checks\" &&",
-          "    context.materialized.trailingArgumentCount == 2 && context.materialized.trailingArguments.contains(\"--json\") && (context.materialized.trailingArguments.contains(\"name,state,bucket,link,workflow\") || context.materialized.trailingArguments.contains(\"name,state,bucket,link,workflow,event,startedAt,completedAt\"))) ||",
-          "  (context.materialized.operation == \"github.pull-request.comment\" &&",
-          "    context.materialized.trailingArgumentCount == 2 && context.materialized.bodyPresent)",
+          "    context.materialized.trailingArgumentCount == 2 && context.materialized.trailingArguments.contains(\"--json\") && (context.materialized.trailingArguments.contains(\"name,state,bucket,link,workflow\") || context.materialized.trailingArguments.contains(\"name,state,bucket,link,workflow,event,startedAt,completedAt\")))",
           "};"
         ],
         "allowReviewThreadReplies": [

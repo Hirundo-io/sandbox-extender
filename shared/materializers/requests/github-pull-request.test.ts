@@ -1,6 +1,24 @@
 import { describe, expect, test } from "bun:test";
+import {
+  mkdtempSync,
+  lstatSync,
+  chmodSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import {
+  watcherReviewThreadsQuery,
+  watcherThreadCommentsQuery,
+} from "../../../test/fixtures/watcher-queries.js";
 
 import {
+  materializeBabysitterActivation,
   materializeGitHubPullRequest,
   reviewThreadCommentsQuery,
   reviewThreadsQuery,
@@ -31,34 +49,6 @@ function currentPullRequest(repository = "Hirundo-io/hirundo-platform", number =
 const watcherPullRequestFields =
   "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
 const watcherChecksFields = "name,state,bucket,link,workflow,event,startedAt,completedAt";
-const watcherReviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          id
-          isResolved
-          comments(first: 100) {
-            pageInfo { hasNextPage endCursor }
-            nodes { databaseId createdAt body path line originalLine url authorAssociation author { login __typename } pullRequestReview { state } }
-          }
-        }
-      }
-    }
-  }
-}`;
-const watcherThreadCommentsQuery = `query($threadId: ID!, $cursor: String) {
-  node(id: $threadId) {
-    ... on PullRequestReviewThread {
-      comments(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { databaseId body }
-      }
-    }
-  }
-}`;
-
 function mockDenoCommand(stdout: string, success = true): () => void {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
   Object.defineProperty(globalThis, "Deno", {
@@ -160,6 +150,7 @@ describe("GitHub pull request request materializer", () => {
           undefined,
           () => true,
           () => true,
+          (pr) => pr.resource,
         ),
       ).toEqual(
         expect.objectContaining({
@@ -221,6 +212,7 @@ describe("GitHub pull request request materializer", () => {
           undefined,
           () => true,
           () => true,
+          (pr) => pr.resource,
         ),
       ).toBeUndefined();
     }
@@ -262,9 +254,20 @@ describe("GitHub pull request request materializer", () => {
       observed,
     );
     try {
-      expect(materializeGitHubPullRequest(candidate(["git", "push"]))).toEqual(
-        expect.objectContaining({ operation: "git.push" }),
-      );
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["git", "push"]),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (pr) => pr.resource,
+        ),
+      ).toEqual(expect.objectContaining({ operation: "git.push" }));
       expect(observed).toContainEqual(["git", "config", "--get-all", "remote.origin.push"]);
       expect(observed).toContainEqual(["git", "config", "--get-all", "remote.origin.pushurl"]);
     } finally {
@@ -299,6 +302,7 @@ describe("GitHub pull request request materializer", () => {
           undefined,
           () => true,
           () => true,
+          (pr) => pr.resource,
         ),
       ).toBeUndefined();
     }
@@ -371,6 +375,206 @@ describe("GitHub pull request request materializer", () => {
     }
   });
 
+  test("confines attributed comment files to regular files inside the working directory", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-body-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-outside-")));
+    const body = "_Replying as **Codex**._ Verified.";
+    const materialize = (path: string, workingDirectory: unknown = directory) =>
+      materializeGitHubPullRequest(
+        {
+          command: {
+            words: ["gh", "pr", "comment", "42", "--repo", "acme/example", "--body-file", path],
+          },
+          workingDirectory,
+        },
+        (file) => readFileSync(file, "utf8"),
+      );
+    try {
+      writeFileSync(join(directory, "reply.md"), body);
+      writeFileSync(join(directory, "unattributed.md"), "Verified.");
+      writeFileSync(join(outside, "reply.md"), body);
+      symlinkSync(join(directory, "reply.md"), join(directory, "linked.md"));
+      symlinkSync(outside, join(directory, "outside"));
+      for (const path of ["reply.md", join(directory, "reply.md")]) {
+        expect(materialize(path)).toEqual(
+          expect.objectContaining({
+            operation: "github.pull-request.conversation-comment",
+            bodyPresent: true,
+          }),
+        );
+      }
+      for (const path of [
+        "-",
+        ".",
+        "missing.md",
+        "unattributed.md",
+        "../reply.md",
+        "a\\reply.md",
+        "linked.md",
+        "outside/reply.md",
+        join(outside, "reply.md"),
+      ]) {
+        expect(materialize(path)).toBeUndefined();
+      }
+      expect(materialize("reply.md", null)).toBeUndefined();
+      expect(materialize("reply.md", "relative")).toBeUndefined();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("accepts reviewed PR metadata subsets and orderings only", () => {
+    for (const fields of ["headRefOid,state", "state,headRefOid", "url"]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["gh", "pr", "view", "42", "--repo", "acme/example", "--json", fields]),
+        ),
+      ).toBeDefined();
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["gh", "-R", "acme/example", "pr", "view", "42", "--json", fields]),
+        ),
+      ).toBeDefined();
+    }
+    for (const fields of ["", "state,", "viewerPermission", "state,unknown", " state"]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["gh", "-R", "acme/example", "pr", "view", "42", "--json", fields]),
+        ),
+      ).toBeUndefined();
+    }
+  });
+
+  test("requires explicit PR selectors for comment mutations", () => {
+    for (const words of [
+      [
+        "gh",
+        "pr",
+        "comment",
+        "--repo",
+        "Hirundo-io/hirundo-platform",
+        "--body",
+        "_Replying as **Codex**._ Fixed.",
+      ],
+      ["gh", "pr", "comment", "--repo", "Hirundo-io/hirundo-platform", "--body-file", "reply.md"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+          currentPullRequest(),
+        ),
+      ).toBeUndefined();
+    }
+  });
+
+  test("keeps explicit PR activation free of Git mutation grants", async () => {
+    expect(
+      materializeBabysitterActivation({ repository: "Acme/Example", pullRequest: 42 }),
+    ).toEqual(["github:pull-request:acme/example#42"]);
+    for (const invalid of [
+      null,
+      {},
+      { repository: "acme/example", pullRequest: 0 },
+      { repository: "acme/example", pullRequest: 42, workingDirectory: "/tmp" },
+      { workingDirectory: "/missing/babysitter-directory" },
+    ]) {
+      expect(materializeBabysitterActivation(invalid)).toBeUndefined();
+    }
+    const output: string[] = [];
+    expect(
+      await runGitHubPullRequestMaterializer(
+        Promise.resolve({ repository: "acme/example", pullRequest: 42 }),
+        (value) => output.push(value),
+      ),
+    ).toBe(true);
+    expect(JSON.parse(output[0]!)).toEqual({ targets: ["github:pull-request:acme/example#42"] });
+  });
+
+  test("freezes reviewed hooks and admits tracked deletions without running mutations", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-git-")));
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+      if (result.status !== 0) throw new Error(result.stderr);
+      return result.stdout.trim();
+    };
+    try {
+      git("init", "-b", "feature");
+      git("config", "user.email", "test@example.test");
+      git("config", "user.name", "Test");
+      git("remote", "add", "origin", "https://github.com/Hirundo-io/hirundo-platform.git");
+      git("config", "branch.feature.remote", "origin");
+      git("config", "branch.feature.merge", "refs/heads/feature");
+      writeFileSync(join(directory, "deleted.ts"), "tracked");
+      git("add", "deleted.ts");
+      git("commit", "-m", "fixture");
+      Object.defineProperty(globalThis, "Deno", {
+        configurable: true,
+        value: {
+          cwd: () => directory,
+          build: { os: "linux" },
+          realPathSync: (path: string) => realpathSync(resolve(directory, path)),
+          statSync: (path: string) => ({ isFile: lstatSync(path).isFile() }),
+          Command: class {
+            args: readonly string[];
+            constructor(executable: string, options: { args: readonly string[] }) {
+              expect(executable).toBe("git");
+              this.args = options.args;
+            }
+            outputSync() {
+              const result = spawnSync("git", this.args, { cwd: directory });
+              return { success: result.status === 0, code: result.status, stdout: result.stdout };
+            }
+          },
+        },
+      });
+      const activation = () =>
+        materializeBabysitterActivation({ workingDirectory: directory }, () =>
+          currentPullRequest(),
+        );
+      const materialize = (words: string[]) =>
+        materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+          currentPullRequest(),
+        );
+      const original = activation()!;
+      expect(original).toHaveLength(2);
+      expect(materialize(["git", "push", "origin", "HEAD"])?.resource).toBe(original[1]);
+      for (const ref of ["feature", "HEAD:feature", "HEAD:refs/heads/feature"]) {
+        expect(materialize(["git", "push", "origin", ref])?.resource).toBe(original[1]);
+      }
+      expect(materialize(["git", "push", "other", "HEAD"])).toBeUndefined();
+      expect(materialize(["git", "push", "origin", "HEAD:main"])).toBeUndefined();
+      rmSync(join(directory, "deleted.ts"));
+      expect(materialize(["git", "add", "deleted.ts"])?.operation).toBe("git.add");
+      expect(materialize(["git", "commit", "-m", "deletion", "--", "deleted.ts"])?.resource).toBe(
+        original[1],
+      );
+      git("add", "deleted.ts");
+      expect(materialize(["git", "commit", "-m", "deletion", "--", "deleted.ts"])?.operation).toBe(
+        "git.commit",
+      );
+      expect(materialize(["git", "add", "never-tracked.ts"])).toBeUndefined();
+      const hooks = join(directory, ".git/hooks");
+      writeFileSync(join(hooks, "pre-commit"), "#!/bin/sh\nexit 0\n");
+      const changed = activation()!;
+      expect(changed[1]).not.toBe(original[1]);
+      expect(materialize(["git", "push"])?.resource).toBe(changed[1]);
+      chmodSync(join(hooks, "pre-commit"), 0o755);
+      expect(activation()![1]).not.toBe(changed[1]);
+      symlinkSync(join(directory, "deleted.ts"), join(hooks, "pre-push"));
+      expect(activation()).toEqual([original[0]!]);
+      expect(materialize(["git", "push"])).toBeUndefined();
+      rmSync(join(hooks, "pre-push"));
+      git("config", "core.hooksPath", "/tmp");
+      expect(activation()).toEqual([original[0]!]);
+      expect(materialize(["git", "push"])).toBeUndefined();
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "Deno", descriptor);
+      else Reflect.deleteProperty(globalThis, "Deno");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("materializes pull request operations", () => {
     expect(
       materializeGitHubPullRequest(
@@ -385,10 +589,22 @@ describe("GitHub pull request request materializer", () => {
     });
     expect(
       materializeGitHubPullRequest(
-        candidate(["gh", "pr", "comment", "42", "--repo", "acme/example", "--body", "done"]),
+        candidate([
+          "gh",
+          "pr",
+          "comment",
+          "42",
+          "--repo",
+          "acme/example",
+          "--body",
+          "_Replying as **Codex**._ Done.",
+        ]),
       ),
     ).toEqual(
-      expect.objectContaining({ bodyPresent: true, operation: "github.pull-request.comment" }),
+      expect.objectContaining({
+        bodyPresent: true,
+        operation: "github.pull-request.conversation-comment",
+      }),
     );
     expect(
       materializeGitHubPullRequest(

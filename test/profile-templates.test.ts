@@ -73,7 +73,9 @@ describe("shipped Profile templates", () => {
 
     expect(babysitter.activationMaterializer?.permissions).toEqual({
       ...emptyPermissions,
-      run: ["gh"],
+      env: ["NODE_ENV"],
+      read: ["$WORKING_DIRECTORY"],
+      run: ["gh", "git"],
     });
     expect(babysitter.requestMaterializer?.permissions).toEqual({
       ...emptyPermissions,
@@ -405,7 +407,7 @@ describe("shipped Profile templates", () => {
       "gh pr checks 42 --repo acme/example --watch",
       `gh -R acme/example pr view 42 --json ${watcherPullRequestFields}`,
       `gh -R acme/example pr checks 42 --json ${watcherChecksFields}`,
-      'gh pr comment 42 --repo acme/example --body "Reviewed."',
+      'gh pr comment 42 --repo acme/example --body "_Replying as **Codex**._ Reviewed."',
       'gh api --method POST repos/acme/example/issues/42/comments -f body="_Replying as Codex. Reviewed."',
       "gh api 'repos/acme/example/issues/42/comments?per_page=100&page=1'",
       "gh api 'repos/acme/example/pulls/42/reviews?per_page=100&page=1'",
@@ -440,13 +442,13 @@ describe("shipped Profile templates", () => {
     ).toBe("abstain");
 
     for (const command of [
-      'gh pr comment 43 --repo acme/example --body "Reviewed."',
-      'gh pr comment 42 --repo acme/other --body "Reviewed."',
+      'gh pr comment 43 --repo acme/example --body "_Replying as **Codex**._ Reviewed."',
+      'gh pr comment 42 --repo acme/other --body "_Replying as **Codex**._ Reviewed."',
       "gh pr comment --repo acme/example --body Reviewed.",
       "gh pr comment 42 --repo acme/example --body-file /tmp/private-note",
       "gh pr comment 42 --repo acme/example --body Reviewed. --body-file=/tmp/private-note",
       "gh pr comment 42 --repo acme/example --body Reviewed. -F /tmp/private-note",
-      'gh pr comment 42 --repo acme/example -R evil/example --body "Reviewed."',
+      'gh pr comment 42 --repo acme/example -R evil/example --body "_Replying as **Codex**._ Reviewed."',
       "gh pr view 42 --repo acme/example --web",
       "gh pr view 42 --repo=acme/example",
       "gh pr checks 42 --repo acme/example --interval 5",
@@ -521,7 +523,7 @@ describe("shipped Profile templates", () => {
         ...multipleTargets,
         allowedTargets: new Set([
           "github:pull-request:acme/example#42",
-          "github:pull-request:acme/example#43",
+          "babysitter:git:reviewed-grant",
         ]),
       },
       "thread-2",
@@ -529,14 +531,13 @@ describe("shipped Profile templates", () => {
     expect(
       await core.evaluate({
         action: "codex.unified_exec",
-        arguments: { command: "gh pr view 42 --repo acme/example" },
+        arguments: { command: "gh pr view 43 --repo acme/example" },
         resource: workspaceTarget,
         threadId: "thread-2",
       }),
     ).toEqual(
       expect.objectContaining({
         decision: "abstain",
-        reason: "profile requires exactly one allowed target",
       }),
     );
   }, 30_000);
