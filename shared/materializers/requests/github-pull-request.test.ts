@@ -482,6 +482,51 @@ describe("GitHub pull request request materializer", () => {
     }
   });
 
+  test("workspace activation scopes lookups and restores cwd after success or failure", () => {
+    const policyRoot = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-policy-cwd-")));
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-activation-cwd-")));
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    let workingDirectory = policyRoot;
+    const visited: string[] = [];
+    Object.defineProperty(globalThis, "Deno", {
+      configurable: true,
+      value: {
+        cwd: () => workingDirectory,
+        chdir: (directory: string) => {
+          visited.push(directory);
+          workingDirectory = directory;
+        },
+      },
+    });
+    try {
+      for (const outcome of ["success", "missing", "throws"] as const) {
+        visited.length = 0;
+        const result = materializeBabysitterActivation(
+          { workingDirectory: workspace },
+          () => {
+            expect(workingDirectory).toBe(workspace);
+            if (outcome === "throws") throw new Error("PR lookup failed");
+            return outcome === "missing" ? undefined : currentPullRequest();
+          },
+          () => {
+            expect(workingDirectory).toBe(workspace);
+            return "reviewed-git-grant";
+          },
+        );
+        expect(result).toEqual(
+          outcome === "success" ? [currentPullRequest().resource, "reviewed-git-grant"] : undefined,
+        );
+        expect(visited).toEqual([workspace, policyRoot]);
+        expect(workingDirectory).toBe(policyRoot);
+      }
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "Deno", descriptor);
+      else Reflect.deleteProperty(globalThis, "Deno");
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(policyRoot, { recursive: true, force: true });
+    }
+  });
+
   test("keeps explicit PR activation free of Git mutation grants", async () => {
     expect(
       materializeBabysitterActivation({ repository: "Acme/Example", pullRequest: 42 }),
