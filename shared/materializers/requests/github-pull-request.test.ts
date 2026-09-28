@@ -1084,6 +1084,20 @@ describe("GitHub pull request request materializer", () => {
           "gh",
           "api",
           "repos/acme/example/pulls/42/comments/9/replies",
+          "-f",
+          "x1234_Replying as Codex",
+        ]),
+        undefined,
+        undefined,
+        () => true,
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeGitHubPullRequest(
+        candidate([
+          "gh",
+          "api",
+          "repos/acme/example/pulls/42/comments/9/replies",
           "-F",
           "body=@reply.md",
           "--jq",
