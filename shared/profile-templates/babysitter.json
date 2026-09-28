@@ -11,7 +11,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "171efa618d649df8d0bfb9f77a13f4f030878aac653991445a42419364da9deb",
+    "integrity": "9f888cf7755a0636576f6aee23bbcd7a334b90641d8ecd77c8af8fb47856bdf9",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -33,7 +33,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "171efa618d649df8d0bfb9f77a13f4f030878aac653991445a42419364da9deb",
+    "integrity": "9f888cf7755a0636576f6aee23bbcd7a334b90641d8ecd77c8af8fb47856bdf9",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
