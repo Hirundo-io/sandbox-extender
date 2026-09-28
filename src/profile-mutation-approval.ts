@@ -9,6 +9,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
+import { assertBoundedAuthoringInput } from "./authoring-limits.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
 import type { AuthorizationTest, ActivationMaterializer, RequestMaterializer } from "./types.js";
 import { redactSensitiveValue } from "./policy-service.js";
@@ -94,6 +95,8 @@ export function profileMutationApprovalIdentity(
   intent: ProfileMutationIntent,
   details: MutationApprovalDetails,
 ): string {
+  assertBoundedAuthoringInput(intent);
+  assertBoundedAuthoringInput(details);
   return createHmac("sha256", approvalIdentityKey)
     .update(canonicalJson({ details, intent }))
     .digest("hex");
@@ -155,8 +158,7 @@ export async function requestProfileMutationApproval(
   details: MutationApprovalDetails,
   serverContext: ServerContext,
 ): Promise<ProfileMutationApproval> {
-  canonicalJson(intent);
-  canonicalJson(details);
+  assertBoundedAuthoringInput(threadId);
   const identity = profileMutationApprovalIdentity(intent, details);
   const sanitized = sanitizedApprovalValues(intent, details);
   const state = serverContext.mcpReq.requestState<ApprovalState>();

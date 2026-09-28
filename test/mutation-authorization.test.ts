@@ -38,7 +38,7 @@ describe("profile mutation intent", () => {
       parseProfileMutationIntent({
         arguments: {
           profile: {
-            allowedTargets: [],
+            allowedTargets: ["/workspace"],
             groupings: [
               { id: "allow", policies: { allow: "permit(principal, action, resource);" } },
             ],

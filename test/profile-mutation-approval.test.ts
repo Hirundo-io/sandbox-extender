@@ -32,6 +32,17 @@ function context(state?: unknown, inputResponses?: Record<string, unknown>): Ser
 }
 
 describe("profile mutation approval", () => {
+  test("rejects oversized details before approval serialization", async () => {
+    await expect(
+      requestProfileMutationApproval(
+        "thread-1",
+        intent,
+        { targets: Array.from({ length: 257 }, () => "target") },
+        context(),
+      ),
+    ).rejects.toThrow("256 entries");
+  });
+
   test("reads the approval nonce only from verified continuation state", () => {
     expect(approvalNonceFor(context())).toBeUndefined();
     expect(

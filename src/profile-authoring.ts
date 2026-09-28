@@ -1,3 +1,4 @@
+import { assertBoundedAuthoringInput } from "./authoring-limits.js";
 import { profileIdSchema } from "./schemas.js";
 import { completeProfileSchema } from "./mutation-authorization.js";
 import {
@@ -52,6 +53,7 @@ export function proposeCompleteProfile(
   profile: CompleteProfileDefinition,
   tests: readonly CompleteAuthorizationTest[],
 ): ProfileProposal {
+  assertBoundedAuthoringInput({ profile, tests });
   profile = completeProfileSchema.parse(profile);
   if (tests.length === 0) throw new Error("complete proposals require at least one test");
   for (const grouping of profile.groupings) {
