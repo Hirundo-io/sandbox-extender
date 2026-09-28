@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
@@ -415,13 +415,23 @@ export class PolicyRepository {
           throw new Error("materializer directory must not be a symlink");
       }
     }
-    for (const [file, source] of files)
-      await writeFile(join(this.root, file), source!, {
-        encoding: "utf8",
-        mode: 0o600,
-        flag: "wx",
-      });
-    await this.writeProposal(proposal);
+    const published: string[] = [];
+    try {
+      for (const [file, source] of files) {
+        const destination = join(this.root, file);
+        const handle = await open(destination, "wx", 0o600);
+        published.push(destination);
+        try {
+          await handle.writeFile(source!, "utf8");
+        } finally {
+          await handle.close();
+        }
+      }
+      await this.writeProposal(proposal);
+    } catch (error) {
+      await Promise.all(published.map((file) => unlink(file)));
+      throw error;
+    }
   }
 
   async promoteProposal(profileId: string, policyRevision: string): Promise<void> {

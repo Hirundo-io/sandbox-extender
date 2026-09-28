@@ -2,6 +2,14 @@ import { expect, test } from "bun:test";
 import { assertBoundedAuthoringInput } from "../src/authoring-limits.js";
 import { parseProfileMutationIntent } from "../src/mutation-authorization.js";
 
+test.each([undefined, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+  "rejects primitives that JSON serialization loses or changes: %s",
+  (value) => {
+    expect(() => assertBoundedAuthoringInput(value)).toThrow("JSON values");
+    expect(() => assertBoundedAuthoringInput({ nested: [value] })).toThrow("JSON values");
+  },
+);
+
 test("bounds total bytes, escaping, UTF-8, nesting, and cyclic input without serialization", () => {
   expect(() =>
     assertBoundedAuthoringInput(Array.from({ length: 5 }, () => "x".repeat(250000))),

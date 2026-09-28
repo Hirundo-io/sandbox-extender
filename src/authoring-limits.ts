@@ -35,15 +35,15 @@ export function assertBoundedAuthoringInput(value: unknown): void {
     if (depth > maximumDepth) throw new Error("authoring payload exceeds 32 nesting levels");
     if (typeof item === "string") return stringBytes(item);
     if (
-      item === undefined ||
       item === null ||
       typeof item === "boolean" ||
-      typeof item === "number"
+      (typeof item === "number" && Number.isFinite(item))
     ) {
       addBytes(24);
       return;
     }
-    if (typeof item !== "object") throw new Error("authoring payload must contain JSON values");
+    if (typeof item !== "object")
+      throw new Error("authoring payload must contain only JSON values");
     if (ancestors.has(item)) throw new Error("authoring payload must not contain cycles");
     ancestors.add(item);
     addBytes(2);

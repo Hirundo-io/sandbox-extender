@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,6 +36,37 @@ const tests = [
 ];
 
 describe("complete profile authoring", () => {
+  test.each(["proposals", "tests"])(
+    "removes published materializers when %s persistence fails and allows a retry",
+    async (artifactDirectory) => {
+      const root = await mkdtemp(join(tmpdir(), "sandbox-extender-rollback-"));
+      try {
+        const repository = new PolicyRepository(root);
+        const profile = definition();
+        const proposal = proposeCompleteProfile(
+          { ...profile, requestMaterializer: profile.activationMaterializer },
+          tests,
+        );
+        const obstruction = join(root, artifactDirectory, "maker-fixture.json");
+        await mkdir(obstruction, { recursive: true });
+        const sources = { activation: activationSource, request: activationSource };
+        await expect(repository.writeCompleteProposal(proposal, sources)).rejects.toThrow();
+        for (const kind of ["activation", "requests"]) {
+          await expect(
+            readFile(join(root, "materializers", kind, "maker-fixture.ts")),
+          ).rejects.toThrow("ENOENT");
+        }
+        await rm(obstruction, { recursive: true });
+        await repository.writeCompleteProposal(proposal, sources);
+        expect(await readFile(join(root, "tests", "maker-fixture.json"), "utf8")).toContain(
+          "allows the frozen workspace",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("rejects empty tests at the authoring boundary", () => {
     expect(() => proposeCompleteProfile(definition(), [])).toThrow("at least one test");
   });
