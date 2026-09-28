@@ -109,10 +109,7 @@ function gitMutationOperation(
   ) {
     operation = "git.push";
   }
-  const resource =
-    operation === "git.commit" || operation === "git.push"
-      ? mutationGrantLookup(currentPullRequest)
-      : currentPullRequest.resource;
+  const resource = operation ? mutationGrantLookup(currentPullRequest) : undefined;
   return operation && resource
     ? {
         bodyPresent: false,

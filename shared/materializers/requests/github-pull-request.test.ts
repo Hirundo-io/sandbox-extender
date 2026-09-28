@@ -350,6 +350,11 @@ describe("GitHub pull request request materializer", () => {
         undefined,
         undefined,
         () => currentPullRequest(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (pr) => pr.resource,
       );
 
     try {
@@ -373,6 +378,11 @@ describe("GitHub pull request request materializer", () => {
           undefined,
           undefined,
           () => currentPullRequest(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (pr) => pr.resource,
         ),
       ).toEqual(expect.objectContaining({ operation: "git.add" }));
     } finally {
@@ -498,8 +508,17 @@ describe("GitHub pull request request materializer", () => {
   test("freezes reviewed hooks and admits tracked deletions without running mutations", () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-git-")));
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    const fixtureEnvironment = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: join(directory, "global-config"),
+      GIT_CONFIG_SYSTEM: join(directory, "system-config"),
+    };
     const git = (...args: string[]) => {
-      const result = spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+      const result = spawnSync("git", args, {
+        cwd: directory,
+        encoding: "utf8",
+        env: fixtureEnvironment,
+      });
       if (result.status !== 0) throw new Error(result.stderr);
       return result.stdout.trim();
     };
@@ -527,7 +546,10 @@ describe("GitHub pull request request materializer", () => {
               this.args = options.args;
             }
             outputSync() {
-              const result = spawnSync("git", this.args, { cwd: directory });
+              const result = spawnSync("git", this.args, {
+                cwd: directory,
+                env: fixtureEnvironment,
+              });
               return { success: result.status === 0, code: result.status, stdout: result.stdout };
             }
           },
@@ -564,6 +586,7 @@ describe("GitHub pull request request materializer", () => {
       const changed = activation()!;
       expect(changed[1]).not.toBe(original[1]);
       expect(materialize(["git", "push"])?.resource).toBe(changed[1]);
+      expect(materialize(["git", "add", "deleted.ts"])?.resource).toBe(changed[1]);
       chmodSync(join(hooks, "pre-commit"), 0o755);
       expect(activation()![1]).not.toBe(changed[1]);
       symlinkSync(join(directory, "deleted.ts"), join(hooks, "pre-push"));
