@@ -1,0 +1,46 @@
+{
+  "id": "kubernetes-diagnostics",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "activationMaterializer": {
+    "file": "materializers/activation/kubernetes-diagnostics.ts",
+    "integrity": "28b368da21e976f2fa1a235e56b6d8db6c9abde4b50fcac95220628f37cf48dd",
+    "language": "typescript",
+    "permissions": {
+      "env": [],
+      "ffi": [],
+      "net": [],
+      "read": [],
+      "run": [],
+      "sys": [],
+      "write": []
+    },
+    "runtimeVersion": "2.8.1"
+  },
+  "requestMaterializer": {
+    "file": "materializers/requests/kubernetes-diagnostics.ts",
+    "integrity": "1be59887add70ad34bec846f562988388abbfdf05bb7dab985afab672d1c996b",
+    "language": "typescript",
+    "permissions": {
+      "env": [],
+      "ffi": [],
+      "net": [],
+      "read": [],
+      "run": [],
+      "sys": [],
+      "write": []
+    },
+    "runtimeVersion": "2.8.1"
+  },
+  "sessionContext": [
+    "Use this profile for deployment readiness, pod inspection, scheduling events, and node capacity only. Node reads require allowClusterWideNodes=true at activation. Never request Secrets or mutations."
+  ],
+  "groupings": [
+    {
+      "id": "diagnostics",
+      "policies": {
+        "allowDiagnostics": "permit(principal, action, resource) when { [Action::\"codex.unified_exec\", Action::\"claude.Bash\"].contains(action) && [\"deployment.readiness\",\"deployment.list\",\"pod.list\",\"pod.describe\",\"scheduling.events\",\"node.list\",\"node.describe\"].contains(context.materialized.operation) };"
+      }
+    }
+  ]
+}
