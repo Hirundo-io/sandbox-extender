@@ -17,14 +17,18 @@ import { materializeActivation } from "../src/materializer-runtime.js";
 import { PolicyCore, type Profile } from "../src/index.js";
 
 const cluster = "gke_project_region_cluster";
+const server = "https://api.example.test:6443/cluster";
+const tlsServerName = "api.internal.example.test";
 const namespace = "workloads";
 
 function command(
   operation: string,
   selectedCluster = cluster,
   selectedNamespace = namespace,
+  selectedServer = server,
+  selectedTlsServerName = tlsServerName,
 ): string {
-  return `kubectl --context ${selectedCluster} --namespace ${selectedNamespace} ${operation}`;
+  return `kubectl --context ${selectedCluster} --server ${selectedServer} --tls-server-name ${selectedTlsServerName} --namespace ${selectedNamespace} ${operation}`;
 }
 
 function requestInput(operation: string) {
@@ -58,17 +62,31 @@ async function profile(targets: readonly string[]): Promise<Profile> {
 
 describe("Kubernetes diagnostics profile", () => {
   test("activation freezes cluster, namespace, and explicit node scope", async () => {
-    const namespaced = `kubernetes:${JSON.stringify([cluster, namespace, "namespace"])}`;
-    const nodes = `kubernetes:${JSON.stringify([cluster, namespace, "cluster-nodes"])}`;
+    const namespaced = `kubernetes:${JSON.stringify([cluster, server, tlsServerName, namespace, "namespace"])}`;
+    const nodes = `kubernetes:${JSON.stringify([cluster, server, tlsServerName, namespace, "cluster-nodes"])}`;
     expect(
-      materializeKubernetesActivation({ cluster, namespace, allowClusterWideNodes: false }),
+      materializeKubernetesActivation({
+        server,
+        tlsServerName,
+        cluster,
+        namespace,
+        allowClusterWideNodes: false,
+      }),
     ).toEqual([namespaced]);
     expect(
-      materializeKubernetesActivation({ cluster, namespace, allowClusterWideNodes: true }),
+      materializeKubernetesActivation({
+        server,
+        tlsServerName,
+        cluster,
+        namespace,
+        allowClusterWideNodes: true,
+      }),
     ).toEqual([namespaced, nodes]);
     const reviewed = await profile([namespaced, nodes]);
     expect(
       materializeActivation(reviewed.activationMaterializer!, {
+        server,
+        tlsServerName,
         cluster,
         namespace,
         allowClusterWideNodes: true,
@@ -77,44 +95,57 @@ describe("Kubernetes diagnostics profile", () => {
     const output: string[] = [];
     expect(
       await runKubernetesActivationMaterializer(
-        Promise.resolve({ cluster, namespace, allowClusterWideNodes: true }),
+        Promise.resolve({ server, tlsServerName, cluster, namespace, allowClusterWideNodes: true }),
         (value) => output.push(value),
       ),
     ).toBe(true);
     expect(JSON.parse(output[0]!)).toEqual({ targets: [namespaced, nodes] });
     const codes: number[] = [];
     await runKubernetesActivationMain(
-      Promise.resolve({ cluster, namespace, allowClusterWideNodes: false }),
+      Promise.resolve({ server, tlsServerName, cluster, namespace, allowClusterWideNodes: false }),
       (code) => codes.push(code),
     );
-    await runKubernetesActivationMain(Promise.resolve({ cluster, namespace }), (code) =>
-      codes.push(code),
+    await runKubernetesActivationMain(
+      Promise.resolve({ server, tlsServerName, cluster, namespace }),
+      (code) => codes.push(code),
     );
     expect(codes).toEqual([0, 1]);
     for (const invalid of [
       null,
       {},
-      { cluster, namespace },
-      { cluster: "", namespace, allowClusterWideNodes: false },
-      { cluster: "https://user:secret@example.test", namespace, allowClusterWideNodes: false },
-      { cluster, namespace: "Other", allowClusterWideNodes: false },
-      { cluster, namespace: "team.apps", allowClusterWideNodes: false },
-      { cluster, namespace: "a".repeat(64), allowClusterWideNodes: false },
-      { cluster, namespace, allowClusterWideNodes: "yes" },
+      { server, tlsServerName, cluster, namespace },
+      { server, tlsServerName, cluster: "", namespace, allowClusterWideNodes: false },
+      {
+        server,
+        tlsServerName,
+        cluster: "https://user:secret@example.test",
+        namespace,
+        allowClusterWideNodes: false,
+      },
+      { server, tlsServerName, cluster, namespace: "Other", allowClusterWideNodes: false },
+      { server, tlsServerName, cluster, namespace: "team.apps", allowClusterWideNodes: false },
+      { server, tlsServerName, cluster, namespace: "a".repeat(64), allowClusterWideNodes: false },
+      { server, tlsServerName, cluster, namespace, allowClusterWideNodes: "yes" },
     ])
       expect(materializeKubernetesActivation(invalid)).toBeUndefined();
-    expect(await runKubernetesActivationMaterializer(Promise.resolve({ cluster, namespace }))).toBe(
-      false,
-    );
+    expect(
+      await runKubernetesActivationMaterializer(
+        Promise.resolve({ server, tlsServerName, cluster, namespace }),
+      ),
+    ).toBe(false);
   });
 
   test("permits observed inspection and keeps node reads behind the cluster-wide grant", async () => {
     const namespaced = materializeKubernetesActivation({
+      server,
+      tlsServerName,
       cluster,
       namespace,
       allowClusterWideNodes: false,
     })!;
     const allTargets = materializeKubernetesActivation({
+      server,
+      tlsServerName,
       cluster,
       namespace,
       allowClusterWideNodes: true,
@@ -164,6 +195,10 @@ describe("Kubernetes diagnostics profile", () => {
       ).toBe("allow");
       for (const rejected of [
         ...nodeCommands.filter((value) => !allowed.includes(value)).map((value) => command(value)),
+        command("get pods -o=wide", cluster, namespace, "https://other.example.test"),
+        command("get pods -o=wide", cluster, namespace, server, "other.example.test"),
+        command("get pods -o=wide").replace(` --server ${server}`, ""),
+        command("get pods -o=wide") + " --server https://other.example.test",
         command("get secrets"),
         command("describe secret prod"),
         command("delete pod api-123"),
@@ -187,6 +222,63 @@ describe("Kubernetes diagnostics profile", () => {
     }
   }, 60_000);
 
+  test("rejects unsafe endpoints and TLS names before freezing or materializing targets", () => {
+    const activation = { cluster, server, tlsServerName, namespace, allowClusterWideNodes: false };
+    for (const invalidServer of [
+      undefined,
+      "",
+      "https://[",
+      "http://api.example.test",
+      "https://user:secret@api.example.test",
+      "https://api.example.test?token=secret",
+      "https://api.example.test#fragment",
+      "https://api.example.test/ white",
+      "https://api.example.test\\other",
+    ]) {
+      expect(
+        materializeKubernetesActivation({ ...activation, server: invalidServer }),
+      ).toBeUndefined();
+      const input = requestInput("get pods -o=wide");
+      input.command.words[4] = invalidServer as string;
+      expect(materializeKubernetesRequest(input)).toBeUndefined();
+    }
+    for (const invalidTls of [undefined, "", "bad name", "a".repeat(254)]) {
+      expect(
+        materializeKubernetesActivation({ ...activation, tlsServerName: invalidTls }),
+      ).toBeUndefined();
+      const input = requestInput("get pods -o=wide");
+      input.command.words[6] = invalidTls as string;
+      expect(materializeKubernetesRequest(input)).toBeUndefined();
+    }
+  });
+
+  test("malformed argv fails closed without throwing or writing output", async () => {
+    const valid = requestInput("get pods -o=wide");
+    const malformed: unknown[][] = [];
+    for (let length = 0; length < valid.command.words.length; length++) {
+      malformed.push(valid.command.words.slice(0, length));
+    }
+    for (let index = 0; index < valid.command.words.length; index++) {
+      const sparse: unknown[] = [...valid.command.words];
+      delete sparse[index];
+      malformed.push(sparse);
+      const nonString: unknown[] = [...valid.command.words];
+      nonString[index] = null;
+      malformed.push(nonString);
+    }
+    const output: string[] = [];
+    for (const words of malformed) {
+      const input = { ...valid, command: { words } };
+      expect(materializeKubernetesRequest(input)).toBeUndefined();
+      expect(
+        await runKubernetesRequestMaterializer(Promise.resolve(input), (value) =>
+          output.push(value),
+        ),
+      ).toBe(false);
+    }
+    expect(output).toEqual([]);
+  });
+
   test("request materializer emits only typed diagnostics", async () => {
     const expected = [
       ["rollout status deployment/api", "deployment.readiness", "namespace"],
@@ -199,7 +291,7 @@ describe("Kubernetes diagnostics profile", () => {
     ];
     for (const [operation, name, scope] of expected) {
       const input = requestInput(operation);
-      const resource = `kubernetes:${JSON.stringify([cluster, namespace, scope])}`;
+      const resource = `kubernetes:${JSON.stringify([cluster, server, tlsServerName, namespace, scope])}`;
       expect(materializeKubernetesRequest(input)).toEqual({ operation: name, resource });
       const output: string[] = [];
       expect(

@@ -4,7 +4,7 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/kubernetes-diagnostics.ts",
-    "integrity": "5b923657f807c5d2cf1144b8c50ead99e96e75a7e7aed75ddaed91d05f4fe5d6",
+    "integrity": "28b368da21e976f2fa1a235e56b6d8db6c9abde4b50fcac95220628f37cf48dd",
     "language": "typescript",
     "permissions": {
       "env": [],
@@ -19,7 +19,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/kubernetes-diagnostics.ts",
-    "integrity": "6555facc3f9a013d0ceff1c7d5526dddb5edace5b3668ada24145494b2cba4c5",
+    "integrity": "1be59887add70ad34bec846f562988388abbfdf05bb7dab985afab672d1c996b",
     "language": "typescript",
     "permissions": {
       "env": [],

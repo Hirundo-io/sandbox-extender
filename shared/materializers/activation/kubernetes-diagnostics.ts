@@ -14,21 +14,52 @@ function validNamespace(value: unknown): value is string {
   );
 }
 
-function kubernetesTarget(cluster: string, namespace: string, scope: string): string {
-  return `kubernetes:${JSON.stringify([cluster, namespace, scope])}`;
+function validServer(value: unknown): value is string {
+  if (typeof value !== "string" || !value.startsWith("https://") || /[\s\\?#]/.test(value))
+    return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" && url.hostname !== "" && url.username === "" && url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validTlsServerName(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length <= 253 && /^[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(value)
+  );
+}
+
+function kubernetesTarget(
+  cluster: string,
+  server: string,
+  tlsServerName: string,
+  namespace: string,
+  scope: string,
+): string {
+  return `kubernetes:${JSON.stringify([cluster, server, tlsServerName, namespace, scope])}`;
 }
 
 export function materializeKubernetesActivation(candidate: unknown): readonly string[] | undefined {
   if (typeof candidate !== "object" || candidate === null) return undefined;
-  const { cluster, namespace, allowClusterWideNodes } = candidate as Record<string, unknown>;
+  const { cluster, server, tlsServerName, namespace, allowClusterWideNodes } = candidate as Record<
+    string,
+    unknown
+  >;
   if (
     !validCluster(cluster) ||
+    !validServer(server) ||
+    !validTlsServerName(tlsServerName) ||
     !validNamespace(namespace) ||
     typeof allowClusterWideNodes !== "boolean"
   )
     return undefined;
-  const targets = [kubernetesTarget(cluster, namespace, "namespace")];
-  if (allowClusterWideNodes) targets.push(kubernetesTarget(cluster, namespace, "cluster-nodes"));
+  const targets = [kubernetesTarget(cluster, server, tlsServerName, namespace, "namespace")];
+  if (allowClusterWideNodes)
+    targets.push(kubernetesTarget(cluster, server, tlsServerName, namespace, "cluster-nodes"));
   return targets;
 }
 

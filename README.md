@@ -168,11 +168,19 @@ The operations are `login <backend>`, `stack history --stack <stack>`, and
 the URI. These are disabled, local templates; copy and review one in your own
 policy repository before promotion.
 Kubernetes diagnostics activation requires
-`{"cluster":"cluster-context","namespace":"workloads","allowClusterWideNodes":false}`.
+`{"cluster":"cluster-context","server":"https://api.example.test:6443","tlsServerName":"api.example.test","namespace":"workloads","allowClusterWideNodes":false}`.
+Activation freezes the exact HTTPS server URL and TLS server name alongside the
+context and namespace. Server URLs cannot contain credentials, query strings, or
+fragments. Use the context's configured TLS server name, or the endpoint hostname
+when it has none. Kubectl clears the context TLS server name when `--server` is
+set, so commands must supply both explicitly. The context still supplies trusted
+credentials, CA configuration, and proxy settings; review those locally before
+activation. This endpoint binding prevents changing the context's server field
+from redirecting an approved command. It does not freeze other kubeconfig fields.
 Set `allowClusterWideNodes` to `true` only when cluster-wide node inspection is
 intended. The node target is separate from the namespace target. Allowed
 commands use the exact prefix
-`kubectl --context <cluster> --namespace <namespace>` followed by one of
+`kubectl --context <cluster> --server <server> --tls-server-name <tlsServerName> --namespace <namespace>` followed by one of
 `rollout status deployment/<name>`, `get deployments -o=wide`,
 `get pods -o=wide`, `describe pod <name>`, or
 `get events --field-selector=reason=FailedScheduling`. With the node grant,

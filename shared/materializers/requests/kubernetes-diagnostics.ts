@@ -18,8 +18,33 @@ function validName(value: string | undefined): value is string {
   );
 }
 
-function kubernetesTarget(cluster: string, namespace: string, scope: string): string {
-  return `kubernetes:${JSON.stringify([cluster, namespace, scope])}`;
+function validServer(value: unknown): value is string {
+  if (typeof value !== "string" || !value.startsWith("https://") || /[\s\\?#]/.test(value))
+    return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" && url.hostname !== "" && url.username === "" && url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validTlsServerName(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length <= 253 && /^[A-Za-z0-9][A-Za-z0-9.:-]*$/.test(value)
+  );
+}
+
+function kubernetesTarget(
+  cluster: string,
+  server: string,
+  tlsServerName: string,
+  namespace: string,
+  scope: string,
+): string {
+  return `kubernetes:${JSON.stringify([cluster, server, tlsServerName, namespace, scope])}`;
 }
 
 export function materializeKubernetesRequest(candidate: unknown): KubernetesOperation | undefined {
@@ -31,13 +56,29 @@ export function materializeKubernetesRequest(candidate: unknown): KubernetesOper
     (input.requestArguments as { command?: unknown } | undefined)?.command !==
       input.originalCommand ||
     !Array.isArray(words) ||
-    !words.every((word) => typeof word === "string")
+    words.length !== 12 ||
+    !Array.from(words).every((word) => typeof word === "string")
   )
     return undefined;
-  const [kubectl, contextFlag, cluster, namespaceFlag, namespace, ...command] = words;
+  const [
+    kubectl,
+    contextFlag,
+    cluster,
+    serverFlag,
+    server,
+    tlsFlag,
+    tlsServerName,
+    namespaceFlag,
+    namespace,
+    ...command
+  ] = words;
   if (
     kubectl !== "kubectl" ||
     contextFlag !== "--context" ||
+    serverFlag !== "--server" ||
+    tlsFlag !== "--tls-server-name" ||
+    !validServer(server) ||
+    !validTlsServerName(tlsServerName) ||
     namespaceFlag !== "--namespace" ||
     !validCluster(cluster) ||
     !validNamespace(namespace)
@@ -98,7 +139,10 @@ export function materializeKubernetesRequest(candidate: unknown): KubernetesOper
     operation = "node.describe";
     scope = "cluster-nodes";
   } else return undefined;
-  return { operation, resource: kubernetesTarget(cluster, namespace, scope) };
+  return {
+    operation,
+    resource: kubernetesTarget(cluster, server, tlsServerName, namespace, scope),
+  };
 }
 
 export async function runKubernetesRequestMaterializer(
