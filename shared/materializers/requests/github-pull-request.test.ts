@@ -99,6 +99,11 @@ function mockDenoFiles(os: "linux" | "windows" = "linux"): () => void {
   Object.defineProperty(globalThis, "Deno", {
     configurable: true,
     value: {
+      Command: class {
+        outputSync() {
+          return { success: false, code: 1, stdout: new Uint8Array() };
+        }
+      },
       build: { os },
       cwd: () => root,
       realPathSync: (path: string) => {
@@ -565,6 +570,22 @@ describe("GitHub pull request request materializer", () => {
       expect(activation()).toEqual([original[0]!]);
       expect(materialize(["git", "push"])).toBeUndefined();
       rmSync(join(hooks, "pre-push"));
+      for (const [key, value] of [
+        ["filter.attack.clean", "touch /tmp/unreviewed"],
+        ["filter.attack.process", "sh unreviewed.sh"],
+        ["core.fsmonitor", "unreviewed-command"],
+        ["commit.gpgSign", "true"],
+        ["gpg.program", "unreviewed-command"],
+      ]) {
+        git("config", key!, value!);
+        expect(activation()).toEqual([original[0]!]);
+        expect(materialize(["git", "add", "deleted.ts"])).toBeUndefined();
+        expect(
+          materialize(["git", "commit", "-m", "deletion", "--", "deleted.ts"]),
+        ).toBeUndefined();
+        expect(materialize(["git", "push"])).toBeUndefined();
+        git("config", "--unset", key!);
+      }
       git("config", "core.hooksPath", "/tmp");
       expect(activation()).toEqual([original[0]!]);
       expect(materialize(["git", "push"])).toBeUndefined();

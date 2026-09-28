@@ -324,6 +324,18 @@ function optionalGitConfig(key: string): string | undefined {
   return gitOutput("config", "--get-all", key) || undefined;
 }
 
+function safeGitExecutionConfig(): boolean {
+  const executableConfig = gitOutput(
+    "config",
+    "--get-regexp",
+    "^(filter\\.|gpg\\.|core\\.fsmonitor$|commit\\.gpgsign$)",
+  );
+  if (executableConfig === undefined) return true;
+  return executableConfig
+    .split("\n")
+    .every((line) => /^(?:core\.fsmonitor|commit\.gpgsign) (?:false|no|off|0)$/.test(line));
+}
+
 function hookTreeDigest(directory: string): string {
   const hash = createHash("sha256");
   function visitDirectory(path: string): void {
@@ -348,6 +360,7 @@ function liveGitMutationGrant(
   pullRequest: NonNullable<ReturnType<PullRequestLookup>>,
 ): string | undefined {
   try {
+    if (!safeGitExecutionConfig()) return undefined;
     const workspace = realpathSync(Deno.cwd());
     if (
       gitOutput("rev-parse", "--show-toplevel") !== workspace ||
@@ -468,6 +481,7 @@ function liveTrackedDeletion(path: string): boolean {
 function liveRegularWorkspaceFile(path: string): boolean {
   if (typeof Deno === "undefined") return false;
   try {
+    if (!safeGitExecutionConfig()) return false;
     const workingDirectory = Deno.realPathSync(Deno.cwd());
     const resolvedPath = Deno.realPathSync(path);
     const separator = Deno.build.os === "windows" ? "\\" : "/";

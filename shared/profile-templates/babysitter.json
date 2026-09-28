@@ -11,7 +11,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "9f888cf7755a0636576f6aee23bbcd7a334b90641d8ecd77c8af8fb47856bdf9",
+    "integrity": "9599b90e15eb27a7037ed8b73d3e313cfd8c1af31d397b1905b5cc70b0d362d7",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -33,7 +33,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "9f888cf7755a0636576f6aee23bbcd7a334b90641d8ecd77c8af8fb47856bdf9",
+    "integrity": "9599b90e15eb27a7037ed8b73d3e313cfd8c1af31d397b1905b5cc70b0d362d7",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -50,7 +50,7 @@
     "Use only for the repository and pull request frozen when this profile was activated.",
     "Read pull-request status before changing code or responding to review.",
     "For a CI or review fix, stage or commit only explicit regular workspace files or tracked deletions. Commit with git commit -m <message> -- <paths>. Push the current branch using plain git push or a verified remote with HEAD, the current branch, HEAD:<branch>, or HEAD:refs/heads/<branch>. Broad pathspecs, unrelated refs, force, amend, and hook bypass remain denied.",
-    "Workspace activation reviews and freezes the canonical repository, active PR branch, repository-local hook directory, and its file content and modes. Commit and push require this additional grant. Hooks run normally as trusted reviewed repository code; changed hooks require a new activation. Global or external hooks and hook symlinks are denied. Explicit repository/PR activation grants PR operations and git add only.",
+    "Workspace activation reviews and freezes the canonical repository, active PR branch, repository-local hook directory, and its file content and modes. Commit and push require this additional grant. Hooks run normally as trusted reviewed repository code; changed hooks require a new activation. Global or external hooks and hook symlinks are denied. Explicit repository/PR activation grants PR operations and git add only. Git mutations also reject configured filter and GPG programs, active filesystem-monitor commands, and commit signing; effective configuration includes global and included files.",
     "Inspect all review threads with: gh api graphql --paginate --slurp -f owner=<owner> -f repo=<repo> -F pr=<number> -f 'query=<ReviewThreads query>'. The reviewed request materializer validates the repository and pull-request query structure. It accepts any integer first value, any comment fields, optional pageInfo in either position, and the query field before or after the owner fields.",
     "Every reply and pull-request conversation comment must use an agent attribution prefix: _Replying as <agent> or [from <agent>]:. Run one REST command per comment with a non-empty body, or use the reviewed GraphQL thread-reply mutation. You may place multiple allowed commands in one ordinary shell sequence; do not use command substitution.",
     "Top-level comments accept gh pr comment <number> --repo <owner/repo> --body-file <path>. The attributed body must be a real file contained in the command working directory. Parent traversal, stdin, and symlink paths are not allowed. Existing REST review replies also accept -F body=@reply.md for a basename.",
