@@ -1,9 +1,13 @@
 import { McpServer, type ServerContext } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import packageManifest from "../package.json" with { type: "json" };
+import { z } from "zod";
 
 import { getActiveProfileHandler, listProfilesHandler } from "./mcp-read-handlers.js";
-import type { ProfileMutationIntent } from "./mutation-authorization.js";
+import {
+  completeProfileProposalArgumentsSchema,
+  type ProfileMutationIntent,
+} from "./mutation-authorization.js";
 import { PendingMutationCapacityError, PendingMutations } from "./pending-mutations.js";
 import { PolicyRepository } from "./policy-repository.js";
 import {
@@ -24,6 +28,13 @@ import {
 const policyRoot = getPolicyRoot();
 const repository = new PolicyRepository(policyRoot);
 const pendingMutations = new PendingMutations();
+const completeProposalInputSchema = z
+  .object({
+    profile: completeProfileProposalArgumentsSchema.shape.profile,
+    tests: completeProfileProposalArgumentsSchema.shape.tests,
+    threadId: nonEmptyStringSchema,
+  })
+  .strict();
 
 function text(value: string) {
   return { content: [{ type: "text" as const, text: value }] };
@@ -89,6 +100,21 @@ export function buildServer(): McpServer {
   const server = new McpServer(
     { name: "sandbox-extender", version: packageManifest.version },
     { requestState: { verify: verifyProfileMutationRequestState } },
+  );
+
+  server.registerTool(
+    "propose_complete_profile",
+    {
+      description:
+        "Write a complete parameterized pending-review profile definition, optional activation/request materializers, and authorization tests. Materializer paths and integrity values are derived from the profile ID. It never activates or promotes the profile.",
+      inputSchema: completeProposalInputSchema,
+    },
+    ({ profile, tests, threadId }, serverContext) =>
+      runMutation(
+        threadId,
+        { arguments: { profile, tests }, operation: "propose_complete_profile" },
+        serverContext,
+      ),
   );
 
   server.registerTool(

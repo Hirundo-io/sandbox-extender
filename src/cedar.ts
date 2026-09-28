@@ -1,7 +1,46 @@
 import { isAuthorized } from "@cedar-policy/cedar-wasm/nodejs";
 import type { CedarValueJson } from "@cedar-policy/cedar-wasm/nodejs";
 
-import type { CedarGrouping, Decision, EvaluationContext, NormalizedRequest } from "./types.js";
+import type { CedarGrouping, Decision, EvaluationContext } from "./types.js";
+
+function cedarPolicies(policies: CedarGrouping["policies"]): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(policies).map(([id, source]) => [
+      id,
+      typeof source === "string" ? source : source.join("\n"),
+    ]),
+  );
+}
+
+function entity(type: string, id: string): { type: string; id: string } {
+  return { type, id };
+}
+
+function cedarValue(value: unknown): CedarValueJson {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(cedarValue);
+  }
+
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        cedarValue(item),
+      ]),
+    ) as Record<string, CedarValueJson>;
+  }
+
+  throw new Error("request arguments must be JSON values");
+}
 
 /**
  * Evaluates one ordered policy grouping. Invalid policies and unsupported input
@@ -42,41 +81,16 @@ export function evaluateCedarGrouping(
   }
 }
 
-function cedarPolicies(policies: CedarGrouping["policies"]): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(policies).map(([id, source]) => [
-      id,
-      typeof source === "string" ? source : source.join("\n"),
-    ]),
-  );
-}
-
-function entity(type: string, id: string): { type: string; id: string } {
-  return { type, id };
-}
-
-function cedarValue(value: unknown): CedarValueJson {
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    typeof value === "number" ||
-    typeof value === "string"
-  ) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(cedarValue);
-  }
-
-  if (typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-        key,
-        cedarValue(item),
-      ]),
-    ) as Record<string, CedarValueJson>;
-  }
-
-  throw new Error("request arguments must be JSON values");
+/** Reject malformed Cedar at proposal time instead of silently turning it into abstention later. */
+export function validateCedarGrouping(grouping: CedarGrouping): void {
+  const answer = isAuthorized({
+    action: entity("Action", "proposal-validation"),
+    context: { arguments: {} },
+    entities: [],
+    policies: { staticPolicies: cedarPolicies(grouping.policies) },
+    principal: entity("AgentThread", "proposal-validation"),
+    resource: entity("Target", "proposal-validation"),
+    validateRequest: false,
+  });
+  if (answer.type !== "success") throw new Error(`invalid Cedar policy grouping ${grouping.id}`);
 }

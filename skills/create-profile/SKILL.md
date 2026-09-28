@@ -1,11 +1,16 @@
 ---
 name: create-profile
-description: Create a narrow Sandbox Extender profile proposal from an observed request. Use when the user asks to create, draft, or learn a permission profile. Do not use to activate a profile.
+description: Create pending-review Sandbox Extender profile proposals. Use observed-request creation for one narrow repeated request and complete-definition creation for parameterized profiles or reviewed templates. Do not use to activate a profile.
 ---
 
 # Create a profile proposal
 
-Create proposals from a concrete request the user wants to repeat. Do not generalize from a chat instruction or activate a proposal.
+Choose the authoring operation before writing a proposal. Do not activate a proposal.
+
+- Use `propose_profile` for one concrete observed request that must be repeated exactly.
+- Use `propose_complete_profile` for a parameterized profile or when adopting a reviewed template. Supply the whole pending-review profile, every authorization test, and source for each new materializer. The service derives materializer paths from the validated profile ID and derives integrity from source, permissions, and runtime version.
+
+For an exact observed request:
 
 1. Use `$HOME_FOLDER/.agents/sandbox-extender` as the policy repository. Call `initialize_policy_repository` with the current host thread ID. Continue only after the Agent Host displays the exact mutation and reports that the user accepted it.
 2. Use `audit.yaml` to identify an observed request when available, but treat its `resourceDisplay`, `resolvedTargetDisplay`, `resolvedTargetsDisplay`, and redacted argument values as display-only. Use the original Agent Host request for the exact action, target resource, and arguments. If that request is unavailable or any needed value was redacted, ask the user for the exact value; never copy a display-only or redacted value into a proposal.
@@ -43,3 +48,5 @@ Confirm that plugin validation rejects the old digest or an undeclared access.
 If the MCP approval cannot be completed, report the failure. Do not run the standalone CLI: agents mutate profiles only through MCP.
 
 The proposal must remain target-bound and action-bound. Do not broaden it to similar commands, other repositories, or other tool calls.
+
+For a complete profile, write only a pending-review definition. Use an activation materializer when activation arguments must freeze a workspace, backend, repository, or similar target. Give the approval UI time to show the profile ID, every generated file, materializer permissions and integrity, and all tests. Review and commit those files before promotion with the exact full commit SHA. Never treat proposal creation as promotion or activation.

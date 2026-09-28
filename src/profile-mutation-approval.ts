@@ -9,14 +9,19 @@ import {
 } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
+import { assertBoundedAuthoringInput } from "./authoring-limits.js";
 import type { ProfileMutationIntent } from "./mutation-authorization.js";
+import type { AuthorizationTest, ActivationMaterializer, RequestMaterializer } from "./types.js";
 import { redactSensitiveValue } from "./policy-service.js";
 
 export type MutationApprovalDetails = {
   readonly activationArguments?: Readonly<Record<string, unknown>>;
+  readonly affectedFiles?: readonly string[];
+  readonly materializers?: readonly (ActivationMaterializer | RequestMaterializer)[];
   readonly policyRevision?: string;
   readonly profileId?: string;
   readonly targets?: readonly string[];
+  readonly tests?: readonly AuthorizationTest[];
 };
 
 type ApprovalState = {
@@ -90,6 +95,8 @@ export function profileMutationApprovalIdentity(
   intent: ProfileMutationIntent,
   details: MutationApprovalDetails,
 ): string {
+  assertBoundedAuthoringInput(intent);
+  assertBoundedAuthoringInput(details);
   return createHmac("sha256", approvalIdentityKey)
     .update(canonicalJson({ details, intent }))
     .digest("hex");
@@ -119,6 +126,9 @@ function approvalMessage(
       details.activationArguments && canonicalJson(details.activationArguments),
     ),
     line("Targets", targets),
+    line("Affected Files", details.affectedFiles?.join(", ")),
+    line("Materializers", details.materializers && canonicalJson(details.materializers)),
+    line("Authorization Tests", details.tests && canonicalJson(details.tests)),
   ].join("\n");
 }
 
@@ -148,8 +158,7 @@ export async function requestProfileMutationApproval(
   details: MutationApprovalDetails,
   serverContext: ServerContext,
 ): Promise<ProfileMutationApproval> {
-  canonicalJson(intent);
-  canonicalJson(details);
+  assertBoundedAuthoringInput(threadId);
   const identity = profileMutationApprovalIdentity(intent, details);
   const sanitized = sanitizedApprovalValues(intent, details);
   const state = serverContext.mcpReq.requestState<ApprovalState>();

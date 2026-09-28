@@ -8,7 +8,7 @@ export {
   getActiveProfileStatus,
 } from "./policy-service.js";
 export type { ActiveProfileStatus } from "./policy-service.js";
-export { proposeProfile } from "./profile-authoring.js";
+export { proposeCompleteProfile, proposeProfile } from "./profile-authoring.js";
 export { getPolicyRoot } from "./policy-root.js";
 export { hostSchema, normalizedRequestSchema, profileIdSchema } from "./schemas.js";
 export type {
@@ -27,4 +27,5 @@ export type {
   ActivationMaterializer,
   RequestMaterializer,
   AuthorizationTest,
+  CompleteProfileDefinition,
 } from "./types.js";
