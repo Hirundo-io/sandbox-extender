@@ -90,7 +90,7 @@ describe("shipped Profile templates", () => {
     });
     expect(maker.activationMaterializer?.permissions).toEqual({
       ...emptyPermissions,
-      read: ["$WORKING_DIRECTORY"],
+      read: ["$ACTIVATION_WORKSPACE"],
       run: ["git"],
     });
     expect(maker.requestMaterializer?.permissions).toEqual({
@@ -344,7 +344,7 @@ describe("shipped Profile templates", () => {
       const activation = materializeActivation(
         profile.activationMaterializer!,
         { workspace, push: true },
-        workspace,
+        process.cwd(),
       );
       expect(activation?.targets).toHaveLength(2);
       const core = new PolicyCore();
@@ -375,7 +375,7 @@ describe("shipped Profile templates", () => {
       const dependenciesOnly = materializeActivation(
         profile.activationMaterializer!,
         { workspace },
-        workspace,
+        process.cwd(),
       );
       const dependencyCore = new PolicyCore();
       dependencyCore.activate(
@@ -418,7 +418,7 @@ describe("shipped Profile templates", () => {
       const withHooks = materializeActivation(
         profile.activationMaterializer!,
         { workspace, push: true },
-        workspace,
+        process.cwd(),
       );
       expect(withHooks?.targets).toHaveLength(2);
       const hooksCore = new PolicyCore();

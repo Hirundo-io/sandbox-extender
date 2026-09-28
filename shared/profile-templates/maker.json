@@ -4,10 +4,10 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "279cda0f2ca5cad3d7ecfbbf554548d390a2dd584e58684f423d86934dbe3fb0",
+    "integrity": "7734d05096b5d55424b5e33fe336fe198b09ee49c90fd39da41c1f7d6a6e942d",
     "language": "typescript",
     "permissions": {
-      "read": ["$WORKING_DIRECTORY"],
+      "read": ["$ACTIVATION_WORKSPACE"],
       "write": [],
       "env": [],
       "net": [],
