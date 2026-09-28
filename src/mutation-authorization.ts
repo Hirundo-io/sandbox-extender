@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { assertBoundedAuthoringInput } from "./authoring-limits.js";
+
 import {
   authorizationTestSchema,
   cedarGroupingSchema,
@@ -29,7 +31,13 @@ export const completeProfileSchema = z
     sessionContext: z.array(nonEmptyStringSchema).optional(),
     targetScope: z.literal("single").optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (profile) => profile.allowedTargets.length > 0 || profile.activationMaterializer !== undefined,
+    {
+      message: "complete profiles require allowed targets or an activation materializer",
+    },
+  );
 export const completeProfileProposalArgumentsSchema = z
   .object({ profile: completeProfileSchema, tests: z.array(authorizationTestSchema).min(1) })
   .strict();
@@ -82,5 +90,6 @@ const mutationIntentSchema = z.discriminatedUnion("operation", [
 export type ProfileMutationIntent = z.infer<typeof mutationIntentSchema>;
 
 export function parseProfileMutationIntent(candidate: unknown): ProfileMutationIntent {
+  assertBoundedAuthoringInput(candidate);
   return mutationIntentSchema.parse(candidate);
 }

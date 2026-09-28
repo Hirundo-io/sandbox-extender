@@ -83,6 +83,12 @@ For example, this Profile allows only Codex shell requests from one workspace:
 
 Start by asking the agent to use the `sandbox-extender:create-profile` skill. It initializes the policy repository, writes a target-bound proposal under `proposals/`, and writes its authorization cases under `tests/`. Review those files, promote the proposal with an explicit policy revision, then activate it with `sandbox-extender:activate-profile`. Use `sandbox-extender:disable-profile` to remove the binding. The plugin writes observed extension requests and decisions to `audit.yaml` once the policy repository exists. Audit targets use `resourceDisplay`, `resolvedTargetDisplay`, and `resolvedTargetsDisplay`: these values and credential-bearing arguments are redacted for display and must not be treated as exact profile-authoring inputs. Use the original Agent Host request, or supply the exact value explicitly, when creating a proposal.
 
+Complete profiles require either explicit allowed targets or an activation materializer.
+Authoring and mutation approval reject payloads above a conservative 1 MiB JSON budget,
+strings above 256 KiB of UTF-8, collections above 256 entries, and nesting beyond 32 levels.
+These limits cover materializer source, Cedar policies, targets, session context, authorization
+tests, mutation intents, and approval details before source inspection or serialization.
+
 ## Profile mutation Approval
 
 Profile mutations use MCP elicitation. Before changing the Policy Repository or

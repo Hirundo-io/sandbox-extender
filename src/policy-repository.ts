@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
+import { assertBoundedAuthoringInput } from "./authoring-limits.js";
 import { PolicyCore } from "./policy-core.js";
 import { verifyMaterializerIntegrity } from "./materializer-policy.js";
 import { materializeActivation } from "./materializer-runtime.js";
@@ -372,8 +373,10 @@ export class PolicyRepository {
     proposal: ProfileProposal,
     sources: { readonly activation?: string; readonly request?: string },
   ): Promise<void> {
+    assertBoundedAuthoringInput({ proposal, sources });
     const id = proposal.profile.id;
-    profileIdSchema.parse(id);
+    parseProposal(proposal.profile, `proposals/${id}.json`);
+    authorizationTestsSchema.parse(proposal.tests);
     const files = [
       ...(proposal.profile.activationMaterializer
         ? [[proposal.profile.activationMaterializer.file, sources.activation] as const]
@@ -384,6 +387,16 @@ export class PolicyRepository {
     ];
     if (files.some(([, source]) => source === undefined))
       throw new Error("materializer source is missing");
+    for (const materializer of [
+      proposal.profile.activationMaterializer,
+      proposal.profile.requestMaterializer,
+    ]) {
+      if (materializer) {
+        const source = files.find(([file]) => file === materializer.file)?.[1];
+        if (source === undefined) throw new Error("materializer source is missing");
+        verifyMaterializerIntegrity(materializer, source);
+      }
+    }
     for (const [file] of files) {
       if (!file.endsWith(`/${id}.ts`))
         throw new Error("materializer file must be derived from the profile ID");
@@ -403,7 +416,11 @@ export class PolicyRepository {
       }
     }
     for (const [file, source] of files)
-      await writeFile(join(this.root, file), `${source}\n`, { encoding: "utf8", mode: 0o600 });
+      await writeFile(join(this.root, file), source!, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "wx",
+      });
     await this.writeProposal(proposal);
   }
 
