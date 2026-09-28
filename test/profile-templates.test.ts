@@ -84,7 +84,7 @@ describe("shipped Profile templates", () => {
       await mkdir(bin);
       await writeFile(
         join(bin, "gh"),
-        `#!/bin/sh\n[ "$(pwd -P)" = '${workspace}' ] || exit 1\nprintf '%s\\n' '{"number":42,"url":"https://github.com/acme/example/pull/42","headRefName":"feature","headRefOid":"${"a".repeat(40)}"}'\n`,
+        `#!/bin/sh\n[ "$(pwd -P)" = '${workspace}' ] || exit 1\nprintf x >> '${policyRoot}/gh-calls'\nprintf '%s\\n' '{"number":42,"url":"https://github.com/acme/example/pull/42","headRefName":"feature","headRefOid":"${"a".repeat(40)}"}'\n`,
         { mode: 0o755 },
       );
       const launcher = join(policyRoot, "deno-fixture");
@@ -130,6 +130,13 @@ describe("shipped Profile templates", () => {
           options,
         );
       expect(evaluate()?.resource).toBe(activated!.targets[1]);
+      const callsBeforeCommandlessRequest = await readFile(join(policyRoot, "gh-calls"), "utf8");
+      expect(
+        materializeRequest(profile.requestMaterializer!, request, workspace, undefined, options),
+      ).toBeUndefined();
+      expect(await readFile(join(policyRoot, "gh-calls"), "utf8")).toBe(
+        callsBeforeCommandlessRequest,
+      );
       await writeFile(join(workspace, ".git/hooks/post-index-change"), "#!/bin/sh\nexit 0\n", {
         mode: 0o755,
       });
