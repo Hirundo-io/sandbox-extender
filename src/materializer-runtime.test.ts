@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  activationWorkspacePermission,
+  denoPermissionFlags,
   materializerIntegrity,
   requestResourcePermission,
   workingDirectoryPermission,
@@ -266,4 +268,61 @@ describe("materializer runtime", () => {
         materializeRequest(requestMaterializer(source), request(), process.cwd()),
       ).toBeUndefined();
   });
+});
+
+test("activation workspace permission reads only the canonical explicit workspace", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "activation-workspace-")));
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "activation-outside-")));
+  const permissions = { ...noPermissions, read: [activationWorkspacePermission] };
+  const source = `const input = await new Response(Deno.stdin.readable).json(); console.log(JSON.stringify({targets:[Deno.readTextFileSync(input.file)]}));`;
+  try {
+    const file = join(root, "target");
+    writeFileSync(file, "approved");
+    writeFileSync(join(outside, "target"), "outside");
+    expect(denoPermissionFlags(permissions, process.cwd(), undefined, root)).toEqual([
+      `--allow-read=${root}`,
+    ]);
+    for (const workspace of [undefined, "relative", join(root, "missing"), root + ",other", file])
+      expect(() => denoPermissionFlags(permissions, process.cwd(), undefined, workspace)).toThrow();
+    symlinkSync(root, join(outside, "alias"));
+    expect(() =>
+      denoPermissionFlags(permissions, process.cwd(), undefined, join(outside, "alias")),
+    ).toThrow();
+    expect(() =>
+      denoPermissionFlags(
+        { ...noPermissions, write: [activationWorkspacePermission] },
+        process.cwd(),
+        undefined,
+        root,
+      ),
+    ).toThrow("read-only");
+    for (const args of [
+      { workspace: root, file },
+      { workingDirectory: root, file },
+      { workspace: root, workingDirectory: root, file },
+    ])
+      expect(
+        materializeActivation(activationMaterializer(source, permissions), args, process.cwd()),
+      ).toEqual({ targets: ["approved"] });
+    expect(
+      materializeActivation(
+        activationMaterializer(source, permissions),
+        { workspace: root, workingDirectory: outside, file },
+        process.cwd(),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeActivation(
+        activationMaterializer(source, permissions),
+        { workspace: root, file: join(outside, "target") },
+        process.cwd(),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeRequest(requestMaterializer(requestSource, permissions), request(), process.cwd()),
+    ).toBeUndefined();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });

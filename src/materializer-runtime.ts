@@ -97,6 +97,7 @@ function executeMaterializer(
   workingDirectory: string,
   requestResource: string | undefined,
   options: MaterializerRuntimeOptions,
+  activationWorkspace?: unknown,
 ): unknown {
   if (!materializer.reviewedSource) throw new Error("materializer source was not reviewed");
   verifyMaterializerIntegrity(materializer, materializer.reviewedSource);
@@ -159,7 +160,12 @@ function executeMaterializer(
               `--allow-read=${temporaryDirectory}`,
             ]
           : ["--no-lock"]),
-        ...denoPermissionFlags(materializer.permissions, workingDirectory, requestResource),
+        ...denoPermissionFlags(
+          materializer.permissions,
+          workingDirectory,
+          requestResource,
+          activationWorkspace,
+        ),
         artifact,
       ],
       cwd: workingDirectory,
@@ -219,9 +225,20 @@ export function materializeActivation(
   options: MaterializerRuntimeOptions = {},
 ): ActivationResult | undefined {
   assertSupportedPlatform();
+  const conflictingWorkspace =
+    arguments_.workspace !== undefined &&
+    arguments_.workingDirectory !== undefined &&
+    arguments_.workspace !== arguments_.workingDirectory;
   try {
     return activationResult(
-      executeMaterializer(materializer, arguments_, workingDirectory, undefined, options),
+      executeMaterializer(
+        materializer,
+        arguments_,
+        workingDirectory,
+        undefined,
+        options,
+        conflictingWorkspace ? undefined : (arguments_.workspace ?? arguments_.workingDirectory),
+      ),
     );
   } catch {
     return undefined;
