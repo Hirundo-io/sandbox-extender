@@ -69,8 +69,12 @@ export async function prepareProfileMutation(
         },
         execute: async () => {
           await repository.writeCompleteProposal(proposal, {
-            activation: intent.arguments.profile.activationMaterializer?.source,
-            request: intent.arguments.profile.requestMaterializer?.source,
+            ...(intent.arguments.profile.activationMaterializer
+              ? { activation: intent.arguments.profile.activationMaterializer.source }
+              : {}),
+            ...(intent.arguments.profile.requestMaterializer
+              ? { request: intent.arguments.profile.requestMaterializer.source }
+              : {}),
           });
           return `Wrote pending proposal ${proposal.profile.id}. Review proposals/${proposal.profile.id}.json, tests/${proposal.profile.id}.json, and its materializers before promoting it.`;
         },

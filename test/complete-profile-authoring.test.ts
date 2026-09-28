@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { proposeCompleteProfile } from "../src/profile-authoring.js";
+import { verifyMaterializerIntegrity } from "../src/materializer-policy.js";
 import { PolicyRepository } from "../src/policy-repository.js";
 
 const permissions = { env: [], ffi: [], net: [], read: [], run: [], sys: [], write: [] } as const;
@@ -35,6 +36,37 @@ const tests = [
 ];
 
 describe("complete profile authoring", () => {
+  test.each(["proposals", "tests"])(
+    "removes published materializers when %s persistence fails and allows a retry",
+    async (artifactDirectory) => {
+      const root = await mkdtemp(join(tmpdir(), "sandbox-extender-rollback-"));
+      try {
+        const repository = new PolicyRepository(root);
+        const profile = definition();
+        const proposal = proposeCompleteProfile(
+          { ...profile, requestMaterializer: profile.activationMaterializer },
+          tests,
+        );
+        const obstruction = join(root, artifactDirectory, "maker-fixture.json");
+        await mkdir(obstruction, { recursive: true });
+        const sources = { activation: activationSource, request: activationSource };
+        await expect(repository.writeCompleteProposal(proposal, sources)).rejects.toThrow();
+        for (const kind of ["activation", "requests"]) {
+          await expect(
+            readFile(join(root, "materializers", kind, "maker-fixture.ts")),
+          ).rejects.toThrow("ENOENT");
+        }
+        await rm(obstruction, { recursive: true });
+        await repository.writeCompleteProposal(proposal, sources);
+        expect(await readFile(join(root, "tests", "maker-fixture.json"), "utf8")).toContain(
+          "allows the frozen workspace",
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("rejects empty tests at the authoring boundary", () => {
     expect(() => proposeCompleteProfile(definition(), [])).toThrow("at least one test");
   });
@@ -63,25 +95,95 @@ describe("complete profile authoring", () => {
     expect(proposal.tests[0]?.request.threadId).toBe("proposal-test");
   });
 
-  test("writes only pending proposal files and refuses conflicting materializers", async () => {
+  test.each([activationSource, `${activationSource}\n`])(
+    "preserves materializer bytes and refuses overwrites",
+    async (source) => {
+      const root = await mkdtemp(join(tmpdir(), "sandbox-extender-complete-"));
+      try {
+        const repository = new PolicyRepository(root);
+        const proposal = proposeCompleteProfile(
+          {
+            ...definition(),
+            activationMaterializer: { ...definition().activationMaterializer, source },
+          },
+          tests,
+        );
+        await repository.writeCompleteProposal(proposal, { activation: source });
+        expect(await readFile(join(root, "proposals", "maker-fixture.json"), "utf8")).toContain(
+          "pending-review",
+        );
+        expect(
+          await readFile(join(root, "materializers", "activation", "maker-fixture.ts"), "utf8"),
+        ).toBe(source);
+        verifyMaterializerIntegrity(
+          proposal.profile.activationMaterializer!,
+          await readFile(join(root, "materializers", "activation", "maker-fixture.ts"), "utf8"),
+        );
+        expect(await repository.listProfiles()).toEqual([]);
+        await expect(
+          repository.writeCompleteProposal(proposal, { activation: source }),
+        ).rejects.toThrow("overwrite");
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  test("rejects tampered source before writing proposal artifacts", async () => {
     const root = await mkdtemp(join(tmpdir(), "sandbox-extender-complete-"));
     try {
       const repository = new PolicyRepository(root);
       const proposal = proposeCompleteProfile(definition(), tests);
-      await repository.writeCompleteProposal(proposal, { activation: activationSource });
-      expect(await readFile(join(root, "proposals", "maker-fixture.json"), "utf8")).toContain(
-        "pending-review",
-      );
-      expect(
-        await readFile(join(root, "materializers", "activation", "maker-fixture.ts"), "utf8"),
-      ).toContain("targets");
-      expect(await repository.listProfiles()).toEqual([]);
       await expect(
-        repository.writeCompleteProposal(proposal, { activation: activationSource }),
-      ).rejects.toThrow("overwrite");
+        repository.writeCompleteProposal(proposal, { activation: activationSource + "\n" }),
+      ).rejects.toThrow("integrity mismatch");
+      await expect(
+        readFile(join(root, "materializers", "activation", "maker-fixture.ts")),
+      ).rejects.toThrow("ENOENT");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
+  });
+
+  test.each(["allow", "abstain"] as const)(
+    "rejects targetless profiles even with %s tests",
+    (expected) => {
+      const { activationMaterializer: _materializer, ...profile } = definition();
+      expect(() => proposeCompleteProfile(profile, [{ ...tests[0]!, expected }])).toThrow(
+        "require allowed targets",
+      );
+      expect(
+        proposeCompleteProfile({ ...profile, allowedTargets: ["/workspace"] }, tests).profile
+          .allowedTargets,
+      ).toEqual(["/workspace"]);
+    },
+  );
+
+  test.each([
+    { sessionContext: Array.from({ length: 257 }, () => "entry") },
+    { allowedTargets: Array.from({ length: 257 }, () => "/workspace") },
+    {
+      activationMaterializer: { permissions, runtimeVersion: "2.8.1", source: "x".repeat(262145) },
+    },
+    { groupings: [{ id: "oversized", policies: { allow: "x".repeat(262145) } }] },
+  ])("bounds authoring before materializer and Cedar validation", (change) => {
+    expect(() => proposeCompleteProfile({ ...definition(), ...change }, tests)).toThrow(
+      "authoring",
+    );
+  });
+
+  test("bounds test count and nested test payloads", () => {
+    expect(() =>
+      proposeCompleteProfile(
+        definition(),
+        Array.from({ length: 257 }, () => tests[0]!),
+      ),
+    ).toThrow("256 entries");
+    expect(() =>
+      proposeCompleteProfile(definition(), [
+        { ...tests[0]!, activationArguments: { payload: "x".repeat(262145) } },
+      ]),
+    ).toThrow("256 KiB");
   });
 
   test.each([

@@ -1,10 +1,11 @@
-import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
+import { assertBoundedAuthoringInput } from "./authoring-limits.js";
 import { PolicyCore } from "./policy-core.js";
 import { verifyMaterializerIntegrity } from "./materializer-policy.js";
 import { materializeActivation } from "./materializer-runtime.js";
@@ -372,8 +373,10 @@ export class PolicyRepository {
     proposal: ProfileProposal,
     sources: { readonly activation?: string; readonly request?: string },
   ): Promise<void> {
+    assertBoundedAuthoringInput({ proposal, sources });
     const id = proposal.profile.id;
-    profileIdSchema.parse(id);
+    parseProposal(proposal.profile, `proposals/${id}.json`);
+    authorizationTestsSchema.parse(proposal.tests);
     const files = [
       ...(proposal.profile.activationMaterializer
         ? [[proposal.profile.activationMaterializer.file, sources.activation] as const]
@@ -384,6 +387,16 @@ export class PolicyRepository {
     ];
     if (files.some(([, source]) => source === undefined))
       throw new Error("materializer source is missing");
+    for (const materializer of [
+      proposal.profile.activationMaterializer,
+      proposal.profile.requestMaterializer,
+    ]) {
+      if (materializer) {
+        const source = files.find(([file]) => file === materializer.file)?.[1];
+        if (source === undefined) throw new Error("materializer source is missing");
+        verifyMaterializerIntegrity(materializer, source);
+      }
+    }
     for (const [file] of files) {
       if (!file.endsWith(`/${id}.ts`))
         throw new Error("materializer file must be derived from the profile ID");
@@ -402,9 +415,23 @@ export class PolicyRepository {
           throw new Error("materializer directory must not be a symlink");
       }
     }
-    for (const [file, source] of files)
-      await writeFile(join(this.root, file), `${source}\n`, { encoding: "utf8", mode: 0o600 });
-    await this.writeProposal(proposal);
+    const published: string[] = [];
+    try {
+      for (const [file, source] of files) {
+        const destination = join(this.root, file);
+        const handle = await open(destination, "wx", 0o600);
+        published.push(destination);
+        try {
+          await handle.writeFile(source!, "utf8");
+        } finally {
+          await handle.close();
+        }
+      }
+      await this.writeProposal(proposal);
+    } catch (error) {
+      await Promise.all(published.map((file) => unlink(file)));
+      throw error;
+    }
   }
 
   async promoteProposal(profileId: string, policyRevision: string): Promise<void> {
