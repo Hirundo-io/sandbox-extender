@@ -1,18 +1,30 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   canonicalExistingAncestor,
   materializeMakerDependency,
+  materializeMakerActivation,
+  materializeMakerRequest,
+  runMakerMaterializer,
   runMakerDependencyMaterializer,
 } from "./maker-dependency.js";
 
 const temporaryDirectories: string[] = [];
 
 function workspace(): string {
-  const directory = mkdtempSync(join(tmpdir(), "dependency-materializer-"));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "dependency-materializer-")));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -97,6 +109,102 @@ describe("Maker dependency request materializer", () => {
         unknownOptionCount: 0,
       }),
     );
+  });
+
+  test.each([
+    ["pixi.toml", "[pypi-options]\nno-build = true", true],
+    ["pixi.toml", "[workspace.pypi-options]\nno-build = true", true],
+    ["pyproject.toml", "[tool.pixi.workspace.pypi-options]\nno-build = true", true],
+    [
+      "pixi.toml",
+      "[workspace.pypi-options]\nno-build = true\n[environments.ci]\nno-default-feature=true\nfeatures=[]",
+      true,
+    ],
+    ...["false", "'bad'", "[]", "[1]"].map(
+      (value) =>
+        ["pixi.toml", `environments=${value}\n[pypi-options]\nno-build=true`, false] as const,
+    ),
+    ...[
+      "false",
+      "'bad'",
+      "[1]",
+      "{features=['ci'], no-default-feature='true'}",
+      "{features=false}",
+    ].map(
+      (value) =>
+        ["pixi.toml", `[pypi-options]\nno-build=true\n[environments]\nci=${value}`, false] as const,
+    ),
+    ["pyproject.toml", "[tool.pixi.pypi-options]\nno-build = true", true],
+    ["pyproject.toml", "[tool.uv]\nno-build = true", false],
+    ["pixi.toml", "[pypi-options]\nno-build = false", false],
+    ["pixi.toml", "[pypi-options]\nno-build = ['a']", false],
+    ["pixi.toml", "# no-build = true", false],
+    ["pixi.toml", "[pypi-options]\nno-build = 'true'", false],
+    ["pixi.toml", "[pypi-options]\nno-build = true\nno-build = false", false],
+    [
+      "pixi.toml",
+      "[pypi-options]\nno-build = true\n[environments.ci]\nno-default-feature=true",
+      false,
+    ],
+    ["pixi.toml", "[pypi-options]\nno-build = true\n[environments]\nci=['test']", true],
+    ["pixi.toml", "[pypi-options]\nno-build = true\n[environments.ci]\nfeatures=['test']", true],
+  ])("checks %s no-build configuration %#", (name, manifest, expected) => {
+    const root = workspace();
+    writeFileSync(join(root, name), manifest);
+    expect(
+      materializeMakerDependency(
+        candidate(root, ["pixi", "lock", "--manifest-path", name]),
+        (path) => readFileSync(path, "utf8"),
+      )?.pypiNoBuild,
+    ).toBe(expected);
+  });
+
+  test("checks no-build on features that replace the default environment", () => {
+    const root = workspace();
+    const words = ["pixi", "lock", "--manifest-path", "pixi.toml"];
+    for (const [setting, expected] of [
+      ["true", true],
+      ["false", false],
+    ] as const) {
+      writeFileSync(
+        join(root, "pixi.toml"),
+        `[pypi-options]
+no-build = true
+[feature.ci.pypi-options]
+no-build = ${setting}
+[environments.ci]
+no-default-feature = true
+features = ["ci"]
+`,
+      );
+      expect(
+        materializeMakerDependency(candidate(root, words), (path) => readFileSync(path, "utf8"))
+          ?.pypiNoBuild,
+      ).toBe(expected);
+    }
+  });
+
+  test("fails closed if the runtime manifest reader is unavailable", () => {
+    const root = workspace();
+    expect(
+      materializeMakerDependency(candidate(root, ["pixi", "lock", "--manifest-path", "pixi.toml"]))
+        ?.pypiNoBuild,
+    ).toBe(false);
+  });
+
+  test("rejects missing, directory-discovered, and escaped manifests", () => {
+    const root = workspace();
+    const outside = workspace();
+    writeFileSync(join(outside, "pixi.toml"), "[pypi-options]\nno-build=true");
+    symlinkSync(join(outside, "pixi.toml"), join(root, "pixi.toml"));
+    for (const name of ["pixi.toml", ".", "missing/pyproject.toml", "../pixi.toml"]) {
+      expect(
+        materializeMakerDependency(
+          candidate(root, ["pixi", "lock", "--manifest-path", name]),
+          (path) => readFileSync(path, "utf8"),
+        )?.pypiNoBuild,
+      ).toBe(false);
+    }
   });
 
   test("reports policy-relevant unsafe facts instead of deciding", () => {
@@ -240,4 +348,201 @@ describe("Maker dependency request materializer", () => {
   ])("rejects unsupported input %#", (value) =>
     expect(materializeMakerDependency(value)).toBeUndefined(),
   );
+});
+
+function gitFacts(root: string, overrides: Readonly<Record<string, string | undefined>> = {}) {
+  mkdirSync(join(root, ".git", "hooks"), { recursive: true });
+  mkdirSync(join(root, ".hooks"), { recursive: true });
+  const facts: Readonly<Record<string, string | undefined>> = {
+    "rev-parse --show-toplevel": root,
+    "symbolic-ref --quiet --short HEAD": "feature",
+    "check-ref-format refs/heads/feature": "",
+    "remote get-url --push --all origin": "https://github.com/acme/repo.git",
+    "rev-parse --git-path hooks": ".git/hooks",
+    ...overrides,
+  };
+  return (_workspace: string, args: readonly string[]) => facts[args.join(" ")];
+}
+
+describe("Maker push grants", () => {
+  test("freezes workspace, GitHub remote, branch and repository hook directory", () => {
+    const root = workspace();
+    const git = gitFacts(root);
+    const activation = materializeMakerActivation({ workspace: root, push: true }, git);
+    expect(activation).toHaveLength(2);
+    const result = materializeMakerRequest(
+      candidate(root, ["git", "push", "origin", "HEAD:refs/heads/feature"]),
+      git,
+    );
+    expect(result?.resource).toBe(activation![1]!);
+    expect(materializeMakerActivation({ workspace: root }, git)).toEqual([root]);
+    expect(materializeMakerRequest(candidate(root, ["npm", "install", "zod"]), git)).toHaveProperty(
+      "manager",
+      "npm",
+    );
+    expect(
+      materializeMakerActivation(
+        { workspace: root, push: true },
+        gitFacts(root, { "config --show-scope --get core.hooksPath": "local\t.hooks" }),
+      ),
+    ).toHaveLength(2);
+  });
+  test.each([
+    ["rev-parse --show-toplevel", "/elsewhere"],
+    ["symbolic-ref --quiet --short HEAD", undefined],
+    ["symbolic-ref --quiet --short HEAD", "bad name"],
+    ["check-ref-format refs/heads/feature", undefined],
+    ["remote get-url --push --all origin", "ext::evil"],
+    [
+      "remote get-url --push --all origin",
+      "https://github.com/acme/repo.git\nhttps://github.com/acme/other.git",
+    ],
+    ["remote get-url --push --all origin", undefined],
+    ["config --get-all remote.origin.mirror", "true"],
+    ["config --get-all push.followTags", "true"],
+    ["config --get-all push.recurseSubmodules", "on-demand"],
+    ["config --get-all push.gpgSign", "true"],
+    ["config --get-all remote.origin.receivepack", "evil"],
+    ["config --get-all remote.origin.vcs", "evil"],
+    ["config --get-all push.pushOption", "evil"],
+    ["config --get-all core.sshCommand", "evil"],
+    ["config --get-all core.gitProxy", "evil"],
+    ["config --get-all remote.origin.proxy", "evil"],
+    ["config --show-scope --get core.hooksPath", "global\t.hooks"],
+    ["config --show-scope --get core.hooksPath", "local\t/elsewhere/hooks"],
+    ["rev-parse --git-path hooks", undefined],
+  ])("rejects unsafe metadata %s", (key, value) => {
+    const root = workspace();
+    const git = gitFacts(root, { [key!]: value });
+    expect(materializeMakerActivation({ workspace: root, push: true }, git)).toBeUndefined();
+    expect(
+      materializeMakerRequest(
+        candidate(root, ["git", "push", "origin", "HEAD:refs/heads/feature"]),
+        git,
+      ),
+    ).toBeUndefined();
+  });
+  test("binds reviewed hook contents and modes, including nested helpers", () => {
+    const root = workspace();
+    const git = gitFacts(root);
+    const hooks = join(root, ".git", "hooks");
+    mkdirSync(join(hooks, "helpers"));
+    const hook = join(hooks, "pre-push");
+    writeFileSync(hook, "#!/bin/sh\nexit 0\n");
+    chmodSync(hook, 0o755);
+    writeFileSync(join(hooks, "helpers", "check"), "reviewed");
+    const grant = () => materializeMakerActivation({ workspace: root, push: true }, git)?.[1];
+    const original = grant();
+    expect(original).toBeDefined();
+    writeFileSync(hook, "#!/bin/sh\nexit 1\n");
+    expect(grant()).not.toBe(original);
+    writeFileSync(hook, "#!/bin/sh\nexit 0\n");
+    expect(grant()).toBe(original);
+    chmodSync(hook, 0o644);
+    expect(grant()).not.toBe(original);
+    chmodSync(hook, 0o755);
+    writeFileSync(join(hooks, "helpers", "check"), "modified");
+    expect(grant()).not.toBe(original);
+    rmSync(join(hooks, "helpers", "check"));
+    symlinkSync(hook, join(hooks, "helpers", "check"));
+    expect(grant()).toBeUndefined();
+    rmSync(join(hooks, "helpers", "check"));
+    const fifo = Bun.spawnSync(["/usr/bin/mkfifo", join(hooks, "fifo")]);
+    expect(fifo.exitCode).toBe(0);
+    expect(grant()).toBeUndefined();
+  });
+
+  test("accepts explicit disabled extra push behavior", () => {
+    const root = workspace();
+    expect(
+      materializeMakerActivation(
+        { workspace: root, push: true },
+        gitFacts(root, {
+          "config --get-all push.followTags": "false",
+          "config --get-all push.recurseSubmodules": "no",
+        }),
+      ),
+    ).toHaveLength(2);
+  });
+  test("fails closed on missing workspaces, invalid input, and metadata errors", () => {
+    const root = workspace();
+    const git = gitFacts(root);
+    for (const value of [
+      undefined,
+      {},
+      { workspace: "relative" },
+      { workspace: root, push: "true" },
+      { workspace: join(root, "missing"), push: true },
+    ])
+      expect(materializeMakerActivation(value, git)).toBeUndefined();
+    for (const value of [
+      { command: { words: ["git"] } },
+      candidate(root, ["git", "push"]),
+      candidate(root, ["git", "push", "origin", "HEAD:refs/heads/main"]),
+      candidate(join(root, "missing"), ["git"]),
+      candidate(root, ["git"], "/elsewhere"),
+    ])
+      expect(materializeMakerRequest(value, git)).toBeUndefined();
+    mkdirSync(join(root, "nested"));
+    expect(
+      materializeMakerRequest(candidate(root, ["git"], join(root, "nested")), git),
+    ).toBeUndefined();
+    expect(
+      materializeMakerActivation({ workspace: root, push: true }, () => {
+        throw new Error("unavailable");
+      }),
+    ).toBeUndefined();
+  });
+  test("executes activation and request output with the runtime Git reader", async () => {
+    const root = workspace();
+    const facts = gitFacts(root);
+    let fail = false;
+    const original = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    Object.defineProperty(globalThis, "Deno", {
+      configurable: true,
+      value: {
+        readTextFileSync: () => "[pypi-options]\nno-build=true",
+        Command: class {
+          constructor(
+            _command: string,
+            readonly options: { args: readonly string[] },
+          ) {}
+          outputSync() {
+            const value = facts(root, this.options.args.slice(2));
+            return {
+              success: !fail && value !== undefined,
+              code: fail ? 128 : value === undefined ? 1 : 0,
+              stdout: new TextEncoder().encode(value ?? ""),
+            };
+          }
+        },
+      },
+    });
+    try {
+      const output: string[] = [];
+      expect(
+        materializeMakerRequest(candidate(root, ["pixi", "lock", "--manifest-path", "pixi.toml"])),
+      ).toHaveProperty("pypiNoBuild", true);
+      expect(
+        await runMakerMaterializer(
+          Promise.resolve({ workspace: root, push: true }),
+          output.push.bind(output),
+        ),
+      ).toBe(true);
+      expect(JSON.parse(output[0]!).targets).toHaveLength(2);
+      expect(
+        await runMakerMaterializer(
+          Promise.resolve(candidate(root, ["git", "push", "origin", "HEAD:refs/heads/feature"])),
+          output.push.bind(output),
+        ),
+      ).toBe(true);
+      expect(await runMakerMaterializer(Promise.resolve({ workspace: "relative" }))).toBe(false);
+      expect(await runMakerMaterializer(Promise.resolve({}))).toBe(false);
+      fail = true;
+      expect(materializeMakerActivation({ workspace: root, push: true })).toBeUndefined();
+    } finally {
+      if (original) Object.defineProperty(globalThis, "Deno", original);
+      else Reflect.deleteProperty(globalThis, "Deno");
+    }
+  });
 });

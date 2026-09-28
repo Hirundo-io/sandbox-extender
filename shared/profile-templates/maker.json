@@ -3,23 +3,30 @@
   "policyRevision": "pending-review",
   "allowedTargets": [],
   "activationMaterializer": {
-    "file": "materializers/activation/local-workspace.ts",
-    "integrity": "01121fc3fa30380f7af79f36779428c6cc7d64620e43e549d42e17dfbf4beb35",
+    "file": "materializers/requests/maker-dependency.ts",
+    "integrity": "7734d05096b5d55424b5e33fe336fe198b09ee49c90fd39da41c1f7d6a6e942d",
     "language": "typescript",
     "permissions": {
-      "read": [],
+      "read": ["$ACTIVATION_WORKSPACE"],
       "write": [],
       "env": [],
       "net": [],
       "sys": [],
-      "run": [],
+      "run": ["git"],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
+    "dependencies": {
+      "directory": "materializers/dependencies/toml",
+      "packageJson": "package.json",
+      "packageJsonIntegrity": "2ba437edaac5bd45c9349e14581b5eebbeedd02cb1fa743fb50303cf97df7f27",
+      "denoLock": "deno.lock",
+      "denoLockIntegrity": "c1740658959770d0e4a6c1f4e2a9d72f5b7a3fc65e00c218ede6c5b8e87cb8b1"
+    }
   },
   "requestMaterializer": {
     "file": "materializers/requests/maker-dependency.ts",
-    "integrity": "b94919c42b39d1d98d58533f9bc61b53ceb8385e2f8c048efca1d013ebc66e47",
+    "integrity": "813242759e8f31be51ad5709a9b86bccc2893c43569244580f00db4f05e56c52",
     "language": "typescript",
     "permissions": {
       "read": ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
@@ -27,16 +34,26 @@
       "env": [],
       "net": [],
       "sys": [],
-      "run": [],
+      "run": ["git"],
       "ffi": []
     },
-    "runtimeVersion": "2.8.1"
+    "runtimeVersion": "2.8.1",
+    "dependencies": {
+      "directory": "materializers/dependencies/toml",
+      "packageJson": "package.json",
+      "packageJsonIntegrity": "2ba437edaac5bd45c9349e14581b5eebbeedd02cb1fa743fb50303cf97df7f27",
+      "denoLock": "deno.lock",
+      "denoLockIntegrity": "c1740658959770d0e4a6c1f4e2a9d72f5b7a3fc65e00c218ede6c5b8e87cb8b1"
+    }
   },
   "sessionContext": [
     "Prefer established packages with multiple maintainers and recent updates.",
     "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
     "Keep dependency changes narrow; explain package and lockfile changes.",
-    "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace."
+    "uv sync remains unsupported until the host bridge can clear or bind UV_PROJECT_ENVIRONMENT; it can redirect writes outside the workspace.",
+    "Before Pixi operations, persist no-build = true in [tool.pixi.workspace.pypi-options] in pyproject.toml (or [workspace.pypi-options] in pixi.toml). Default-feature pypi-options also work, but every environment with no-default-feature = true then needs it on an included feature. Use an explicit --manifest-path to that file; directory discovery is not authorized.",
+    "When using uv, encourage persisting [tool.uv] no-build = true in pyproject.toml; keep --no-build on every Maker command because --no-config ignores persisted settings. Never weaken no-build to resolve an unavailable wheel; report the package requiring a source build.",
+    "Git pushes require explicit activation with push: true from the canonical repository root. This freezes the origin GitHub URL, current branch, repository hook directory, and hook-tree contents and modes. Use only git push origin HEAD:refs/heads/<activated-branch> from that root. Activation trusts reviewed repository hooks; review them before activation. Global or external hook directories are not included in that trust. Remote, branch, hook-directory, hook-content, and hook-mode changes require review and reactivation."
   ],
   "groupings": [
     {
@@ -86,8 +103,17 @@
           "  context.materialized.optionCount == 4 && context.materialized.duplicateOptionCount == 0 &&",
           "  context.materialized.unknownOptionCount == 0 && context.materialized.pathsWithinWorkspace &&",
           "  context.materialized.positionalsValid && context.materialized.options.noConfig &&",
-          "  context.materialized.options.noInstall && context.materialized.options.offline",
+          "  context.materialized.pypiNoBuild && context.materialized.options.noInstall && context.materialized.options.offline",
           "};"
+        ]
+      }
+    },
+    {
+      "id": "git-push",
+      "policies": {
+        "allowBoundPush": [
+          "permit(principal, action, resource)",
+          "when { context.materialized.operation == \"git.push\" };"
         ]
       }
     }

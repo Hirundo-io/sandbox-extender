@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +19,7 @@ import {
   reviewThreadsQuery,
 } from "../shared/materializers/requests/github-pull-request.js";
 import { materializeMakerDependency } from "../shared/materializers/requests/maker-dependency.js";
+import { materializeActivation } from "../src/materializer-runtime.js";
 import { runFixtureGit } from "./git-fixture.js";
 
 const sharedDirectory = join(process.cwd(), "shared");
@@ -78,10 +88,15 @@ describe("shipped Profile templates", () => {
       read: ["$WORKING_DIRECTORY"],
       run: ["gh"],
     });
-    expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
+    expect(maker.activationMaterializer?.permissions).toEqual({
+      ...emptyPermissions,
+      read: ["$ACTIVATION_WORKSPACE"],
+      run: ["git"],
+    });
     expect(maker.requestMaterializer?.permissions).toEqual({
       ...emptyPermissions,
       read: ["$REQUEST_RESOURCE", "$WORKING_DIRECTORY"],
+      run: ["git"],
     });
     expect(scout.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(scout.requestMaterializer?.permissions).toEqual({ ...emptyPermissions, run: ["git"] });
@@ -268,6 +283,7 @@ describe("shipped Profile templates", () => {
   test("Maker permits script-free npm installs inside the effective workspace", async () => {
     const workspace = await realpath(await mkdtemp(join(tmpdir(), "sandbox-extender-maker-")));
     try {
+      await writeFile(join(workspace, "pixi.toml"), "[pypi-options]\nno-build = true\n");
       const nested = join(workspace, "packages", "app");
       await mkdir(nested, { recursive: true });
       await mkdir(join(workspace, "~", "literal"), { recursive: true });
@@ -285,9 +301,9 @@ describe("shipped Profile templates", () => {
         "uv add requests --no-sync --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
         "uv remove requests --no-sync --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
         "uv lock --no-build --no-sources --no-config --no-python-downloads --project . --cache-dir .cache/uv",
-        "pixi add python=3.12 --no-install --offline --no-config --manifest-path .",
-        "pixi remove python --no-install --offline --no-config --manifest-path .",
-        "pixi lock --no-install --offline --no-config --manifest-path .",
+        "pixi add python=3.12 --no-install --offline --no-config --manifest-path pixi.toml",
+        "pixi remove python --no-install --offline --no-config --manifest-path pixi.toml",
+        "pixi lock --no-install --offline --no-config --manifest-path pixi.toml",
         "cd packages/app && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun",
         'cd "~/literal" && bun add zod --ignore-scripts --lockfile-only --cwd . --cache-dir .cache/bun',
       ]) {
@@ -313,6 +329,196 @@ describe("shipped Profile templates", () => {
       expect(maker.sessionContext).toContain(
         "No high/critical known vulnerabilities; inspect lockfiles and audit data.",
       );
+    } finally {
+      await rm(workspace, { force: true, recursive: true });
+    }
+  }, 20_000);
+
+  test("Maker binds opt-in pushes to the activated repository, ref, and reviewed hooks", async () => {
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "maker-push-")));
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "maker-push-outside-")));
+    try {
+      runGit(workspace, "init", "--initial-branch=feature");
+      runGit(workspace, "remote", "add", "origin", "https://github.com/acme/example.git");
+      const profile = await profileTemplate("maker");
+      const activation = materializeActivation(
+        profile.activationMaterializer!,
+        { workspace, push: true },
+        process.cwd(),
+      );
+      expect(activation?.targets).toHaveLength(2);
+      const core = new PolicyCore();
+      core.activate({ ...profile, allowedTargets: new Set(activation!.targets) }, "thread-1");
+      const decision = async (command: string, resource = workspace) =>
+        (
+          await core.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command, workdir: resource },
+            resource,
+            threadId: "thread-1",
+          })
+        ).decision;
+      const push = "git push origin HEAD:refs/heads/feature";
+      expect(await decision(push)).toBe("allow");
+      for (const command of [
+        "git push",
+        "git push origin",
+        "git push origin HEAD:refs/heads/main",
+        "git push other HEAD:refs/heads/feature",
+        "git push origin +HEAD:refs/heads/feature",
+        `${push} --force`,
+        `${push} --no-verify`,
+        `${push} --tags`,
+        "git -C . push origin HEAD:refs/heads/feature",
+      ])
+        expect(await decision(command)).toBe("abstain");
+      const dependenciesOnly = materializeActivation(
+        profile.activationMaterializer!,
+        { workspace },
+        process.cwd(),
+      );
+      const dependencyCore = new PolicyCore();
+      dependencyCore.activate(
+        { ...profile, allowedTargets: new Set(dependenciesOnly!.targets) },
+        "thread-1",
+      );
+      expect(
+        (
+          await dependencyCore.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command: push, workdir: workspace },
+            resource: workspace,
+            threadId: "thread-1",
+          })
+        ).decision,
+      ).toBe("abstain");
+      runGit(workspace, "remote", "set-url", "origin", "https://github.com/acme/other.git");
+      expect(await decision(push)).toBe("abstain");
+      runGit(workspace, "remote", "set-url", "origin", "https://github.com/acme/example.git");
+      runGit(workspace, "symbolic-ref", "HEAD", "refs/heads/other");
+      expect(await decision("git push origin HEAD:refs/heads/other")).toBe("abstain");
+      runGit(workspace, "symbolic-ref", "HEAD", "refs/heads/feature");
+      for (const [key, value] of [
+        ["remote.origin.mirror", "true"],
+        ["push.followTags", "true"],
+        ["push.recurseSubmodules", "on-demand"],
+        ["remote.origin.receivepack", "evil"],
+        ["push.pushOption", "evil"],
+      ]) {
+        runGit(workspace, "config", key!, value!);
+        expect(await decision(push)).toBe("abstain");
+        runGit(workspace, "config", "--unset", key!);
+      }
+      await mkdir(join(workspace, ".githooks"));
+      runGit(workspace, "config", "core.hooksPath", ".githooks");
+      expect(await decision(push)).toBe("abstain");
+      const prePush = join(workspace, ".githooks", "pre-push");
+      await writeFile(prePush, "#!/bin/sh\nexit 0\n");
+      await chmod(prePush, 0o755);
+      const withHooks = materializeActivation(
+        profile.activationMaterializer!,
+        { workspace, push: true },
+        process.cwd(),
+      );
+      expect(withHooks?.targets).toHaveLength(2);
+      const hooksCore = new PolicyCore();
+      hooksCore.activate({ ...profile, allowedTargets: new Set(withHooks!.targets) }, "thread-1");
+      expect(
+        (
+          await hooksCore.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command: push, workdir: workspace },
+            resource: workspace,
+            threadId: "thread-1",
+          })
+        ).decision,
+      ).toBe("allow");
+      const hookDecision = async () =>
+        (
+          await hooksCore.evaluate({
+            action: "codex.unified_exec",
+            arguments: { command: push, workdir: workspace },
+            resource: workspace,
+            threadId: "thread-1",
+          })
+        ).decision;
+      await writeFile(prePush, "#!/bin/sh\nexit 1\n");
+      expect(await hookDecision()).toBe("abstain");
+      await writeFile(prePush, "#!/bin/sh\nexit 0\n");
+      expect(await hookDecision()).toBe("allow");
+      await chmod(prePush, 0o644);
+      expect(await hookDecision()).toBe("abstain");
+      await rm(prePush);
+      expect(await hookDecision()).toBe("abstain");
+      runGit(workspace, "config", "core.hooksPath", outside);
+      expect(
+        materializeActivation(
+          profile.activationMaterializer!,
+          { workspace, push: true },
+          workspace,
+        ),
+      ).toBeUndefined();
+      runGit(workspace, "config", "core.hooksPath", ".githooks");
+      await writeFile(join(outside, "pre-push"), "#!/bin/sh\nexit 0\n");
+      await symlink(join(outside, "pre-push"), join(workspace, ".githooks", "pre-push"));
+      expect(
+        materializeActivation(
+          profile.activationMaterializer!,
+          { workspace, push: true },
+          workspace,
+        ),
+      ).toBeUndefined();
+      expect(await decision(push, outside)).toBe("abstain");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("Maker requires effective PyPI no-build in the selected manifest", async () => {
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "maker-no-build-")));
+    try {
+      const core = new PolicyCore();
+      core.activate(
+        { ...(await profileTemplate("maker")), allowedTargets: new Set([workspace]) },
+        "thread-1",
+      );
+      for (const [manifest, decision] of [
+        ["[pypi-options]\nno-build = true\n", "allow"],
+        [
+          "[workspace.pypi-options]\nno-build=true\n[environments.ci]\nno-default-feature=true\nfeatures=[]",
+          "allow",
+        ],
+        ["environments=false\n[pypi-options]\nno-build=true", "abstain"],
+        [
+          "[pypi-options]\nno-build=true\n[environments]\nci={features=['ci'], no-default-feature='true'}",
+          "abstain",
+        ],
+        ["[pypi-options]\nno-build = false\n", "abstain"],
+        ["[pypi-options]\nno-build = ['requests']\n", "abstain"],
+        [
+          "[pypi-options]\nno-build = true\n[environments.ci]\nno-default-feature = true\nfeatures = ['ci']\n",
+          "abstain",
+        ],
+        [
+          "[pypi-options]\nno-build = true\n[feature.ci.pypi-options]\nno-build = true\n[environments.ci]\nno-default-feature = true\nfeatures = ['ci']\n",
+          "allow",
+        ],
+      ] as const) {
+        await writeFile(join(workspace, "pixi.toml"), manifest);
+        expect(
+          (
+            await core.evaluate({
+              action: "codex.unified_exec",
+              arguments: {
+                command: "pixi lock --no-install --offline --no-config --manifest-path pixi.toml",
+              },
+              resource: workspace,
+              threadId: "thread-1",
+            })
+          ).decision,
+        ).toBe(decision);
+      }
     } finally {
       await rm(workspace, { force: true, recursive: true });
     }
