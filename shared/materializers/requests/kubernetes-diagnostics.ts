@@ -1,15 +1,21 @@
 type KubernetesOperation = { readonly operation: string; readonly resource: string };
 
 function validCluster(value: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/.test(value);
+  return !value.includes("://") && /^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/.test(value);
 }
 
 function validNamespace(value: string): boolean {
-  return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value);
+  return value.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(value);
 }
 
 function validName(value: string | undefined): value is string {
-  return typeof value === "string" && /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value);
+  return (
+    typeof value === "string" &&
+    value.length <= 253 &&
+    value
+      .split(".")
+      .every((label) => label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))
+  );
 }
 
 function kubernetesTarget(cluster: string, namespace: string, scope: string): string {

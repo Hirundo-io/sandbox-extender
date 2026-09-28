@@ -1,9 +1,17 @@
 function validCluster(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/.test(value);
+  return (
+    typeof value === "string" &&
+    !value.includes("://") &&
+    /^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/.test(value)
+  );
 }
 
 function validNamespace(value: unknown): value is string {
-  return typeof value === "string" && /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value);
+  return (
+    typeof value === "string" &&
+    value.length <= 63 &&
+    /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(value)
+  );
 }
 
 function kubernetesTarget(cluster: string, namespace: string, scope: string): string {

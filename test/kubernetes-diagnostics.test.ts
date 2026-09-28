@@ -96,7 +96,10 @@ describe("Kubernetes diagnostics profile", () => {
       {},
       { cluster, namespace },
       { cluster: "", namespace, allowClusterWideNodes: false },
+      { cluster: "https://user:secret@example.test", namespace, allowClusterWideNodes: false },
       { cluster, namespace: "Other", allowClusterWideNodes: false },
+      { cluster, namespace: "team.apps", allowClusterWideNodes: false },
+      { cluster, namespace: "a".repeat(64), allowClusterWideNodes: false },
       { cluster, namespace, allowClusterWideNodes: "yes" },
     ])
       expect(materializeKubernetesActivation(invalid)).toBeUndefined();
@@ -139,6 +142,26 @@ describe("Kubernetes diagnostics profile", () => {
         });
         expect(result, operation).toMatchObject({ decision: "allow" });
       }
+      expect(
+        (
+          await core.evaluate({
+            action: "other.unified_exec",
+            arguments: { command: command(allowed[0]!) },
+            resource: process.cwd(),
+            threadId: "test-thread",
+          })
+        ).decision,
+      ).toBe("abstain");
+      expect(
+        (
+          await core.evaluate({
+            action: "claude.Bash",
+            arguments: { command: command(allowed[0]!) },
+            resource: process.cwd(),
+            threadId: "test-thread",
+          })
+        ).decision,
+      ).toBe("allow");
       for (const rejected of [
         ...nodeCommands.filter((value) => !allowed.includes(value)).map((value) => command(value)),
         command("get secrets"),
@@ -199,5 +222,17 @@ describe("Kubernetes diagnostics profile", () => {
     ).toBe(false);
     expect(materializeKubernetesRequest(null)).toBeUndefined();
     expect(materializeKubernetesRequest({ command: { words: ["kubectl"] } })).toBeUndefined();
+    expect(
+      materializeKubernetesRequest(requestInput("describe pod " + "a".repeat(254))),
+    ).toBeUndefined();
+    expect(
+      materializeKubernetesRequest(requestInput("describe node " + "a".repeat(64))),
+    ).toBeUndefined();
+    expect(
+      materializeKubernetesRequest({
+        ...requestInput("get pods -o=wide"),
+        command: { words: command("get pods -o=wide", cluster, "team.apps").split(" ") },
+      }),
+    ).toBeUndefined();
   });
 });

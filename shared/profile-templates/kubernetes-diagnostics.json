@@ -4,7 +4,7 @@
   "allowedTargets": [],
   "activationMaterializer": {
     "file": "materializers/activation/kubernetes-diagnostics.ts",
-    "integrity": "bd67cc7b61f338f388e34d747f231b4cfd39a462661be2db2ef33c08c675f0d4",
+    "integrity": "5b923657f807c5d2cf1144b8c50ead99e96e75a7e7aed75ddaed91d05f4fe5d6",
     "language": "typescript",
     "permissions": {
       "env": [],
@@ -19,7 +19,7 @@
   },
   "requestMaterializer": {
     "file": "materializers/requests/kubernetes-diagnostics.ts",
-    "integrity": "fae4fb85d743caac1e5812aae828b71636bccf620c672b23726c81074278e280",
+    "integrity": "6555facc3f9a013d0ceff1c7d5526dddb5edace5b3668ada24145494b2cba4c5",
     "language": "typescript",
     "permissions": {
       "env": [],
@@ -39,7 +39,7 @@
     {
       "id": "diagnostics",
       "policies": {
-        "allowDiagnostics": "permit(principal, action, resource) when { [\"deployment.readiness\",\"deployment.list\",\"pod.list\",\"pod.describe\",\"scheduling.events\",\"node.list\",\"node.describe\"].contains(context.materialized.operation) };"
+        "allowDiagnostics": "permit(principal, action, resource) when { [Action::\"codex.unified_exec\", Action::\"claude.Bash\"].contains(action) && [\"deployment.readiness\",\"deployment.list\",\"pod.list\",\"pod.describe\",\"scheduling.events\",\"node.list\",\"node.describe\"].contains(context.materialized.operation) };"
       }
     }
   ]
