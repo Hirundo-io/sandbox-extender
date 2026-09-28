@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
   watcherReviewThreadsQuery,
   watcherThreadCommentsQuery,
 } from "../../../test/fixtures/watcher-queries.js";
@@ -71,6 +81,55 @@ function mockDenoCommandSequence(outputs: readonly string[], observed: string[][
 }
 
 describe("GitHub pull request request materializer", () => {
+  test("confines attributed comment files to regular files inside the working directory", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-body-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-outside-")));
+    const body = "_Replying as **Codex**._ Verified.";
+    const materialize = (path: string, workingDirectory: unknown = directory) =>
+      materializeGitHubPullRequest(
+        {
+          command: {
+            words: ["gh", "pr", "comment", "42", "--repo", "acme/example", "--body-file", path],
+          },
+          workingDirectory,
+        },
+        (file) => readFileSync(file, "utf8"),
+      );
+    try {
+      writeFileSync(join(directory, "reply.md"), body);
+      writeFileSync(join(directory, "unattributed.md"), "Verified.");
+      writeFileSync(join(outside, "reply.md"), body);
+      symlinkSync(join(directory, "reply.md"), join(directory, "linked.md"));
+      symlinkSync(outside, join(directory, "outside"));
+      for (const path of ["reply.md", join(directory, "reply.md")]) {
+        expect(materialize(path)).toEqual(
+          expect.objectContaining({
+            operation: "github.pull-request.conversation-comment",
+            bodyPresent: true,
+          }),
+        );
+      }
+      for (const path of [
+        "-",
+        ".",
+        "missing.md",
+        "unattributed.md",
+        "../reply.md",
+        "a\\reply.md",
+        "linked.md",
+        "outside/reply.md",
+        join(outside, "reply.md"),
+      ]) {
+        expect(materialize(path)).toBeUndefined();
+      }
+      expect(materialize("reply.md", null)).toBeUndefined();
+      expect(materialize("reply.md", "relative")).toBeUndefined();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   test("materializes pull request operations", () => {
     expect(
       materializeGitHubPullRequest(
