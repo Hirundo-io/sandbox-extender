@@ -262,7 +262,7 @@ export function materializeRequest(
       executeMaterializer(
         materializer,
         {
-          command,
+          command: command ?? null,
           requestArguments: request.arguments,
           resource: request.resource,
           workingDirectory,
