@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PolicyCore, type CedarGrouping, type Profile } from "../src/index.js";
+import {
+  materializeActivation,
+  materializeRequest,
+  denoPackageName,
+} from "../src/materializer-runtime.js";
 import { evaluateCedarGrouping } from "../src/cedar.js";
 import {
   materializeGitHubPullRequest,
@@ -66,6 +71,90 @@ async function profileTemplate(name: string): Promise<Profile> {
 }
 
 describe("shipped Profile templates", () => {
+  test("Babysitter activates an external workspace and preserves its Git grant on requests", async () => {
+    const policyRoot = await realpath(await mkdtemp(join(tmpdir(), "babysitter-policy-")));
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "babysitter-workspace-")));
+    try {
+      runGit(workspace, "init", "-b", "feature");
+      runGit(workspace, "remote", "add", "origin", "https://github.com/acme/example.git");
+      runGit(workspace, "config", "branch.feature.remote", "origin");
+      runGit(workspace, "config", "branch.feature.merge", "refs/heads/feature");
+      await writeFile(join(workspace, "file.ts"), "export const changed = true;\n");
+      const bin = join(policyRoot, "bin");
+      await mkdir(bin);
+      await writeFile(
+        join(bin, "gh"),
+        `#!/bin/sh\n[ "$(pwd -P)" = '${workspace}' ] || exit 1\nprintf x >> '${policyRoot}/gh-calls'\nprintf '%s\\n' '{"number":42,"url":"https://github.com/acme/example/pull/42","headRefName":"feature","headRefOid":"${"a".repeat(40)}"}'\n`,
+        { mode: 0o755 },
+      );
+      const launcher = join(policyRoot, "deno-fixture");
+      const deno = join(
+        process.cwd(),
+        "node_modules",
+        "@deno",
+        denoPackageName(process.platform, process.arch),
+        process.platform === "win32" ? "deno.exe" : "deno",
+      );
+      await writeFile(
+        launcher,
+        `#!/bin/sh\nexport PATH='${bin}:/usr/bin:/bin:/opt/homebrew/bin'\nexport GIT_CONFIG_GLOBAL='${policyRoot}/empty-global-config'\nexport GIT_CONFIG_SYSTEM='${policyRoot}/empty-system-config'\nexec '${deno}' "$@"\n`,
+        { mode: 0o755 },
+      );
+      const options = { denoExecutable: launcher };
+      const profile = await profileTemplate("babysitter");
+      const activated = materializeActivation(
+        profile.activationMaterializer!,
+        { workingDirectory: workspace },
+        policyRoot,
+        options,
+      );
+      expect(activated?.targets).toHaveLength(2);
+      expect(activated?.targets[0]).toBe("github:pull-request:acme/example#42");
+      const request = {
+        action: "codex.unified_exec",
+        arguments: { command: "git add file.ts" },
+        resource: workspace,
+        threadId: "external-workspace",
+      };
+      const evaluate = () =>
+        materializeRequest(
+          profile.requestMaterializer!,
+          request,
+          workspace,
+          {
+            executable: "git",
+            arguments: ["file.ts"],
+            subcommand: "add",
+            words: ["git", "add", "file.ts"],
+          },
+          options,
+        );
+      expect(evaluate()?.resource).toBe(activated!.targets[1]);
+      const callsBeforeCommandlessRequest = await readFile(join(policyRoot, "gh-calls"), "utf8");
+      expect(
+        materializeRequest(profile.requestMaterializer!, request, workspace, undefined, options),
+      ).toBeUndefined();
+      expect(await readFile(join(policyRoot, "gh-calls"), "utf8")).toBe(
+        callsBeforeCommandlessRequest,
+      );
+      await writeFile(join(workspace, ".git/hooks/post-index-change"), "#!/bin/sh\nexit 0\n", {
+        mode: 0o755,
+      });
+      expect(activated!.targets).not.toContain(evaluate()?.resource);
+      expect(
+        materializeActivation(
+          profile.activationMaterializer!,
+          { repository: "acme/example", pullRequest: 42 },
+          policyRoot,
+          options,
+        )?.targets,
+      ).toEqual(["github:pull-request:acme/example#42"]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(policyRoot, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   test("declares only permissions used by each materializer", async () => {
     const babysitter = await profileTemplate("babysitter");
     const maker = await profileTemplate("maker");
@@ -73,13 +162,15 @@ describe("shipped Profile templates", () => {
 
     expect(babysitter.activationMaterializer?.permissions).toEqual({
       ...emptyPermissions,
-      run: ["gh"],
+      env: ["NODE_ENV"],
+      read: ["$WORKING_DIRECTORY", "$ACTIVATION_WORKSPACE"],
+      run: ["gh", "git"],
     });
     expect(babysitter.requestMaterializer?.permissions).toEqual({
       ...emptyPermissions,
       env: ["NODE_ENV"],
       read: ["$WORKING_DIRECTORY"],
-      run: ["gh"],
+      run: ["gh", "git"],
     });
     expect(maker.activationMaterializer?.permissions).toEqual(emptyPermissions);
     expect(maker.requestMaterializer?.permissions).toEqual({
@@ -479,6 +570,20 @@ describe("shipped Profile templates", () => {
       "gh api rate_limit",
       "gh api repos/acme/example/actions/secrets",
       "show_token() { gh auth token; }\nshow_token",
+      "git add -A",
+      "git add .",
+      "git add --all",
+      "git add ../outside",
+      "git add :/",
+      "git commit --amend -m 'rewrite history'",
+      "git commit --no-verify -m 'skip hooks'",
+      "git commit -m ''",
+      "git commit -m 'captures unrelated staged files'",
+      'for path in package.json; do git commit -m repeated -- "$path"; done',
+      "git push origin HEAD:main",
+      "git push --force",
+      "git push --force-with-lease",
+      "while true; do git push; done",
       'gh api --method PATCH repos/acme/example/pulls/42/comments/987/replies -f body="Wrong method."',
       'gh api graphql -f query="mutation { addPullRequestReviewThreadReply(input: {}) { clientMutationId } }"',
       reviewThreadsCommand("acme/other"),
@@ -507,7 +612,7 @@ describe("shipped Profile templates", () => {
         ...multipleTargets,
         allowedTargets: new Set([
           "github:pull-request:acme/example#42",
-          "github:pull-request:acme/example#43",
+          "babysitter:git:reviewed-grant",
         ]),
       },
       "thread-2",
@@ -515,14 +620,13 @@ describe("shipped Profile templates", () => {
     expect(
       await core.evaluate({
         action: "codex.unified_exec",
-        arguments: { command: "gh pr view 42 --repo acme/example" },
+        arguments: { command: "gh pr view 43 --repo acme/example" },
         resource: workspaceTarget,
         threadId: "thread-2",
       }),
     ).toEqual(
       expect.objectContaining({
         decision: "abstain",
-        reason: "profile requires exactly one allowed target",
       }),
     );
   }, 30_000);
@@ -599,6 +703,9 @@ describe("shipped Profile templates", () => {
       }),
     ).toBe("abstain");
     for (const operation of [
+      "git.add",
+      "git.commit",
+      "git.push",
       "github.pull-request.conversation-comments",
       "github.pull-request.reviews",
       "github.actions.runs",

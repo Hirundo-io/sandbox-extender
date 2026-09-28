@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   mkdtempSync,
+  lstatSync,
+  chmodSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -8,13 +10,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   watcherReviewThreadsQuery,
   watcherThreadCommentsQuery,
 } from "../../../test/fixtures/watcher-queries.js";
 
 import {
+  materializeBabysitterActivation,
   materializeGitHubPullRequest,
   reviewThreadCommentsQuery,
   reviewThreadsQuery,
@@ -26,8 +30,17 @@ function candidate(words: unknown): unknown {
   return { command: { words } };
 }
 
+function repeatedCandidate(words: unknown): unknown {
+  return { command: { repetition: "potentially-unbounded", words } };
+}
+
+function finiteCandidate(words: unknown): unknown {
+  return { command: { repetition: "finite", words } };
+}
+
 function currentPullRequest(repository = "Hirundo-io/hirundo-platform", number = 513) {
   return {
+    headBranch: "feature",
     headSha: "a".repeat(40),
     resource: `github:pull-request:${repository.toLowerCase()}#${number}`,
   };
@@ -80,7 +93,303 @@ function mockDenoCommandSequence(outputs: readonly string[], observed: string[][
   };
 }
 
+function mockDenoFiles(os: "linux" | "windows" = "linux"): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+  const root = os === "windows" ? "C:\\workspace" : "/workspace";
+  Object.defineProperty(globalThis, "Deno", {
+    configurable: true,
+    value: {
+      Command: class {
+        outputSync() {
+          return { success: false, code: 1, stdout: new Uint8Array() };
+        }
+      },
+      build: { os },
+      cwd: () => root,
+      realPathSync: (path: string) => {
+        if (path === "missing-file.ts") throw new Error("missing");
+        if (path === root) return root;
+        return os === "windows" ? `${root}\\${path.replaceAll("/", "\\")}` : `${root}/${path}`;
+      },
+      statSync: (path: string) => ({
+        isFile:
+          path === `${root}${os === "windows" ? "\\" : "/"}package.json` ||
+          path.endsWith(
+            `${os === "windows" ? "\\" : "/"}src${os === "windows" ? "\\" : "/"}file.ts`,
+          ),
+      }),
+    },
+  });
+  return () => {
+    if (descriptor) Object.defineProperty(globalThis, "Deno", descriptor);
+    else Reflect.deleteProperty(globalThis, "Deno");
+  };
+}
+
 describe("GitHub pull request request materializer", () => {
+  test("materializes narrow Git mutations for the current pull request", () => {
+    const pullRequestLookup = () => currentPullRequest();
+    for (const [words, operation] of [
+      [["git", "add", "mvp/utils/customer.py"], "git.add"],
+      [
+        [
+          "git",
+          "commit",
+          "-m",
+          "fix(ci): format customer validation",
+          "--",
+          "mvp/utils/customer.py",
+        ],
+        "git.commit",
+      ],
+      [["git", "push"], "git.push"],
+    ] as const) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(words),
+          undefined,
+          undefined,
+          undefined,
+          pullRequestLookup,
+          undefined,
+          undefined,
+          () => true,
+          () => true,
+          (pr) => pr.resource,
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          operation,
+          resource: "github:pull-request:hirundo-io/hirundo-platform#513",
+        }),
+      );
+    }
+
+    for (const words of [
+      ["git", "add", "."],
+      ["git", "add", "src"],
+      ["git", "add", "src/*.ts"],
+      ["git", "commit", "--amend", "-m", "rewrite"],
+      ["git", "commit", "--no-verify", "-m", "skip hooks"],
+      ["git", "commit", "-m", "captures unrelated staged files"],
+      ["git", "push", "--force"],
+      ["git", "push", "origin", "HEAD:main"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(words),
+          undefined,
+          undefined,
+          undefined,
+          pullRequestLookup,
+          undefined,
+          undefined,
+          (path) => path !== "src",
+          () => true,
+        ),
+      ).toBeUndefined();
+    }
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["git", "push"]),
+        undefined,
+        undefined,
+        undefined,
+        () => undefined,
+        undefined,
+        undefined,
+        () => true,
+        () => true,
+      ),
+    ).toBeUndefined();
+    for (const words of [
+      ["git", "commit", "-m", "repeated", "--", "src/file.ts"],
+      ["git", "push"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(
+          finiteCandidate(words),
+          undefined,
+          undefined,
+          undefined,
+          pullRequestLookup,
+          undefined,
+          undefined,
+          () => true,
+          () => true,
+          (pr) => pr.resource,
+        ),
+      ).toBeUndefined();
+    }
+    expect(
+      materializeGitHubPullRequest(
+        repeatedCandidate(["git", "push"]),
+        undefined,
+        undefined,
+        undefined,
+        pullRequestLookup,
+        undefined,
+        undefined,
+        () => true,
+        () => true,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("allows plain git push only for the current PR branch and configured repository", () => {
+    const observed: string[][] = [];
+    const restore = mockDenoCommandSequence(
+      [
+        JSON.stringify({
+          headRefName: "feature",
+          headRefOid: "a".repeat(40),
+          number: 513,
+          url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+        }),
+        "feature",
+        "",
+        "",
+        "origin",
+        "",
+        "refs/heads/feature",
+        "",
+        "",
+        "git@github.com:Hirundo-io/hirundo-platform.git",
+      ],
+      observed,
+    );
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["git", "push"]),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (pr) => pr.resource,
+        ),
+      ).toEqual(expect.objectContaining({ operation: "git.push" }));
+      expect(observed).toContainEqual(["git", "config", "--get-all", "remote.origin.push"]);
+      expect(observed).toContainEqual(["git", "config", "--get-all", "remote.origin.pushurl"]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("rejects plain git push when effective configuration is not proven safe", () => {
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["git", "push"]),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+        undefined,
+        undefined,
+        () => true,
+        () => false,
+      ),
+    ).toBeUndefined();
+
+    for (const repetition of ["unexpected", null, 1, {}]) {
+      expect(
+        materializeGitHubPullRequest(
+          { command: { repetition, words: ["git", "push"] } },
+          undefined,
+          undefined,
+          undefined,
+          () => currentPullRequest(),
+          undefined,
+          undefined,
+          () => true,
+          () => true,
+          (pr) => pr.resource,
+        ),
+      ).toBeUndefined();
+    }
+  });
+
+  test("rejects a push URL rewritten away from the PR repository", () => {
+    const restore = mockDenoCommandSequence(
+      [
+        JSON.stringify({
+          headRefName: "feature",
+          headRefOid: "a".repeat(40),
+          number: 513,
+          url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
+        }),
+        "feature",
+        "",
+        "",
+        "origin",
+        "",
+        "refs/heads/feature",
+        "",
+        "",
+        "ssh://attacker.example/acme/example.git",
+      ],
+      [],
+    );
+    try {
+      expect(materializeGitHubPullRequest(candidate(["git", "push"]))).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  test("allows git add only for existing regular workspace files", () => {
+    const restore = mockDenoFiles();
+    const materialize = (path: string) =>
+      materializeGitHubPullRequest(
+        candidate(["git", "add", path]),
+        undefined,
+        undefined,
+        undefined,
+        () => currentPullRequest(),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (pr) => pr.resource,
+      );
+
+    try {
+      expect(materialize("package.json")).toEqual(
+        expect.objectContaining({ operation: "git.add" }),
+      );
+      expect(materialize("shared")).toBeUndefined();
+      expect(materialize("missing-file.ts")).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+
+  test("recognizes nested workspace files with Windows path separators", () => {
+    const restore = mockDenoFiles("windows");
+    try {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["git", "add", "src/file.ts"]),
+          undefined,
+          undefined,
+          undefined,
+          () => currentPullRequest(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (pr) => pr.resource,
+        ),
+      ).toEqual(expect.objectContaining({ operation: "git.add" }));
+    } finally {
+      restore();
+    }
+  });
+
   test("confines attributed comment files to regular files inside the working directory", () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-body-")));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-outside-")));
@@ -130,6 +439,231 @@ describe("GitHub pull request request materializer", () => {
     }
   });
 
+  test("accepts reviewed PR metadata subsets and orderings only", () => {
+    for (const fields of ["headRefOid,state", "state,headRefOid", "url"]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["gh", "pr", "view", "42", "--repo", "acme/example", "--json", fields]),
+        ),
+      ).toBeDefined();
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["gh", "-R", "acme/example", "pr", "view", "42", "--json", fields]),
+        ),
+      ).toBeDefined();
+    }
+    for (const fields of ["", "state,", "viewerPermission", "state,unknown", " state"]) {
+      expect(
+        materializeGitHubPullRequest(
+          candidate(["gh", "-R", "acme/example", "pr", "view", "42", "--json", fields]),
+        ),
+      ).toBeUndefined();
+    }
+  });
+
+  test("requires explicit PR selectors for comment mutations", () => {
+    for (const words of [
+      [
+        "gh",
+        "pr",
+        "comment",
+        "--repo",
+        "Hirundo-io/hirundo-platform",
+        "--body",
+        "_Replying as **Codex**._ Fixed.",
+      ],
+      ["gh", "pr", "comment", "--repo", "Hirundo-io/hirundo-platform", "--body-file", "reply.md"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+          currentPullRequest(),
+        ),
+      ).toBeUndefined();
+    }
+  });
+
+  test("workspace activation scopes lookups and restores cwd after success or failure", () => {
+    const policyRoot = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-policy-cwd-")));
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-activation-cwd-")));
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    let workingDirectory = policyRoot;
+    const visited: string[] = [];
+    Object.defineProperty(globalThis, "Deno", {
+      configurable: true,
+      value: {
+        cwd: () => workingDirectory,
+        chdir: (directory: string) => {
+          visited.push(directory);
+          workingDirectory = directory;
+        },
+      },
+    });
+    try {
+      for (const outcome of ["success", "missing", "throws"] as const) {
+        visited.length = 0;
+        const result = materializeBabysitterActivation(
+          { workingDirectory: workspace },
+          () => {
+            expect(workingDirectory).toBe(workspace);
+            if (outcome === "throws") throw new Error("PR lookup failed");
+            return outcome === "missing" ? undefined : currentPullRequest();
+          },
+          () => {
+            expect(workingDirectory).toBe(workspace);
+            return "reviewed-git-grant";
+          },
+        );
+        expect(result).toEqual(
+          outcome === "success" ? [currentPullRequest().resource, "reviewed-git-grant"] : undefined,
+        );
+        expect(visited).toEqual([workspace, policyRoot]);
+        expect(workingDirectory).toBe(policyRoot);
+      }
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "Deno", descriptor);
+      else Reflect.deleteProperty(globalThis, "Deno");
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(policyRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps explicit PR activation free of Git mutation grants", async () => {
+    expect(
+      materializeBabysitterActivation({ repository: "Acme/Example", pullRequest: 42 }),
+    ).toEqual(["github:pull-request:acme/example#42"]);
+    for (const invalid of [
+      null,
+      {},
+      { repository: "acme/example", pullRequest: 0 },
+      { repository: "acme/example", pullRequest: 42, workingDirectory: "/tmp" },
+      { workingDirectory: "/missing/babysitter-directory" },
+    ]) {
+      expect(materializeBabysitterActivation(invalid)).toBeUndefined();
+    }
+    const output: string[] = [];
+    expect(
+      await runGitHubPullRequestMaterializer(
+        Promise.resolve({ repository: "acme/example", pullRequest: 42 }),
+        (value) => output.push(value),
+      ),
+    ).toBe(true);
+    expect(JSON.parse(output[0]!)).toEqual({ targets: ["github:pull-request:acme/example#42"] });
+  });
+
+  test("freezes reviewed hooks and admits tracked deletions without running mutations", () => {
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "babysitter-git-")));
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
+    const fixtureEnvironment = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: join(directory, "global-config"),
+      GIT_CONFIG_SYSTEM: join(directory, "system-config"),
+    };
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, {
+        cwd: directory,
+        encoding: "utf8",
+        env: fixtureEnvironment,
+      });
+      if (result.status !== 0) throw new Error(result.stderr);
+      return result.stdout.trim();
+    };
+    try {
+      git("init", "-b", "feature");
+      git("config", "user.email", "test@example.test");
+      git("config", "user.name", "Test");
+      git("remote", "add", "origin", "https://github.com/Hirundo-io/hirundo-platform.git");
+      git("config", "branch.feature.remote", "origin");
+      git("config", "branch.feature.merge", "refs/heads/feature");
+      writeFileSync(join(directory, "deleted.ts"), "tracked");
+      git("add", "deleted.ts");
+      git("commit", "-m", "fixture");
+      Object.defineProperty(globalThis, "Deno", {
+        configurable: true,
+        value: {
+          cwd: () => directory,
+          build: { os: "linux" },
+          realPathSync: (path: string) => realpathSync(resolve(directory, path)),
+          statSync: (path: string) => ({ isFile: lstatSync(path).isFile() }),
+          Command: class {
+            args: readonly string[];
+            constructor(executable: string, options: { args: readonly string[] }) {
+              expect(executable).toBe("git");
+              this.args = options.args;
+            }
+            outputSync() {
+              const result = spawnSync("git", this.args, {
+                cwd: directory,
+                env: fixtureEnvironment,
+              });
+              return { success: result.status === 0, code: result.status, stdout: result.stdout };
+            }
+          },
+        },
+      });
+      const activation = () =>
+        materializeBabysitterActivation({ workingDirectory: directory }, () =>
+          currentPullRequest(),
+        );
+      const materialize = (words: string[]) =>
+        materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+          currentPullRequest(),
+        );
+      const original = activation()!;
+      expect(original).toHaveLength(2);
+      expect(materialize(["git", "push", "origin", "HEAD"])?.resource).toBe(original[1]);
+      for (const ref of ["feature", "HEAD:feature", "HEAD:refs/heads/feature"]) {
+        expect(materialize(["git", "push", "origin", ref])?.resource).toBe(original[1]);
+      }
+      expect(materialize(["git", "push", "other", "HEAD"])).toBeUndefined();
+      expect(materialize(["git", "push", "origin", "HEAD:main"])).toBeUndefined();
+      rmSync(join(directory, "deleted.ts"));
+      expect(materialize(["git", "add", "deleted.ts"])?.operation).toBe("git.add");
+      expect(materialize(["git", "commit", "-m", "deletion", "--", "deleted.ts"])?.resource).toBe(
+        original[1],
+      );
+      git("add", "deleted.ts");
+      expect(materialize(["git", "commit", "-m", "deletion", "--", "deleted.ts"])?.operation).toBe(
+        "git.commit",
+      );
+      expect(materialize(["git", "add", "never-tracked.ts"])).toBeUndefined();
+      const hooks = join(directory, ".git/hooks");
+      writeFileSync(join(hooks, "pre-commit"), "#!/bin/sh\nexit 0\n");
+      const changed = activation()!;
+      expect(changed[1]).not.toBe(original[1]);
+      expect(materialize(["git", "push"])?.resource).toBe(changed[1]);
+      expect(materialize(["git", "add", "deleted.ts"])?.resource).toBe(changed[1]);
+      chmodSync(join(hooks, "pre-commit"), 0o755);
+      expect(activation()![1]).not.toBe(changed[1]);
+      symlinkSync(join(directory, "deleted.ts"), join(hooks, "pre-push"));
+      expect(activation()).toEqual([original[0]!]);
+      expect(materialize(["git", "push"])).toBeUndefined();
+      rmSync(join(hooks, "pre-push"));
+      for (const [key, value] of [
+        ["filter.attack.clean", "touch /tmp/unreviewed"],
+        ["filter.attack.process", "sh unreviewed.sh"],
+        ["core.fsmonitor", "unreviewed-command"],
+        ["commit.gpgSign", "true"],
+        ["gpg.program", "unreviewed-command"],
+      ]) {
+        git("config", key!, value!);
+        expect(activation()).toEqual([original[0]!]);
+        expect(materialize(["git", "add", "deleted.ts"])).toBeUndefined();
+        expect(
+          materialize(["git", "commit", "-m", "deletion", "--", "deleted.ts"]),
+        ).toBeUndefined();
+        expect(materialize(["git", "push"])).toBeUndefined();
+        git("config", "--unset", key!);
+      }
+      git("config", "core.hooksPath", "/tmp");
+      expect(activation()).toEqual([original[0]!]);
+      expect(materialize(["git", "push"])).toBeUndefined();
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "Deno", descriptor);
+      else Reflect.deleteProperty(globalThis, "Deno");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test("materializes pull request operations", () => {
     expect(
       materializeGitHubPullRequest(
@@ -161,6 +695,37 @@ describe("GitHub pull request request materializer", () => {
         operation: "github.pull-request.conversation-comment",
       }),
     );
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "pr", "diff", "42"]),
+        undefined,
+        undefined,
+        undefined,
+        () => ({
+          headBranch: "feature",
+          headSha: "a".repeat(40),
+          resource: "github:pull-request:acme/example#42",
+        }),
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        operation: "github.pull-request.diff",
+        resource: "github:pull-request:acme/example#42",
+      }),
+    );
+    expect(
+      materializeGitHubPullRequest(
+        candidate(["gh", "pr", "diff", "42"]),
+        undefined,
+        undefined,
+        undefined,
+        () => ({
+          headBranch: "feature",
+          headSha: "a".repeat(40),
+          resource: "github:pull-request:acme/example#7",
+        }),
+      ),
+    ).toBeUndefined();
   });
 
   test("materializes an attributed pull-request conversation comment", () => {
@@ -217,26 +782,47 @@ describe("GitHub pull request request materializer", () => {
   });
 
   test("materializes only the reviewed repo-local checks JSON selection", () => {
+    for (const words of [
+      ["gh", "pr", "checks", "513", "--json", "name,state,bucket,link,workflow"],
+      ["gh", "pr", "checks", "--json", "name,state,bucket,link,workflow"],
+    ]) {
+      expect(
+        materializeGitHubPullRequest(candidate(words), undefined, undefined, undefined, () =>
+          currentPullRequest(),
+        ),
+      ).toEqual({
+        bodyPresent: false,
+        operation: "github.pull-request.checks",
+        resource: "github:pull-request:hirundo-io/hirundo-platform#513",
+        trailingArgumentCount: 2,
+        trailingArguments: ["--json", "name,state,bucket,link,workflow"],
+      });
+    }
+  });
+
+  test("materializes an implicit diff for the active pull request", () => {
     expect(
       materializeGitHubPullRequest(
-        candidate(["gh", "pr", "checks", "513", "--json", "name,state,bucket,link,workflow"]),
+        candidate(["gh", "pr", "diff"]),
         undefined,
         undefined,
         undefined,
         () => currentPullRequest(),
       ),
-    ).toEqual({
-      bodyPresent: false,
-      operation: "github.pull-request.checks",
-      resource: "github:pull-request:hirundo-io/hirundo-platform#513",
-      trailingArgumentCount: 2,
-      trailingArguments: ["--json", "name,state,bucket,link,workflow"],
-    });
+    ).toEqual(expect.objectContaining({ operation: "github.pull-request.diff" }));
   });
 
   test("materializes the watcher's PR metadata and checks commands", () => {
     for (const words of [
       ["gh", "pr", "view", "--json", watcherPullRequestFields],
+      [
+        "gh",
+        "pr",
+        "view",
+        "513",
+        "--json",
+        "number,url,title,body,state,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,files,reviews,comments",
+      ],
       [
         "gh",
         "-R",
@@ -400,6 +986,7 @@ describe("GitHub pull request request materializer", () => {
       [
         `${"a".repeat(40)}\n`,
         JSON.stringify({
+          headRefName: "feature",
           headRefOid: "a".repeat(40),
           number: 513,
           url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
@@ -423,7 +1010,7 @@ describe("GitHub pull request request materializer", () => {
       ).toEqual(expect.objectContaining({ operation: "github.actions.rerun-failed" }));
       expect(observed).toEqual([
         ["gh", "api", "repos/Hirundo-io/hirundo-platform/actions/runs/9001", "--jq", ".head_sha"],
-        ["gh", "pr", "view", "--json", "number,url,headRefOid"],
+        ["gh", "pr", "view", "--json", "number,url,headRefName,headRefOid"],
       ]);
     } finally {
       restore();
@@ -438,6 +1025,7 @@ describe("GitHub pull request request materializer", () => {
       [
         "b".repeat(40),
         JSON.stringify({
+          headRefName: "feature",
           headRefOid: "a".repeat(40),
           number: 513,
           url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",
@@ -457,6 +1045,7 @@ describe("GitHub pull request request materializer", () => {
         "https://api.github.com/repos/Hirundo-io/hirundo-platform/actions/runs/9001",
         "a".repeat(40),
         JSON.stringify({
+          headRefName: "feature",
           headRefOid: "a".repeat(40),
           number: 513,
           url: "https://github.com/Hirundo-io/hirundo-platform/pull/513",

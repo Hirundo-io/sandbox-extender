@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import type {
@@ -8,6 +8,7 @@ import type {
   RequestMaterializer,
 } from "./types.js";
 
+export const activationWorkspacePermission = "$ACTIVATION_WORKSPACE";
 export const workingDirectoryPermission = "$WORKING_DIRECTORY";
 export const requestResourcePermission = "$REQUEST_RESOURCE";
 
@@ -40,7 +41,24 @@ function resolvedPermissions(
   value: string,
   workingDirectory: string,
   requestResource: string | undefined,
+  activationWorkspace: unknown,
+  activationInvocation: boolean,
 ): readonly string[] {
+  if (value === activationWorkspacePermission) {
+    if (activationWorkspace === undefined && activationInvocation) return [];
+    if (typeof activationWorkspace !== "string" || !isAbsolute(activationWorkspace))
+      throw new Error(
+        "activation workspace read permission requires an absolute workspace argument",
+      );
+    const canonicalWorkspace = realpathSync(activationWorkspace);
+    if (
+      canonicalWorkspace !== resolve(activationWorkspace) ||
+      canonicalWorkspace.includes(",") ||
+      !statSync(canonicalWorkspace).isDirectory()
+    )
+      throw new Error("activation workspace must be a canonical path without commas");
+    return [canonicalWorkspace];
+  }
   if (value === workingDirectoryPermission) return pathForms(workingDirectory);
   if (value === requestResourcePermission) return requestResource ? pathForms(requestResource) : [];
   return [value];
@@ -103,6 +121,8 @@ export function denoPermissionFlags(
   permissions: MaterializerPermissionManifest,
   workingDirectory: string,
   requestResource?: string,
+  activationWorkspace?: unknown,
+  activationInvocation = false,
 ): string[] {
   const usesRequestResource = permissionNames.some((name) =>
     permissions[name].includes(requestResourcePermission),
@@ -117,11 +137,18 @@ export function denoPermissionFlags(
       throw new Error("materializer working directory is outside the approved request resource");
     }
   }
-  return permissionNames.flatMap((name) =>
-    permissions[name].flatMap((value) =>
-      resolvedPermissions(value, workingDirectory, requestResource).map(
-        (resolved) => `--allow-${name}=${resolved}`,
-      ),
-    ),
-  );
+  return permissionNames.flatMap((name) => {
+    const resolved = permissions[name].flatMap((value) => {
+      if (value === activationWorkspacePermission && name !== "read")
+        throw new Error("activation workspace permissions are read-only");
+      return resolvedPermissions(
+        value,
+        workingDirectory,
+        requestResource,
+        activationWorkspace,
+        activationInvocation,
+      );
+    });
+    return resolved.length === 0 ? [] : [`--allow-${name}=${resolved.join(",")}`];
+  });
 }

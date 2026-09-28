@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  activationWorkspacePermission,
+  denoPermissionFlags,
   materializerIntegrity,
   requestResourcePermission,
   workingDirectoryPermission,
@@ -40,6 +42,12 @@ const requestSource = [
   "const input = await new Response(Deno.stdin.readable).json();",
   "console.log(JSON.stringify({resource: input.resource, context: {cwd: Deno.cwd(), operation: input.command.executable}}));",
 ].join("\n");
+
+test("combines multiple values into one Deno permission flag", () => {
+  expect(denoPermissionFlags({ ...noPermissions, run: ["gh", "git"] }, process.cwd())).toEqual([
+    "--allow-run=gh,git",
+  ]);
+});
 
 function activationMaterializer(
   source: string,
@@ -101,6 +109,40 @@ describe("materializer runtime", () => {
         repository: "acme/example",
       }),
     ).toEqual({ targets: ["github:pull-request:acme/example#42"] });
+  });
+
+  test("omits optional workspace reads only for activation without workspace arguments", () => {
+    const permissions = { ...noPermissions, read: [activationWorkspacePermission] };
+    const materializer = activationMaterializer(activationSource, permissions);
+    const arguments_ = { repository: "acme/example", pullRequest: 42 };
+    expect(materializeActivation(materializer, arguments_)).toEqual({
+      targets: ["github:pull-request:acme/example#42"],
+    });
+    for (const workspace of [null, 42, "relative"]) {
+      expect(materializeActivation(materializer, { ...arguments_, workspace })).toBeUndefined();
+    }
+    expect(
+      materializeActivation(materializer, {
+        ...arguments_,
+        workspace: process.cwd(),
+        workingDirectory: "/different",
+      }),
+    ).toBeUndefined();
+    expect(
+      materializeRequest(requestMaterializer(requestSource, permissions), request(), process.cwd()),
+    ).toBeUndefined();
+  });
+
+  test("preserves the request discriminator when no shell command is supplied", () => {
+    const source = [
+      "const input = await new Response(Deno.stdin.readable).json();",
+      "if (!(\"command\" in input)) { new Deno.Command('printf', {args: ['activation']}).outputSync(); Deno.exit(1); }",
+      "console.log(JSON.stringify({resource: input.resource, context: {command: input.command}}));",
+    ].join("\n");
+    expect(materializeRequest(requestMaterializer(source), request(), process.cwd())).toEqual({
+      resource: "/work",
+      context: { command: null },
+    });
   });
 
   test("uses the actual request working directory", () => {
@@ -251,6 +293,7 @@ describe("materializer runtime", () => {
   test("validates materialized output shape", () => {
     for (const source of [
       "console.log('{}')",
+      "console.log(JSON.stringify({resource: '/work', context: {}}))",
       "console.log(JSON.stringify({targets: []}))",
       "console.log(JSON.stringify({targets: [1]}))",
       "console.log(JSON.stringify({targets: ['same', 'same']}))",
@@ -266,4 +309,61 @@ describe("materializer runtime", () => {
         materializeRequest(requestMaterializer(source), request(), process.cwd()),
       ).toBeUndefined();
   });
+});
+
+test("activation workspace permission reads only the canonical explicit workspace", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "activation-workspace-")));
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "activation-outside-")));
+  const permissions = { ...noPermissions, read: [activationWorkspacePermission] };
+  const source = `const input = await new Response(Deno.stdin.readable).json(); console.log(JSON.stringify({targets:[Deno.readTextFileSync(input.file)]}));`;
+  try {
+    const file = join(root, "target");
+    writeFileSync(file, "approved");
+    writeFileSync(join(outside, "target"), "outside");
+    expect(denoPermissionFlags(permissions, process.cwd(), undefined, root)).toEqual([
+      `--allow-read=${root}`,
+    ]);
+    for (const workspace of [undefined, "relative", join(root, "missing"), root + ",other", file])
+      expect(() => denoPermissionFlags(permissions, process.cwd(), undefined, workspace)).toThrow();
+    symlinkSync(root, join(outside, "alias"));
+    expect(() =>
+      denoPermissionFlags(permissions, process.cwd(), undefined, join(outside, "alias")),
+    ).toThrow();
+    expect(() =>
+      denoPermissionFlags(
+        { ...noPermissions, write: [activationWorkspacePermission] },
+        process.cwd(),
+        undefined,
+        root,
+      ),
+    ).toThrow("read-only");
+    for (const args of [
+      { workspace: root, file },
+      { workingDirectory: root, file },
+      { workspace: root, workingDirectory: root, file },
+    ])
+      expect(
+        materializeActivation(activationMaterializer(source, permissions), args, process.cwd()),
+      ).toEqual({ targets: ["approved"] });
+    expect(
+      materializeActivation(
+        activationMaterializer(source, permissions),
+        { workspace: root, workingDirectory: outside, file },
+        process.cwd(),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeActivation(
+        activationMaterializer(source, permissions),
+        { workspace: root, file: join(outside, "target") },
+        process.cwd(),
+      ),
+    ).toBeUndefined();
+    expect(
+      materializeRequest(requestMaterializer(requestSource, permissions), request(), process.cwd()),
+    ).toBeUndefined();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });

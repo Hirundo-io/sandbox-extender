@@ -158,8 +158,9 @@ code; it does not choose a target.
 Request Materializers parse shell or MCP input into typed facts for Cedar. They
 may reject malformed input, but they do not allow or deny operations. Cedar is
 the only authorization language. The bundled implementations live under
-`shared/materializers/requests/`, while activation implementations live under
-`shared/materializers/activation/`.
+`shared/materializers/requests/`. Activation implementations live under
+`shared/materializers/activation/` or share a self-contained request materializer
+when both phases must compute the same frozen target.
 
 Materializers are Profile-owned, engineer-reviewed executable code. Approving
 their Policy Revision approves the exact source artifact, Deno runtime version,
@@ -219,16 +220,38 @@ Zsh fixtures.
 
 ### Reviewed `gh` Context Lookup example
 
-Babysitter's
-[`shared/materializers/activation/github-pull-request.ts`](shared/materializers/activation/github-pull-request.ts)
-runs `gh pr view --json number,url` when activation receives
-`{"workingDirectory":"/absolute/current/workspace"}` instead of an explicit
-repository and pull-request number. It validates the returned GitHub URL and
-number before freezing one canonical pull-request Target. Its Profile uses this
-data-only declaration in the canonical
+Babysitter uses the same reviewed
+[`shared/materializers/requests/github-pull-request.ts`](shared/materializers/requests/github-pull-request.ts)
+for activation and requests. Explicit repository and pull-request arguments
+freeze a GitHub PR target and do not grant Git mutations. Workspace activation
+with `{"workingDirectory":"/absolute/current/workspace"}` resolves the current PR
+with `gh pr view --json number,url,headRefName,headRefOid` and can additionally
+freeze a Git mutation target. The
 [`shared/profile-templates/babysitter.json`](shared/profile-templates/babysitter.json)
-template. Use that file rather than copying its integrity digest into another
-profile or document.
+template declares the permissions and integrity digest for both phases.
+Activation grants read access to the explicit canonical workspace with
+`$ACTIVATION_WORKSPACE`, even when the policy repository is elsewhere. The
+placeholder grants no workspace access for explicit repository/PR activation and
+is unavailable to request materializers.
+
+The Git target binds the canonical workspace, PR, branch, remote and URL, and
+repository-local hook directory with its recursive contents and file modes.
+Staging, committing, and pushing recompute this target. Staging also needs hook
+trust because Git can run `post-index-change` when it writes the index.
+Repository hooks run normally; changed hooks require a fresh activation.
+Global or external hook directories, symlinks, and special-file hook entries do not
+receive a Git grant. If Git trust checks fail, workspace activation still allows
+the PR operations and Git mutations require host approval.
+
+Executable Git configuration is excluded conservatively. Any effective
+`filter.*` or `gpg.*` setting, active `core.fsmonitor`, or enabled
+`commit.gpgSign` prevents a Git grant. This includes global and included
+configuration. Globally installed Git LFS filters therefore cause abstention
+even when the requested paths do not use LFS. Signing-enabled repositories also
+require host approval. Do not disable repository controls to obtain a grant.
+Push additionally rejects configuration that expands refs or selects custom
+transports. These restrictions cover the reviewed mutation forms; they do not
+promise support for every ordinary Git workflow.
 
 The `gh` process retains normal OS authority. Review the command and its output
 validation before accepting that `run` declaration.

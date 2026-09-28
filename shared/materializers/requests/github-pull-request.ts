@@ -1,10 +1,14 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, realpathSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 
 import { Kind, parse, visit, type ASTNode, type DocumentNode } from "graphql";
 
 type RequestMaterializerInput = {
-  readonly command?: { readonly words?: unknown };
+  readonly command?: {
+    readonly repetition?: unknown;
+    readonly words?: unknown;
+  };
   readonly workingDirectory?: unknown;
 };
 
@@ -16,9 +20,120 @@ type PullRequestOperation = {
   readonly trailingArgumentCount: number;
 };
 
+type FileLookup = (path: string) => boolean;
+type PullRequestLookup = () =>
+  | {
+      readonly headBranch: string;
+      readonly headSha: string;
+      readonly resource: string;
+    }
+  | undefined;
+type PushTargetLookup = (
+  currentPullRequest: NonNullable<ReturnType<PullRequestLookup>>,
+  remote?: string,
+) => boolean;
+
+type GitMutationGrantLookup = (
+  pullRequest: NonNullable<ReturnType<PullRequestLookup>>,
+) => string | undefined;
+
+function explicitRepositoryPath(path: string, fileLookup: FileLookup): boolean {
+  if (
+    path.length === 0 ||
+    path.startsWith("-") ||
+    path.startsWith(":") ||
+    path.startsWith("/") ||
+    path.includes("\\")
+  )
+    return false;
+  const segments = path.split("/");
+  return (
+    segments.every(
+      (segment) =>
+        /^[A-Za-z0-9._ -]+$/.test(segment) &&
+        segment !== "." &&
+        segment !== ".." &&
+        segment !== ".git",
+    ) && fileLookup(path)
+  );
+}
+
+function gitMutationOperation(
+  words: readonly string[],
+  repetition: unknown,
+  pullRequestLookup: PullRequestLookup,
+  fileLookup: FileLookup,
+  pushTargetLookup: PushTargetLookup,
+  mutationGrantLookup: GitMutationGrantLookup,
+): PullRequestOperation | undefined {
+  if (words[0] !== "git") return undefined;
+  const currentPullRequest = pullRequestLookup();
+  if (
+    !currentPullRequest ||
+    (repetition !== undefined &&
+      repetition !== "finite" &&
+      repetition !== "potentially-unbounded") ||
+    repetition === "potentially-unbounded"
+  )
+    return undefined;
+  if (repetition === "finite" && words[1] !== "add") return undefined;
+
+  let operation: string | undefined;
+  if (
+    words[1] === "add" &&
+    words.length > 2 &&
+    words.slice(2).every((path) => explicitRepositoryPath(path, fileLookup))
+  ) {
+    operation = "git.add";
+  } else if (
+    words[1] === "commit" &&
+    words[2] === "-m" &&
+    words[3]?.trim().length > 0 &&
+    words[4] === "--" &&
+    words.length > 5 &&
+    words.slice(5).every((path) => explicitRepositoryPath(path, fileLookup))
+  ) {
+    operation = "git.commit";
+  } else if (
+    words[1] === "push" &&
+    (words.length === 2 ||
+      (words.length === 4 &&
+        /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(words[2]!) &&
+        [
+          "HEAD",
+          currentPullRequest.headBranch,
+          `HEAD:${currentPullRequest.headBranch}`,
+          `HEAD:refs/heads/${currentPullRequest.headBranch}`,
+        ].includes(words[3]!))) &&
+    pushTargetLookup(currentPullRequest, words[2])
+  ) {
+    operation = "git.push";
+  }
+  const resource = operation ? mutationGrantLookup(currentPullRequest) : undefined;
+  return operation && resource
+    ? {
+        bodyPresent: false,
+        operation,
+        resource,
+        trailingArguments: [],
+        trailingArgumentCount: 0,
+      }
+    : undefined;
+}
+
 const replyPrefix = "_Replying as ";
 const watcherPullRequestFields =
   "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
+const detailedPullRequestFields =
+  "number,url,title,body,state,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,files,reviews,comments";
+const reviewedPullRequestFields = new Set(
+  `${watcherPullRequestFields},${detailedPullRequestFields}`.split(","),
+);
+
+function reviewedPullRequestSelection(value: string | undefined): boolean {
+  return Boolean(value && value.split(",").every((field) => reviewedPullRequestFields.has(field)));
+}
+
 const watcherChecksFields = "name,state,bucket,link,workflow,event,startedAt,completedAt";
 const reviewedChecksFields = "name,state,bucket,link,workflow";
 type ReadTextFile = (path: string) => string;
@@ -29,7 +144,6 @@ type ReviewCommentLookup = (
   pullRequestNumber: string,
   commentId: string,
 ) => boolean;
-type PullRequestLookup = () => { readonly headSha: string; readonly resource: string } | undefined;
 type RunLookup = (repository: string, runId: string) => string | undefined;
 type JobLookup = (repository: string, runId: string, jobId: string) => boolean;
 
@@ -159,7 +273,7 @@ function input(candidate: unknown): RequestMaterializerInput {
   if (typeof candidate !== "object" || candidate === null) return {};
   const command =
     "command" in candidate && typeof candidate.command === "object" && candidate.command !== null
-      ? (candidate.command as { readonly words?: unknown })
+      ? (candidate.command as RequestMaterializerInput["command"])
       : undefined;
   return {
     command,
@@ -183,6 +297,199 @@ function repositoryFromPullRequestUrl(url: string): string | undefined {
 
 function repositoryFromTarget(resource: string): string | undefined {
   return /^github:pull-request:([^#]+)#[1-9][0-9]*$/.exec(resource)?.[1];
+}
+
+function repositoryFromGitRemote(url: string): string | undefined {
+  return /^(?:https:\/\/github\.com\/|git@github\.com:)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/.exec(
+    url,
+  )?.[1];
+}
+
+function gitOutput(...args: readonly string[]): string | undefined {
+  if (typeof Deno === "undefined") return undefined;
+  const result = new Deno.Command("git", {
+    args: [...args],
+    stderr: "null",
+    stdout: "piped",
+  }).outputSync();
+  if (!result.success && args[0] === "config" && result.code !== 1)
+    return "invalid Git configuration";
+  return result.success ? new TextDecoder().decode(result.stdout).trim() : undefined;
+}
+
+function optionalGitConfig(key: string): string | undefined {
+  return gitOutput("config", "--get-all", key) || undefined;
+}
+
+function safeGitExecutionConfig(): boolean {
+  const executableConfig = gitOutput(
+    "config",
+    "--get-regexp",
+    "^(filter\\.|gpg\\.|core\\.fsmonitor$|commit\\.gpgsign$)",
+  );
+  if (executableConfig === undefined) return true;
+  return executableConfig
+    .split("\n")
+    .every((line) => /^(?:core\.fsmonitor|commit\.gpgsign) (?:false|no|off|0)$/.test(line));
+}
+
+function hookTreeDigest(directory: string): string {
+  const hash = createHash("sha256");
+  function visitDirectory(path: string): void {
+    for (const entry of readdirSync(path).sort()) {
+      const file = resolve(path, entry);
+      const stat = lstatSync(file);
+      if (stat.isSymbolicLink() || realpathSync(file) !== file)
+        throw new Error("Hook symlinks are not trusted");
+      hash.update(
+        JSON.stringify([relative(directory, file), stat.mode, stat.isFile() ? stat.size : null]),
+      );
+      if (stat.isDirectory()) visitDirectory(file);
+      else if (stat.isFile()) hash.update(readFileSync(file));
+      else throw new Error("Unsupported hook entry");
+    }
+  }
+  visitDirectory(directory);
+  return hash.digest("hex");
+}
+
+function liveGitMutationGrant(
+  pullRequest: NonNullable<ReturnType<PullRequestLookup>>,
+): string | undefined {
+  try {
+    if (!safeGitExecutionConfig()) return undefined;
+    const workspace = realpathSync(Deno.cwd());
+    if (
+      gitOutput("rev-parse", "--show-toplevel") !== workspace ||
+      gitOutput("symbolic-ref", "--quiet", "--short", "HEAD") !== pullRequest.headBranch
+    )
+      return undefined;
+    const remote =
+      optionalGitConfig(`branch.${pullRequest.headBranch}.pushRemote`) ??
+      optionalGitConfig("remote.pushDefault") ??
+      optionalGitConfig(`branch.${pullRequest.headBranch}.remote`);
+    if (!remote || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(remote)) return undefined;
+    const url = gitOutput("remote", "get-url", "--push", "--all", remote);
+    if (
+      !url ||
+      repositoryFromGitRemote(url)?.toLowerCase() !== repositoryFromTarget(pullRequest.resource)
+    )
+      return undefined;
+    const configured = gitOutput("config", "--show-scope", "--get", "core.hooksPath");
+    const match =
+      configured === undefined ? undefined : /^(?:local|worktree)\t([^\n]+)$/.exec(configured);
+    if (configured !== undefined && !match) return undefined;
+    const path = match?.[1] ?? gitOutput("rev-parse", "--git-path", "hooks");
+    if (!path) return undefined;
+    const hooks = resolve(workspace, path);
+    if (
+      !hooks.startsWith(`${workspace}/`) ||
+      realpathSync(hooks) !== hooks ||
+      !lstatSync(hooks).isDirectory()
+    )
+      return undefined;
+    return `babysitter:git:${JSON.stringify([pullRequest.resource, workspace, remote, url, pullRequest.headBranch, hooks, hookTreeDigest(hooks)])}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function liveSafePushTarget(
+  currentPullRequest: NonNullable<ReturnType<PullRequestLookup>>,
+  explicitRemote?: string,
+): boolean {
+  const branch = gitOutput("symbolic-ref", "--quiet", "--short", "HEAD");
+  if (!branch || branch !== currentPullRequest.headBranch) return false;
+
+  const branchPushRemote = optionalGitConfig(`branch.${branch}.pushRemote`);
+  const defaultPushRemote = optionalGitConfig("remote.pushDefault");
+  const branchRemote = optionalGitConfig(`branch.${branch}.remote`);
+  const remote = branchPushRemote ?? defaultPushRemote ?? branchRemote;
+  if (!remote || remote === "." || (explicitRemote !== undefined && explicitRemote !== remote))
+    return false;
+
+  const pushDefault = optionalGitConfig("push.default");
+  const upstream = optionalGitConfig(`branch.${branch}.merge`);
+  const configuredPush = optionalGitConfig(`remote.${remote}.push`);
+  const pushUrl = optionalGitConfig(`remote.${remote}.pushurl`);
+  const remoteUrl = gitOutput("remote", "get-url", "--push", "--all", remote);
+  if (
+    (pushDefault !== undefined && pushDefault !== "simple") ||
+    upstream !== `refs/heads/${branch}` ||
+    configuredPush !== undefined ||
+    pushUrl !== undefined ||
+    !remoteUrl
+  )
+    return false;
+  for (const key of [
+    `remote.${remote}.mirror`,
+    "push.followTags",
+    "push.recurseSubmodules",
+    "push.gpgSign",
+  ]) {
+    const value = optionalGitConfig(key);
+    if (value !== undefined && value !== "false" && value !== "no") return false;
+  }
+  for (const key of [
+    `remote.${remote}.receivepack`,
+    `remote.${remote}.vcs`,
+    "push.pushOption",
+    "core.sshCommand",
+    "core.gitProxy",
+    `remote.${remote}.proxy`,
+  ]) {
+    if (optionalGitConfig(key) !== undefined) return false;
+  }
+  const repository = repositoryFromGitRemote(remoteUrl);
+  return repository?.toLowerCase() === repositoryFromTarget(currentPullRequest.resource);
+}
+
+function liveTrackedDeletion(path: string): boolean {
+  try {
+    const directory = realpathSync(Deno.cwd());
+    const file = resolve(directory, path);
+    let parent = file;
+    for (;;) {
+      try {
+        const status = lstatSync(parent);
+        if (parent === file || !status.isDirectory() || realpathSync(parent) !== parent)
+          return false;
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+        const next = resolve(parent, "..");
+        if (next === parent) return false;
+        parent = next;
+      }
+    }
+    if (!file.startsWith(`${directory}/`)) return false;
+    const indexed = gitOutput("ls-files", "--stage", "--", path);
+    const committed = indexed || gitOutput("ls-tree", "HEAD", "--", path);
+    return Boolean(
+      committed &&
+      /^100(?:644|755) (?:[0-9a-f]{40} 0|blob [0-9a-f]{40})\t/.test(committed) &&
+      committed.slice(committed.indexOf("\t") + 1) === path,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function liveRegularWorkspaceFile(path: string): boolean {
+  if (typeof Deno === "undefined") return false;
+  try {
+    if (!safeGitExecutionConfig()) return false;
+    const workingDirectory = Deno.realPathSync(Deno.cwd());
+    const resolvedPath = Deno.realPathSync(path);
+    const separator = Deno.build.os === "windows" ? "\\" : "/";
+    return (
+      (resolvedPath === workingDirectory ||
+        resolvedPath.startsWith(`${workingDirectory}${separator}`)) &&
+      Deno.statSync(resolvedPath).isFile
+    );
+  } catch {
+    return liveTrackedDeletion(path);
+  }
 }
 
 function scopedGhCommand(
@@ -240,11 +547,10 @@ function liveReviewCommentBelongsTo(
   return result.success && new TextDecoder().decode(result.stdout).trim() === commentId;
 }
 
-function liveCurrentPullRequest():
-  { readonly headSha: string; readonly resource: string } | undefined {
+function liveCurrentPullRequest(): NonNullable<ReturnType<PullRequestLookup>> | undefined {
   if (typeof Deno === "undefined") return undefined;
   const result = new Deno.Command("gh", {
-    args: ["pr", "view", "--json", "number,url,headRefOid"],
+    args: ["pr", "view", "--json", "number,url,headRefName,headRefOid"],
     stderr: "null",
     stdout: "piped",
   }).outputSync();
@@ -252,6 +558,7 @@ function liveCurrentPullRequest():
   try {
     const value = JSON.parse(new TextDecoder().decode(result.stdout)) as {
       headRefOid?: unknown;
+      headRefName?: unknown;
       number?: unknown;
       url?: unknown;
     };
@@ -263,8 +570,9 @@ function liveCurrentPullRequest():
         : undefined;
     return resource &&
       typeof value.headRefOid === "string" &&
+      typeof value.headRefName === "string" &&
       /^[0-9a-f]{40}$/.test(value.headRefOid)
-      ? { headSha: value.headRefOid, resource }
+      ? { headBranch: value.headRefName, headSha: value.headRefOid, resource }
       : undefined;
   } catch {
     return undefined;
@@ -328,6 +636,14 @@ function targetFromPullRequestSpecifier(
   return !specifier || current.resource.endsWith(`#${specifier}`) ? current.resource : undefined;
 }
 
+function isPullRequestSpecifier(pullRequestSpecifier: string | undefined): boolean {
+  return Boolean(
+    pullRequestSpecifier &&
+    (/^[1-9][0-9]*$/.test(pullRequestSpecifier) ||
+      /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9][0-9]*$/.test(pullRequestSpecifier)),
+  );
+}
+
 function watcherPullRequestViewOperation(
   words: readonly string[],
   pullRequestLookup: PullRequestLookup,
@@ -340,7 +656,7 @@ function watcherPullRequestViewOperation(
   const jsonIndex = hasSpecifier ? 1 : 0;
   if (
     arguments_[jsonIndex] !== "--json" ||
-    arguments_[jsonIndex + 1] !== watcherPullRequestFields ||
+    !reviewedPullRequestSelection(arguments_[jsonIndex + 1]) ||
     arguments_.length !== jsonIndex + 2
   )
     return undefined;
@@ -362,17 +678,25 @@ function pullRequestChecksOperation(
 ): PullRequestOperation | undefined {
   const scoped = scopedGhCommand(words);
   if (!scoped) return undefined;
-  const [pr, checks, number, jsonFlag, jsonFields] = scoped.command;
+  const [pr, checks, selectorOrJsonFlag, ...commandArguments] = scoped.command;
+  const hasSelector = isPullRequestSpecifier(selectorOrJsonFlag);
+  const pullRequestSpecifier = hasSelector ? selectorOrJsonFlag : undefined;
+  const [jsonFlag, jsonFields] = hasSelector
+    ? commandArguments
+    : [selectorOrJsonFlag, ...commandArguments];
   if (
     pr !== "pr" ||
     checks !== "checks" ||
-    !number ||
     jsonFlag !== "--json" ||
     (jsonFields !== reviewedChecksFields && jsonFields !== watcherChecksFields) ||
-    scoped.command.length !== 5
+    commandArguments.length !== (hasSelector ? 2 : 1)
   )
     return undefined;
-  const resource = targetFromPullRequestSpecifier(number, scoped.repository, pullRequestLookup);
+  const resource = targetFromPullRequestSpecifier(
+    pullRequestSpecifier,
+    scoped.repository,
+    pullRequestLookup,
+  );
   return resource
     ? {
         bodyPresent: false,
@@ -424,26 +748,39 @@ function containedCommentBody(
 
 function pullRequestOperation(
   words: readonly string[],
+  pullRequestLookup: PullRequestLookup,
   workingDirectory: unknown,
   readTextFile: ReadTextFile,
 ): PullRequestOperation | undefined {
-  const [gh, pr, subcommand, number, repoFlag, repository, ...rest] = words;
+  const [gh, pr, subcommand, selectorOrArgument, ...remainingWords] = words;
+  if (gh !== "gh" || pr !== "pr" || !subcommand) return undefined;
+  const hasSelector = isPullRequestSpecifier(selectorOrArgument);
+  const pullRequestSpecifier = hasSelector ? selectorOrArgument : undefined;
+  const commandArguments = hasSelector ? remainingWords : words.slice(3);
+  const hasRepository = commandArguments[0] === "--repo";
+  const repository = hasRepository ? commandArguments[1] : undefined;
+  if (hasRepository && !repository) return undefined;
+  if (!repository && subcommand !== "diff") return undefined;
+  if (!hasSelector && subcommand !== "diff" && subcommand !== "view") return undefined;
+  const remainingArguments = commandArguments.slice(hasRepository ? 2 : 0);
   if (
-    gh !== "gh" ||
-    pr !== "pr" ||
-    !subcommand ||
-    !number ||
-    repoFlag !== "--repo" ||
-    !repository
-  ) {
+    subcommand === "view" &&
+    remainingArguments.length > 0 &&
+    (remainingArguments.length !== 2 ||
+      remainingArguments[0] !== "--json" ||
+      !reviewedPullRequestSelection(remainingArguments[1]))
+  )
     return undefined;
-  }
-  const resource = canonicalTarget(repository, number);
+  const resource = targetFromPullRequestSpecifier(
+    pullRequestSpecifier,
+    repository,
+    pullRequestLookup,
+  );
   if (!resource) return undefined;
   if (subcommand === "comment") {
-    const [flag, body] = rest;
+    const [flag, body] = remainingArguments;
     if (
-      rest.length !== 2 ||
+      remainingArguments.length !== 2 ||
       !body ||
       !(flag === "--body"
         ? identifiedReplyBody(body)
@@ -458,14 +795,16 @@ function pullRequestOperation(
       trailingArgumentCount: 0,
     };
   }
-  const bodyIndex = rest.indexOf("--body");
+  const bodyIndex = remainingArguments.indexOf("--body");
   return {
     bodyPresent:
-      bodyIndex >= 0 && typeof rest[bodyIndex + 1] === "string" && rest[bodyIndex + 1]!.length > 0,
+      bodyIndex >= 0 &&
+      typeof remainingArguments[bodyIndex + 1] === "string" &&
+      remainingArguments[bodyIndex + 1]!.length > 0,
     operation: `github.pull-request.${subcommand}`,
     resource,
-    trailingArguments: rest,
-    trailingArgumentCount: rest.length,
+    trailingArguments: remainingArguments,
+    trailingArgumentCount: remainingArguments.length,
   };
 }
 
@@ -1065,11 +1404,23 @@ export function materializeGitHubPullRequest(
   pullRequestLookup: PullRequestLookup = liveCurrentPullRequest,
   runLookup: RunLookup = liveRunTarget,
   jobLookup: JobLookup = liveJobBelongsToRun,
+  fileLookup: FileLookup = liveRegularWorkspaceFile,
+  pushTargetLookup: PushTargetLookup = liveSafePushTarget,
+  mutationGrantLookup: GitMutationGrantLookup = liveGitMutationGrant,
 ): PullRequestOperation | undefined {
   const request = input(candidate);
-  const words = request.command?.words;
+  const command = request.command;
+  const words = command?.words;
   if (!Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
   return (
+    gitMutationOperation(
+      words,
+      command?.repetition,
+      pullRequestLookup,
+      fileLookup,
+      pushTargetLookup,
+      mutationGrantLookup,
+    ) ??
     watcherPullRequestViewOperation(words, pullRequestLookup) ??
     conversationCommentOperation(words) ??
     pullRequestRestReadOperation(words) ??
@@ -1081,15 +1432,62 @@ export function materializeGitHubPullRequest(
     reviewThreadCommentsOperation(words, reviewThreadLookup) ??
     reviewThreadsOperation(words) ??
     reviewReplyOperation(words, readTextFile, reviewCommentLookup) ??
-    pullRequestOperation(words, request.workingDirectory, readTextFile)
+    pullRequestOperation(words, pullRequestLookup, request.workingDirectory, readTextFile)
   );
+}
+
+export function materializeBabysitterActivation(
+  candidate: unknown,
+  lookup: PullRequestLookup = liveCurrentPullRequest,
+  grant: GitMutationGrantLookup = liveGitMutationGrant,
+): readonly string[] | undefined {
+  if (typeof candidate !== "object" || candidate === null) return undefined;
+  const value = candidate as Record<string, unknown>;
+  if (value.repository !== undefined || value.pullRequest !== undefined) {
+    if (
+      value.workingDirectory !== undefined ||
+      typeof value.repository !== "string" ||
+      typeof value.pullRequest !== "number" ||
+      !Number.isSafeInteger(value.pullRequest)
+    )
+      return undefined;
+    const target = canonicalTarget(value.repository, String(value.pullRequest));
+    return target ? [target] : undefined;
+  }
+  if (typeof value.workingDirectory !== "string" || !isAbsolute(value.workingDirectory))
+    return undefined;
+  let previousDirectory: string | undefined;
+  try {
+    const workspace = realpathSync(value.workingDirectory);
+    if (workspace !== resolve(value.workingDirectory)) return undefined;
+    const currentDirectory = Deno.cwd();
+    if (workspace !== realpathSync(currentDirectory)) {
+      Deno.chdir(workspace);
+      previousDirectory = currentDirectory;
+    }
+    const pullRequest = lookup();
+    if (!pullRequest) return undefined;
+    const mutation = grant(pullRequest);
+    return mutation ? [pullRequest.resource, mutation] : [pullRequest.resource];
+  } catch {
+    return undefined;
+  } finally {
+    if (previousDirectory !== undefined) Deno.chdir(previousDirectory);
+  }
 }
 
 export async function runGitHubPullRequestMaterializer(
   candidate: Promise<unknown>,
   write: (value: string) => void = console.log,
 ): Promise<boolean> {
-  const materialized = materializeGitHubPullRequest(await candidate);
+  const value = await candidate;
+  if (typeof value === "object" && value !== null && !("command" in value)) {
+    const targets = materializeBabysitterActivation(value);
+    if (!targets) return false;
+    write(JSON.stringify({ targets }));
+    return true;
+  }
+  const materialized = materializeGitHubPullRequest(value);
   if (!materialized) return false;
   const { resource, ...context } = materialized;
   write(JSON.stringify({ context, resource }));

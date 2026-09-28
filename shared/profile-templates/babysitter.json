@@ -3,21 +3,27 @@
   "policyRevision": "pending-review",
   "allowedTargets": [],
   "activationMaterializer": {
-    "file": "materializers/activation/github-pull-request.ts",
-    "integrity": "4587f30488e8d12835518c58ec6ea5d3877f44c7e9a5527d738b3c019a6ee160",
+    "dependencies": {
+      "directory": "materializers/dependencies/graphql",
+      "packageJson": "package.json",
+      "denoLock": "deno.lock",
+      "denoLockIntegrity": "aca6e0be73c277546f14128673fcf485919e507ca8e5a55bfde76d348bdf5670",
+      "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
+    },
+    "file": "materializers/requests/github-pull-request.ts",
+    "integrity": "39ff323510cae4c4a6e3c370d0e9bc731f237b53d39ccc304ab1fcba22fc48b0",
     "language": "typescript",
     "permissions": {
-      "read": [],
+      "read": ["$WORKING_DIRECTORY", "$ACTIVATION_WORKSPACE"],
       "write": [],
-      "env": [],
+      "env": ["NODE_ENV"],
       "net": [],
       "sys": [],
-      "run": ["gh"],
+      "run": ["gh", "git"],
       "ffi": []
     },
     "runtimeVersion": "2.8.1"
   },
-  "targetScope": "single",
   "requestMaterializer": {
     "dependencies": {
       "directory": "materializers/dependencies/graphql",
@@ -27,7 +33,7 @@
       "packageJsonIntegrity": "497c95e98a154cbb346d5d871e919caa4a3ad7b4446a7a1e7ab0a8985a742177"
     },
     "file": "materializers/requests/github-pull-request.ts",
-    "integrity": "e8297a9ff7f1073413f59ddbeb3de6e74502ea75936bff6494a8c7ea7428602e",
+    "integrity": "47cb99451cfe4fd8b8d8f3ac76fd100758587daf87d37879faa7c8eb756b2a7b",
     "language": "typescript",
     "permissions": {
       "read": ["$WORKING_DIRECTORY"],
@@ -35,7 +41,7 @@
       "env": ["NODE_ENV"],
       "net": [],
       "sys": [],
-      "run": ["gh"],
+      "run": ["gh", "git"],
       "ffi": []
     },
     "runtimeVersion": "2.8.1"
@@ -43,6 +49,8 @@
   "sessionContext": [
     "Use only for the repository and pull request frozen when this profile was activated.",
     "Read pull-request status before changing code or responding to review.",
+    "For a CI or review fix, stage or commit only explicit regular workspace files or tracked deletions. Commit with git commit -m <message> -- <paths>. Push the current branch using plain git push or a verified remote with HEAD, the current branch, HEAD:<branch>, or HEAD:refs/heads/<branch>. Broad pathspecs, unrelated refs, force, amend, and hook bypass remain denied.",
+    "Workspace activation reviews and freezes the canonical repository, active PR branch, repository-local hook directory, and its file content and modes. Every Git mutation, including staging, requires this additional grant. Hooks run normally as trusted reviewed repository code; changed hooks require a new activation. Global or external hooks and hook symlinks are denied. Explicit repository/PR activation grants GitHub PR operations only. Git mutations also reject configured filter and GPG programs, active filesystem-monitor commands, and commit signing; effective configuration includes global and included files.",
     "Inspect all review threads with: gh api graphql --paginate --slurp -f owner=<owner> -f repo=<repo> -F pr=<number> -f 'query=<ReviewThreads query>'. The reviewed request materializer validates the repository and pull-request query structure. It accepts any integer first value, any comment fields, optional pageInfo in either position, and the query field before or after the owner fields.",
     "Every reply and pull-request conversation comment must use an agent attribution prefix: _Replying as <agent> or [from <agent>]:. Run one REST command per comment with a non-empty body, or use the reviewed GraphQL thread-reply mutation. You may place multiple allowed commands in one ordinary shell sequence; do not use command substitution.",
     "Top-level comments accept gh pr comment <number> --repo <owner/repo> --body-file <path>. The attributed body must be a real file contained in the command working directory. Parent traversal, stdin, and symlink paths are not allowed. Existing REST review replies also accept -F body=@reply.md for a basename.",
@@ -60,7 +68,7 @@
           "permit(principal, action, resource)",
           "when {",
           "  (context.materialized.trailingArgumentCount == 0 &&",
-          "    [\"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\", \"github.pull-request.review-threads\", \"github.pull-request.conversation-comment\", \"github.pull-request.conversation-comments\", \"github.pull-request.reviews\", \"github.actions.runs\", \"github.actions.jobs\", \"github.actions.run-view\", \"github.actions.rerun-failed\", \"github.review-thread.comments\", \"github.review-thread.resolve\", \"github.review-thread.reply\"].contains(context.materialized.operation)) ||",
+          "    [\"git.add\", \"git.commit\", \"git.push\", \"github.pull-request.view\", \"github.pull-request.diff\", \"github.pull-request.checks\", \"github.pull-request.review-threads\", \"github.pull-request.conversation-comment\", \"github.pull-request.conversation-comments\", \"github.pull-request.reviews\", \"github.actions.runs\", \"github.actions.jobs\", \"github.actions.run-view\", \"github.actions.rerun-failed\", \"github.review-thread.comments\", \"github.review-thread.resolve\", \"github.review-thread.reply\"].contains(context.materialized.operation)) ||",
           "  (context.materialized.operation == \"github.pull-request.checks\" &&",
           "    context.materialized.trailingArgumentCount == 1 && context.materialized.trailingArguments.contains(\"--watch\")) ||",
           "  (context.materialized.operation == \"github.pull-request.checks\" &&",
