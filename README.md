@@ -235,7 +235,7 @@ repository-local hook directory with its recursive contents and file modes.
 Staging, committing, and pushing recompute this target. Staging also needs hook
 trust because Git can run `post-index-change` when it writes the index.
 Repository hooks run normally; changed hooks require a fresh activation.
-Global or external hook directories, symlinks, and non-file hook entries do not
+Global or external hook directories, symlinks, and special-file hook entries do not
 receive a Git grant. If Git trust checks fail, workspace activation still allows
 the PR operations and Git mutations require host approval.
 
