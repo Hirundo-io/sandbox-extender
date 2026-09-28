@@ -1,7 +1,11 @@
+import { lstatSync, realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
+
 import { Kind, parse, visit, type ASTNode, type DocumentNode } from "graphql";
 
 type RequestMaterializerInput = {
   readonly command?: { readonly words?: unknown };
+  readonly workingDirectory?: unknown;
 };
 
 type PullRequestOperation = {
@@ -157,7 +161,10 @@ function input(candidate: unknown): RequestMaterializerInput {
     "command" in candidate && typeof candidate.command === "object" && candidate.command !== null
       ? (candidate.command as { readonly words?: unknown })
       : undefined;
-  return { command };
+  return {
+    command,
+    workingDirectory: "workingDirectory" in candidate ? candidate.workingDirectory : undefined,
+  };
 }
 
 function canonicalTarget(repository: string, number: string): string | undefined {
@@ -377,7 +384,49 @@ function pullRequestChecksOperation(
     : undefined;
 }
 
-function pullRequestOperation(words: readonly string[]): PullRequestOperation | undefined {
+function identifiedReplyBody(body: string): boolean {
+  if (body.startsWith(replyPrefix)) return body.slice(replyPrefix.length).trim().length > 0;
+  const bracketedAgent = /^\[from ([A-Za-z0-9_. -]+)\]:\s+\S/.exec(body);
+  return bracketedAgent !== null && bracketedAgent[1]!.trim().length > 0;
+}
+
+function containedCommentBody(
+  path: string,
+  workingDirectory: unknown,
+  readTextFile: ReadTextFile,
+): boolean {
+  if (
+    typeof workingDirectory !== "string" ||
+    !isAbsolute(workingDirectory) ||
+    !path ||
+    path === "-" ||
+    path.includes("\\") ||
+    path.split("/").includes("..")
+  )
+    return false;
+  try {
+    const directory = realpathSync(workingDirectory);
+    const file = resolve(directory, path);
+    const relativePath = relative(directory, file);
+    if (
+      !relativePath ||
+      relativePath.startsWith("../") ||
+      isAbsolute(relativePath) ||
+      realpathSync(file) !== file ||
+      !lstatSync(file).isFile()
+    )
+      return false;
+    return identifiedReplyBody(readTextFile(file));
+  } catch {
+    return false;
+  }
+}
+
+function pullRequestOperation(
+  words: readonly string[],
+  workingDirectory: unknown,
+  readTextFile: ReadTextFile,
+): PullRequestOperation | undefined {
   const [gh, pr, subcommand, number, repoFlag, repository, ...rest] = words;
   if (
     gh !== "gh" ||
@@ -391,6 +440,24 @@ function pullRequestOperation(words: readonly string[]): PullRequestOperation | 
   }
   const resource = canonicalTarget(repository, number);
   if (!resource) return undefined;
+  if (subcommand === "comment") {
+    const [flag, body] = rest;
+    if (
+      rest.length !== 2 ||
+      !body ||
+      !(flag === "--body"
+        ? identifiedReplyBody(body)
+        : flag === "--body-file" && containedCommentBody(body, workingDirectory, readTextFile))
+    )
+      return undefined;
+    return {
+      bodyPresent: true,
+      operation: "github.pull-request.conversation-comment",
+      resource,
+      trailingArguments: [],
+      trailingArgumentCount: 0,
+    };
+  }
   const bodyIndex = rest.indexOf("--body");
   return {
     bodyPresent:
@@ -531,12 +598,6 @@ function workflowRunOperation(
         trailingArgumentCount: 0,
       }
     : undefined;
-}
-
-function identifiedReplyBody(body: string): boolean {
-  if (body.startsWith(replyPrefix)) return body.slice(replyPrefix.length).trim().length > 0;
-  const bracketedAgent = /^\[from ([A-Za-z0-9_. -]+)\]:\s+\S/.exec(body);
-  return bracketedAgent !== null && bracketedAgent[1]!.trim().length > 0;
 }
 
 function replyBodyIsIdentified(
@@ -1004,7 +1065,8 @@ export function materializeGitHubPullRequest(
   runLookup: RunLookup = liveRunTarget,
   jobLookup: JobLookup = liveJobBelongsToRun,
 ): PullRequestOperation | undefined {
-  const words = input(candidate).command?.words;
+  const request = input(candidate);
+  const words = request.command?.words;
   if (!Array.isArray(words) || !words.every((word) => typeof word === "string")) return undefined;
   return (
     watcherPullRequestViewOperation(words, pullRequestLookup) ??
@@ -1018,7 +1080,7 @@ export function materializeGitHubPullRequest(
     reviewThreadCommentsOperation(words, reviewThreadLookup) ??
     reviewThreadsOperation(words) ??
     reviewReplyOperation(words, readTextFile, reviewCommentLookup) ??
-    pullRequestOperation(words)
+    pullRequestOperation(words, request.workingDirectory, readTextFile)
   );
 }
 

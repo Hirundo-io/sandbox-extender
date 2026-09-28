@@ -405,7 +405,7 @@ describe("shipped Profile templates", () => {
       "gh pr checks 42 --repo acme/example --watch",
       `gh -R acme/example pr view 42 --json ${watcherPullRequestFields}`,
       `gh -R acme/example pr checks 42 --json ${watcherChecksFields}`,
-      'gh pr comment 42 --repo acme/example --body "Reviewed."',
+      'gh pr comment 42 --repo acme/example --body "_Replying as **Codex**._ Reviewed."',
       'gh api --method POST repos/acme/example/issues/42/comments -f body="_Replying as Codex. Reviewed."',
       "gh api 'repos/acme/example/issues/42/comments?per_page=100&page=1'",
       "gh api 'repos/acme/example/pulls/42/reviews?per_page=100&page=1'",
@@ -438,13 +438,13 @@ describe("shipped Profile templates", () => {
     ).toBe("abstain");
 
     for (const command of [
-      'gh pr comment 43 --repo acme/example --body "Reviewed."',
-      'gh pr comment 42 --repo acme/other --body "Reviewed."',
+      'gh pr comment 43 --repo acme/example --body "_Replying as **Codex**._ Reviewed."',
+      'gh pr comment 42 --repo acme/other --body "_Replying as **Codex**._ Reviewed."',
       "gh pr comment --repo acme/example --body Reviewed.",
       "gh pr comment 42 --repo acme/example --body-file /tmp/private-note",
       "gh pr comment 42 --repo acme/example --body Reviewed. --body-file=/tmp/private-note",
       "gh pr comment 42 --repo acme/example --body Reviewed. -F /tmp/private-note",
-      'gh pr comment 42 --repo acme/example -R evil/example --body "Reviewed."',
+      'gh pr comment 42 --repo acme/example -R evil/example --body "_Replying as **Codex**._ Reviewed."',
       "gh pr view 42 --repo acme/example --web",
       "gh pr view 42 --repo=acme/example",
       "gh pr checks 42 --repo acme/example --interval 5",

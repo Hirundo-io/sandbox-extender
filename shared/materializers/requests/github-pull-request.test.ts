@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import {
+  watcherReviewThreadsQuery,
+  watcherThreadCommentsQuery,
+} from "../../../test/fixtures/watcher-queries.js";
 
 import {
   materializeGitHubPullRequest,
@@ -22,34 +26,6 @@ function currentPullRequest(repository = "Hirundo-io/hirundo-platform", number =
 const watcherPullRequestFields =
   "number,url,state,mergedAt,closedAt,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision";
 const watcherChecksFields = "name,state,bucket,link,workflow,event,startedAt,completedAt";
-const watcherReviewThreadsQuery = `query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          id
-          isResolved
-          comments(first: 100) {
-            pageInfo { hasNextPage endCursor }
-            nodes { databaseId createdAt body path line originalLine url authorAssociation author { login __typename } pullRequestReview { state } }
-          }
-        }
-      }
-    }
-  }
-}`;
-const watcherThreadCommentsQuery = `query($threadId: ID!, $cursor: String) {
-  node(id: $threadId) {
-    ... on PullRequestReviewThread {
-      comments(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes { databaseId body }
-      }
-    }
-  }
-}`;
-
 function mockDenoCommand(stdout: string, success = true): () => void {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "Deno");
   Object.defineProperty(globalThis, "Deno", {
@@ -109,10 +85,22 @@ describe("GitHub pull request request materializer", () => {
     });
     expect(
       materializeGitHubPullRequest(
-        candidate(["gh", "pr", "comment", "42", "--repo", "acme/example", "--body", "done"]),
+        candidate([
+          "gh",
+          "pr",
+          "comment",
+          "42",
+          "--repo",
+          "acme/example",
+          "--body",
+          "_Replying as **Codex**._ Done.",
+        ]),
       ),
     ).toEqual(
-      expect.objectContaining({ bodyPresent: true, operation: "github.pull-request.comment" }),
+      expect.objectContaining({
+        bodyPresent: true,
+        operation: "github.pull-request.conversation-comment",
+      }),
     );
   });
 
