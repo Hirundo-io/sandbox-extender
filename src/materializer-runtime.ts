@@ -187,6 +187,7 @@ export function materializeRequest(
   workingDirectory: string,
   command?: ShellCommandContext,
   options: MaterializerRuntimeOptions = {},
+  originalCommand?: string,
 ): RequestMaterialization | undefined {
   assertSupportedPlatform();
   try {
@@ -195,6 +196,7 @@ export function materializeRequest(
         materializer,
         {
           command,
+          originalCommand,
           requestArguments: request.arguments,
           resource: request.resource,
           workingDirectory,

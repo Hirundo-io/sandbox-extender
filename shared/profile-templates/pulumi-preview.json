@@ -1,0 +1,47 @@
+{
+  "id": "pulumi-preview",
+  "policyRevision": "pending-review",
+  "allowedTargets": [],
+  "targetScope": "single",
+  "activationMaterializer": {
+    "file": "materializers/activation/pulumi-local.ts",
+    "integrity": "686ca766374f65fb63dd6de0b08445972530038a1c2283c8082de3c96e955fa3",
+    "language": "typescript",
+    "permissions": {
+      "env": [],
+      "ffi": [],
+      "net": [],
+      "read": [],
+      "run": [],
+      "sys": [],
+      "write": []
+    },
+    "runtimeVersion": "2.8.1"
+  },
+  "requestMaterializer": {
+    "file": "materializers/requests/pulumi-local.ts",
+    "integrity": "7ec4cddf3c5645996684b4ee8c67f0cf23fb6382d40428fbd04649c9e0407b21",
+    "language": "typescript",
+    "permissions": {
+      "env": [],
+      "ffi": [],
+      "net": [],
+      "read": [],
+      "run": [],
+      "sys": [],
+      "write": []
+    },
+    "runtimeVersion": "2.8.1"
+  },
+  "sessionContext": [
+    "Use env PULUMI_BACKEND_URL=<backend> PULUMI_STACK=<stack> pulumi --cwd <workspace> for every command. Activation freezes the exact workspace, stack, and backend."
+  ],
+  "groupings": [
+    {
+      "id": "scoped-pulumi",
+      "policies": {
+        "allowScopedPulumi": "permit(principal, action, resource) when { [Action::\"codex.unified_exec\", Action::\"claude.Bash\"].contains(action) && [\"login\",\"history\",\"preview\"].contains(context.materialized.operation) };"
+      }
+    }
+  ]
+}

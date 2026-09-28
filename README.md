@@ -49,6 +49,8 @@ The bundled templates are a starting point, not active policy:
 - `Babysitter` scopes pull-request and CI inspection to one pull request.
 - `Scout` supports read-only repository inspection for explicit targets.
 - `Maker` scopes lockfile-oriented dependency work to one workspace.
+- `pulumi-preview`, `pulumi-up`, and `pulumi-refresh` are local templates for one
+  workspace, stack, and backend URI.
 
 ## Policy repository
 
@@ -153,6 +155,16 @@ you activate a Profile with a working-directory argument, expect its reviewed
 materializer to access that folder with the permissions declared in the Profile;
 activate it only for a workspace you intend the Profile to inspect.
 Maker accepts an absolute workspace, and Scout accepts an explicit target set.
+The local Pulumi templates require `{"workspace":"/absolute/workspace","stack":"org/project/dev","backend":"gs://state-bucket"}`.
+Activation freezes all three values. Each approved command must use the exact
+form `env PULUMI_BACKEND_URL=<backend> PULUMI_STACK=<stack> pulumi --cwd <workspace> <operation>`.
+The operations are `login <backend>`, `stack history --stack <stack>`, and
+`preview --stack <stack>` for `pulumi-preview`. `pulumi-up` adds
+`up --stack <stack> --yes`; `pulumi-refresh` allows
+`refresh --stack <stack> --yes` in place of preview and up. Backend URIs use
+`gs://`, `s3://`, `azblob://`, `https://`, or `file://` without credentials in
+the URI. These are disabled, local templates; copy and review one in your own
+policy repository before promotion.
 The Activation Materializer validates those arguments and freezes its targets
 into the thread binding. Promotion reviews reusable rules and materializer
 code; it does not choose a target.
